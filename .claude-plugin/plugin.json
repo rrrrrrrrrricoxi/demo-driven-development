@@ -1,6 +1,6 @@
 {
   "name": "demo-driven-development",
   "version": "0.7.0",
-  "description": "Demo-driven development workflow as a Claude Code plugin: per-decision HTML demos, an 8898 decision kanban served from a single source of truth, and a Stop guard hook that blocks orphan demos.",
+  "description": "Demo-driven development workflow as a Claude Code plugin: per-decision HTML demos, a single-file decision kanban served from a single source of truth, and a Stop guard hook that blocks orphan demos.",
   "author": { "name": "rrrrrrrrrricoxi" }
 }

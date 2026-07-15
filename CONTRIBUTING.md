@@ -6,6 +6,7 @@
 - The version stamp makes downgrades destructive, so `plugin.json` on `main` only moves up. Bump the version in your PR whenever runtime behavior changes, and never merge a lower one.
 - `npm test` must pass; CI runs it on every PR. If you touch the guard, the generator's backnav logic, or the version-stamp code, add assertions to `tests/run.mjs`.
 - Byte freeze applies to optional features: with the feature unconfigured, generated output must be byte-identical to the previous release. Normalize the stamp line first (`sed '/<!-- ddd-gen v/d'`), then compare.
+- Cutting a release (version bump, [CHANGELOG.md](CHANGELOG.md), tag) follows [RELEASING.md](RELEASING.md).
 
 ## Language policy
 

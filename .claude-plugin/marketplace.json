@@ -8,7 +8,7 @@
     {
       "name": "demo-driven-development",
       "source": "./",
-      "description": "Demo-driven development workflow: per-decision HTML demos, an 8898 decision kanban from a single source of truth, and a Stop guard hook that blocks orphan demos."
+      "description": "Demo-driven development workflow: per-decision HTML demos, a single-file decision kanban from a single source of truth, and a Stop guard hook that blocks orphan demos."
     }
   ]
 }

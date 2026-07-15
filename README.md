@@ -58,6 +58,8 @@ After an upgrade, the first regeneration changes exactly one line of `index.html
 
 Long-lived sessions keep whatever plugin version they started with. After upgrading, run `node <plugin>/scripts/retire-stale-caches.mjs` (dry-run by default, `--yes` to apply). It shims superseded cache versions so old sessions get a restart notice instead of silently overwriting your board with stale output. The script skips versions that are still registered as some project's current install.
 
+Release history is in [CHANGELOG.md](CHANGELOG.md); the process for cutting a release is in [RELEASING.md](RELEASING.md).
+
 ## Assumptions
 
 - Card links point at GitHub (blob and commit URLs).
