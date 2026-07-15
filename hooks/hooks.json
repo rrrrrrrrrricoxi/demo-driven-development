@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.mjs\"",
+            "timeout": 60,
+            "statusMessage": "看板守卫:检查孤儿 demo…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/ghpr-remind.mjs\"",
+            "timeout": 15,
+            "statusMessage": "看板守卫:PR 后推进卡状态提醒…"
+          }
+        ]
+      }
+    ]
+  }
+}

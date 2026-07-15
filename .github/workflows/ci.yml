@@ -1,0 +1,16 @@
+# CI:每次 push/PR 在干净 Linux 虚机上跑全量对抗测试床(tests/run.mjs,零依赖)。
+# 红了别合 —— 它守的是 backnav 剥离/版本戳/retire 这些精密逻辑和字节冻结口径。
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test

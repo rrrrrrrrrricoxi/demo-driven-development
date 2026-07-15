@@ -1,0 +1,118 @@
+/* ============================================================================
+ * theme.css.example —— 看板「项目级换装」模板(demo-driven-development v0.4.0)
+ *
+ * 用法:复制为 <看板目录>/theme.css(与 kanban.config.json 同层),改掉要换的
+ * 变量,重跑 gen(node …/scripts/gen.mjs --dir <看板目录>)。gen 会把 theme.css
+ * 原样内联为三种页面(index.html / refs/*.html / shots.html)head 里的最后一个
+ * <style>,天然盖过前面所有规则;守卫重生成自动保留(theme.css 是项目文件)。
+ *
+ * 规则:
+ *   - theme.css 不存在 → 生成物与未换装版逐字节一致(零注入,存量安装不受影响);
+ *     存在 → 生成器改走 var() 间接层,:root 缺省 = 原字面量,只覆盖要改的变量即可。
+ *   - 本文件里不要出现字面的 style 闭合标签(内联注入会被截断,gen 直接报错)。
+ *   - 两套 :root 命名不同、各管一批页面:①主看板 index.html;②refs/*.html 与
+ *     shots.html。同一个文件里两块都写,互不认识的变量彼此惰性,互不干扰。
+ *   - JS 注入的语义色(状态/优先级/tier/段色,以 style="--c:…" 烤进 HTML 属性)
+ *     样式表盖不住 —— 要走 kanban.config.json 的 themeColors(见文末说明)。
+ *
+ * 下面变量的取值 = 出厂缺省(原字面量)。原样拷走视觉零变化,改哪行覆盖哪行;
+ * 不想全列也可以删掉没动的行 —— 未覆盖的变量自动落回缺省。
+ * ========================================================================= */
+
+/* ———————————— ① 主看板 index.html ———————————— */
+:root {
+  /* 基础令牌(生成器 :root 原生一套) */
+  --ink: #37352f;          /* 主文字 */
+  --mut: #6f6e6b;          /* 次文字 */
+  --faint: #8a8884;        /* 弱文字/占位 */
+  --line: #ededec;         /* 分隔线 */
+  --line-strong: #e3e2e0;  /* 强分隔线/控件描边 */
+  --bg: #f6f5f2;           /* 页面底(暖纸) */
+  --card: #fff;            /* 卡片面 */
+  --side: #f7f7f5;         /* 侧面/徽章底 */
+  --accent: #2383e2;       /* 交互蓝 */
+  --accent-deep: #1a6fc4;  /* 交互蓝(深) */
+  --accent-soft: #e7f3f8;  /* 交互蓝软底 */
+  --brand: #0f7b6c;        /* 品牌 teal(成功/C 线同源) */
+  --brand-soft: #eaf5f1;   /* 品牌软底 */
+
+  /* v0.4.0 换装令牌(原字面量收敛而来;深色主题必看「深色文字」组) */
+  --body-ink: #44403c;     /* 卡片正文 dd / 叙事段落 */
+  --sub-ink: #57534e;      /* 次级正文(demo 赌注等) */
+  --note-ink: #6b5d3e;     /* demo 注记(暖褐) */
+  --sec-ink: #1f5066;      /* 设计§ chip 文字 */
+  --ok-ink: #047857;       /* 已拍板文字 */
+  --ok-ink-deep: #065f46;  /* 时间线拍板 chip 文字 */
+  --warn-ink: #b45309;     /* 待定/blockedOn amber 文字 */
+  --gold-ink: #9a6410;     /* C 线徽章文字 */
+  --mix-ink: #2b2723;      /* badge/bbadge/rtag color-mix 深墨端 */
+  --mix-paper: #fff;       /* 同上纸白端(深色主题设成深面,徽章整族翻深) */
+  --tag-neutral: #999;     /* rtag 无 --c 时的灰兜底 */
+  --chip-hover: #efeeeb;   /* 状态 chip hover 底 */
+  --seg-bg: #eceae6;       /* 线别分段控件槽底 */
+  --info-bg: #eaf1fa;      /* A 线徽章底 */
+  --gold-bg: #fbf3e4;      /* C 线徽章底 */
+  --warn-bg: #fffbeb;      /* amber 软底(blockedOn/拍板项) */
+  --sec-bg: #e8f0f4;       /* 设计§ chip 底 */
+  --ref-bg: #f1ebfb;       /* refchip 紫软底 */
+  --ok-bg: #d1f0e6;        /* 时间线拍板 chip 底 */
+  --ok-bg-faint: #f0faf8;  /* pin-arrow 底 */
+  --faint-bg: #fafaf8;     /* anode 跳卡条底 */
+  --paper-tint: #fbfaf7;   /* pivot 纸感底 */
+  --brand-tint: #f5fbfa;   /* teal 微染底(shift-lane.to / demonode.flag) */
+  --flag-glow: #0f7b6c20;  /* demonode.flag 光晕(teal + alpha) */
+  --flash-glow: #0f7b6c66; /* 锚点闪烁光晕(teal + alpha) */
+  --shadow-ink: 40,38,34;  /* 卡片阴影 rgba 基(R,G,B 三元,深色主题可换 0,0,0) */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+             "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+
+/* ———————————— ② refs/*.html 与 shots.html ———————————— */
+/* 注意:这套页面用 --panel/--text/--border/--muted/--primary,不是主看板那套名字 */
+:root {
+  --bg: #f6f5f2;           /* 页面底(与主看板同名同义,重复写无妨) */
+  --panel: #ffffff;        /* 面板/导航条面 */
+  --border: #e3e2e0;       /* 描边 */
+  --text: #37352f;         /* 主文字 */
+  --muted: #6f6e6b;        /* 次文字 */
+  --primary: #0f7b6c;      /* 品牌 teal */
+  --accent: #2383e2;       /* 交互蓝 */
+  --font-body: -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-mono: "SF Mono",ui-monospace,Menlo,"JetBrains Mono",monospace;
+  --shadow: 0 1px 2px rgba(40,38,34,.04),0 4px 16px rgba(40,38,34,.05);
+
+  /* v0.4.0 换装令牌 */
+  --text-rgb: 55,53,47;    /* 墨色低透 overlay 的 rgba 基(目录 hover/行内 code 底) */
+  --accent-rgb: 35,131,226;/* 交互蓝的 rgba 基(目录高亮/链接下划线) */
+  --soft-bg: #f1f0ed;      /* 表头底 / 截图占位底 */
+  --zebra-bg: #faf9f7;     /* 表格偶数行底 */
+  --quote-bg: #eff6fb;     /* 引用块底 */
+  --quote-ink: #3a4150;    /* 引用块文字 */
+}
+
+/* ———— 深色主题起手式(参考,按需展开;删除本注释块不影响) ————
+:root {
+  --bg:#191919; --card:#232323; --side:#202020;
+  --ink:#e8e6e3; --mut:#a5a29c; --faint:#7d7a74;
+  --line:#2e2e2e; --line-strong:#3a3a3a;
+  --body-ink:#d5d2cc; --sub-ink:#b8b5ae; --note-ink:#cdbd93;
+  --mix-ink:#f0efec; --mix-paper:#232323; --shadow-ink:0,0,0;
+  --chip-hover:#2c2c2c; --seg-bg:#2c2c2c; --warn-bg:#3a2f1a; --sec-bg:#1d2c33; …
+}
+:root { --panel:#232323; --text:#e8e6e3; --border:#3a3a3a; --text-rgb:232,230,227;
+  --soft-bg:#2c2c2c; --zebra-bg:#222; --quote-bg:#1d2c33; --quote-ink:#c9d4dc; … }
+———————————————————————————————————————————— */
+
+/* ———— themeColors(不在本文件,在 kanban.config.json)————
+ * 状态点/徽章/进度组头等的语义色由 gen 以 style="--c:…" 直接写进 HTML 属性,
+ * CSS(含本文件)盖不住。要改这六套,在 kanban.config.json 加顶层键 themeColors:
+ *   "themeColors": {
+ *     "STATUS_COLOR":     { "planned":"…","active":"…","testing":"…","done":"…","blocked":"…","separate":"…" },
+ *     "BL_STATUS_COLOR":  { "ready":"…","blocked":"…","design":"…","deferred":"…","done":"…" },
+ *     "PRI_COLOR":        { "high":"…","med":"…","low":"…" },
+ *     "TIER_COLOR":       { "1":"…","2":"…","3":"…" },
+ *     "DEC_STATUS_COLOR": { "deciding":"…","mockup":"…","decided":"…","live":"…","closed":"…" },
+ *     "DOC_SEGMENTS":     { "地基":"…","流程":"…","操作":"…","存档":"…" }
+ *   }
+ * 浅覆盖:只写要改的键;未知键警告后忽略;不给整个 themeColors = 零行为差。
+ * ———————————————————————————————————————— */

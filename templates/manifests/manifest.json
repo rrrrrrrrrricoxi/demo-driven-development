@@ -1,0 +1,19 @@
+{
+  "$comment": "开发进度看板真相源。每条 task 一张卡,按 iterations 分段。status 见 statuses。改完跑 gen 重生成。",
+  "instance": {
+    "label": "{{BRAND}} · 进度",
+    "session": "",
+    "ghRepo": "{{GH_REPO}}",
+    "branch": "{{BRANCH}}",
+    "planDoc": ""
+  },
+  "statuses": {
+    "planned": "排队中",
+    "active": "进行中",
+    "testing": "测试/走查中",
+    "done": "完成(已提交 commit)",
+    "blocked": "被阻塞"
+  },
+  "iterations": [],
+  "tasks": []
+}

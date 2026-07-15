@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(/app/kanban/index.html)",
+      "Read(/app/kanban/shots.html)",
+      "Read(/app/kanban/refs/**)"
+    ]
+  }
+}

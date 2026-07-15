@@ -1,0 +1,14 @@
+{
+  "name": "demo-driven-development",
+  "owner": { "name": "rrrrrrrrrricoxi" },
+  "metadata": {
+    "description": "Self-hosted marketplace for the demo-driven-development plugin (workflow + kanban + guard hook)."
+  },
+  "plugins": [
+    {
+      "name": "demo-driven-development",
+      "source": "./",
+      "description": "Demo-driven development workflow: per-decision HTML demos, an 8898 decision kanban from a single source of truth, and a Stop guard hook that blocks orphan demos."
+    }
+  ]
+}
