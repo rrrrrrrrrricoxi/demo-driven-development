@@ -360,7 +360,7 @@ const genZh = {
   themeHasCloseTag: () => 'theme.css 不得含 </style>(内联注入会被截断)',
   unknownToken: (n) => `未知主题令牌 ${n}`,
   unknownRefToken: (n) => `未知 refs 主题令牌 ${n}`,
-  lanesInvalid: (v) => `kanban.config.json lanes 非法:${v};合法值:null / "lamos-legacy"`,
+  lanesInvalid: (v) => `kanban.config.json lanes 非法:${v};合法值:null 或对象 { "ids": [...], ... }(见 kanban-init SKILL)`,
 }
 const genEn = {
   cfgMissingBrand: () => 'kanban.config.json is missing "brand"',
@@ -387,6 +387,6 @@ const genEn = {
   themeHasCloseTag: () => 'theme.css must not contain </style> (inline injection would be truncated)',
   unknownToken: (n) => `unknown theme token ${n}`,
   unknownRefToken: (n) => `unknown refs theme token ${n}`,
-  lanesInvalid: (v) => `kanban.config.json lanes is invalid: ${v}; valid values: null / "lamos-legacy"`,
+  lanesInvalid: (v) => `kanban.config.json lanes is invalid: ${v}; valid values: null, or an object { "ids": [...], ... } (see the kanban-init skill)`,
 }
 export function genStrings(lang) { return lang === 'en' ? genEn : genZh }

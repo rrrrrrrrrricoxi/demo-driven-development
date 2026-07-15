@@ -307,75 +307,70 @@ const sessSeals = (entry) => {
   }).join('')
 }
 
-// ———— 线别(lanes)预设制,不做通用 DSL:null = 关(新项目默认)/ 'lamos-legacy' = 原样封装 LAMOS A/B/C 启发式 ————
-// 阈值/正则/文案是 rules-as-code;将来真有第二个项目要线别,再谈通用化(YAGNI)。
-if ((cfg.lanes ?? null) !== null && cfg.lanes !== 'lamos-legacy')
-  throw new Error(GS.lanesInvalid(JSON.stringify(cfg.lanes)))
-// ———— 品牌参数化(换装支持,BL-C41/42):预设内品牌串随 config.brand 走 ————
-// 兼容锚:brand=="LAMOS" 时所有模板展开必须与割接前冻结原文逐字节相同(cutover 基准即建立在此)。
+// ———— 线别(lanes):config 驱动,可选。null / 缺省 = 关(新项目默认)。 ————
+// 开 = config.lanes 给对象 { ids:[…], default?, titles?, typeLabels?, hints?, hubSuffix?, blSess? };
+// 线别归属读每条 entry 的显式 line 字段(decisions / backlog / tasks / iterations / docs 均可标,
+// 空格分隔可多线共享,如 "B C")。hints/blSess 值按可信 HTML 原样注入(与其它 config 文案同级)。
+// 兼容:字符串 "lamos-legacy" 作已弃用别名(= 最小 A/B/C 默认),将在下一版移除。
+let LANES // null(关)或规整后的对象
+{
+  const raw = cfg.lanes ?? null
+  if (raw === null) LANES = null
+  else if (raw === 'lamos-legacy') {
+    console.warn('[gen] ⚠ config.lanes 的字符串形式已弃用,请改为对象形式(见 kanban-init SKILL);本别名将在下一版移除')
+    LANES = { ids: ['A', 'B', 'C'], default: 'C', titles: {}, typeLabels: {}, hints: {}, hubSuffix: '', blSess: '' }
+  } else if (raw && typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.ids) && raw.ids.length) {
+    LANES = {
+      ids: raw.ids.map(String),
+      default: raw.default != null ? String(raw.default) : String(raw.ids[0]),
+      titles: raw.titles || {},
+      typeLabels: raw.typeLabels || {},
+      hints: raw.hints || {},
+      hubSuffix: raw.hubSuffix != null ? String(raw.hubSuffix) : '',
+      blSess: raw.blSess != null ? String(raw.blSess) : '',
+    }
+  } else throw new Error(GS.lanesInvalid(JSON.stringify(raw)))
+}
+// ———— 品牌参数化:线别 UI 里的品牌串随 config.brand 走 ————
 const BRAND_H = esc(BRAND) // HTML 文本上下文
 const BRAND_JS = BRAND.replace(/[\\']/g, '\\$&') // 生成 JS 里的单引号字符串字面量
 const BRAND_RE = BRAND.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') // 生成 JS 里的正则字面量
-// localStorage 前缀:LAMOS 保留历史 'lamosc'(已存偏好不丢);其他 brand 用 slug(换名重置一次偏好,拍板不迁移)
-const LS_PREFIX = BRAND === 'LAMOS' ? 'lamosc' : (BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban')
-const LANE = cfg.lanes === 'lamos-legacy' ? {
-  // ———— 线路派生(不手打 tag:从 designDoc 路径 / D 码区间 / id 前缀确定性推断)————
-  // A 线在本仓库无自有产物(决策/文档/demo 皆无),只作为「源 A 线」backlog 的来源被兼挂到 B。
-  decLine: (e) => {
-    if (e.line) return e.line // 手动覆盖:派生看不出的上下文(如 Q8 指标审核=C 已删的旧范式功能)由 manifest 显式定线
-    const dd = e.designDoc || ''
-    if (dd.includes('/lamos-c/')) return 'C'
-    if (dd.includes('/lamos-b/')) return 'B'
-    if (/^UXC\d+$/.test(e.id) || (e.iters || []).some((c) => /^C/.test(c)) || (e.demo || '').includes('demos/')) return 'C'
-    const n = parseInt(String(e.id).replace(/^\D+/, ''), 10)
-    if (/^D/.test(e.id)) return n >= 22 ? 'C' : 'B'
-    if (/^Q/.test(e.id)) return n >= 8 ? 'C' : 'B'
-    return 'C'
-  },
-  iterLine: (it) => (/^C\d+$/.test(it.id) ? 'C' : 'B'),
-  docLine: (d) => d.line || (/lamos-c|entry-ux-demos/.test(d.src) ? 'C' : /lamos-b/.test(d.src) ? 'B' : 'B C'), // 显式 line 覆盖优先(派生看路径、看不出跨线内容);否则根/journal/环境文档=B/C 共享
-  taskLine: (t) => (/^(TC|C)\d/.test(t.id) || /^C\d+$/.test(t.iteration) ? 'C' : 'B'),
-  blLine: (it) => {
-    const base = /^BL-C/i.test(it.id) ? 'C' : 'B'
-    const srcA = /A\s*线|源\s*A/.test(`${it.source || ''}${it.title || ''}${it.problem || ''}`)
-    return base === 'B' && String(it.tier) === '3' && srcA ? 'B A' : base // 仅 T3「源 A 线可平移」项兼挂 A(对齐 A hint 口径);T1/T2 的 B 项不漏进 A
-  },
-  // —— 以下品牌串由 config.brand 模板化;brand=="LAMOS" 时展开与割接前冻结原文逐字节相同(兼容锚,勿改写形状) ——
-  hubbrand: `${BRAND_H} · C 检验工作区`,
-  defaultLine: 'C',
+// localStorage 前缀:brand slug(换名重置一次偏好,拍板不迁移)
+const LS_PREFIX = BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban'
+const LANES_ON = LANES !== null // 线别 UI(工具条分段/文档库 chips/hint/h1 重写)只在此开
+const LANE_IDS = LANES_ON ? LANES.ids : []
+// 线别归属:开时读每条 entry 的显式 line 字段(通用、可审计);关时恒空 —— 产物与未开线别逐字节一致。
+const lineOf = (e) => LANES_ON ? String((e && e.line) || '') : ''
+const decLine = lineOf, iterLine = lineOf, docLine = lineOf, taskLine = lineOf, blLine = lineOf
+// 线别开时的每档 hint 区块:按 ids 序渲染有 hint 的档;值按可信 HTML 原样注入(id 过 esc)
+const laneHintsHtml = LANES && Object.keys(LANES.hints).length
+  ? `\n  <div class="linehints">${LANES.ids.map((id) => LANES.hints[id] ? `\n    <span class="lf-hint" data-line-note="${esc(id)}">${LANES.hints[id]}</span>` : '').join('')}\n  </div>`
+  : ''
+const LANE = LANES_ON ? {
+  hubbrand: LANES.hubSuffix ? `${BRAND_H}${esc(LANES.hubSuffix)}` : BRAND_H,
+  defaultLine: LANES.default,
   lsLineKey: `${LS_PREFIX}_hub_line`,
   lsTfKey: `${LS_PREFIX}_hub_tf`,
-  // v0.2(D46):hubbar 线路钮 → 决策工具条线别分段 + 文档库线别 chips 取代;localStorage key 语义不变
-  lineTitles: { A: 'A · 归档', B: 'B · 历史', C: 'C · 当前' },
-  typeLabels: { D: '决策', Q: '疑问', UXC: '体验', AD: '审批', REVC: '评审' },
-  lineHintsHtml: `
-  <div class="linehints">
-    <span class="lf-hint" data-line-note="C">demo-7 提单模型 · 当前 live —— 决策 D22+ / lamos-c 文档 / 全部 demo。</span>
-    <span class="lf-hint" data-line-note="B">台账 rebuild,已被 C 取代:决策 D1–D21 / Q1–Q7、进度 I0–I9、backlog 全备;这条线主动跳过 demo 阶段,决策直接拍板。</span>
-    <span class="lf-hint" data-line-note="A">委托单系统(ADR 码):7 项决策 AD1–AD7 + 6 个对比 demo 已并入本板(源自 dev 分支 <code>decision-map</code>),设计文档链 GitHub。这是 demo-驱动决策的起点。</span>
-  </div>`,
+  lineTitles: LANES.titles,
+  typeLabels: LANES.typeLabels,
+  lineHintsHtml: laneHintsHtml,
   h1RewriteJs: `
-    // 顶栏 h1 随档换前缀(内容已随档过滤,标题不能一直写 C):${BRAND}-C/${BRAND} → ${BRAND}(-X)
-    // 用 ^${BRAND}(-C)? 前缀替换:「${BRAND} · Backlog」这类中性 label 也要跟档
+    // 顶栏 h1 随档换前缀:${BRAND}-<默认档> / ${BRAND} → ${BRAND}(-X)
     document.querySelectorAll('.pane .topbar h1').forEach(function (h) {
       if (h.dataset.base === undefined) h.dataset.base = h.textContent
       const pre = line === 'all' ? '${BRAND_JS}' : '${BRAND_JS}-' + line
-      h.textContent = h.dataset.base.replace(/^${BRAND_RE}(-C)?/, pre)
+      h.textContent = h.dataset.base.replace(/^${BRAND_RE}(-${LANES.default})?/, pre)
     })`,
-  savedLineJs: `  // 默认档 = C 线·当前(live 主线);已有记忆(含手选「全部」)按记忆走
-  let savedLine = 'C'
-  try { savedLine = localStorage.getItem('${LS_PREFIX}_hub_line') || 'C' } catch (e) {}`,
-  blSessHtml: `
-    <span class="sess">B 线遗留 + C 线新增 · T1 leftover / T2 设计 deferral / T3 源 A 线可平移</span>`,
-  blStamp: '由 <code>gen.mjs</code> 生成自 <code>backlog-manifest.json</code> — 收 B 线遗留 + C 线新增待办 + 源 A 线可平移项,改完重跑生成。',
-  decStamp: '由 <code>gen.mjs</code> 生成自 <code>decisions-manifest.json</code> — demo 存 <code>kanban/demos/</code>,已决追加到 <code>docs/lamos-b/DECISIONS.md</code>。',
+  savedLineJs: `  let savedLine = '${LANES.default}'
+  try { savedLine = localStorage.getItem('${LS_PREFIX}_hub_line') || '${LANES.default}' } catch (e) {}`,
+  blSessHtml: LANES.blSess ? `\n    <span class="sess">${esc(LANES.blSess)}</span>` : '',
+  blStamp: '由 <code>gen.mjs</code> 生成自 <code>backlog-manifest.json</code> — 改完重跑生成。',
+  decStamp: '由 <code>gen.mjs</code> 生成自 <code>decisions-manifest.json</code> — demo 存 <code>kanban/demos/</code>。',
 } : {
-  // lanes 关闭:线别推导全部返回空,线别 UI(筛选钮/hint/h1 前缀重写)不渲染,其余照常
-  decLine: () => '', iterLine: () => '', docLine: () => '', taskLine: () => '', blLine: () => '',
   hubbrand: esc(BRAND),
   defaultLine: 'all',
-  lsLineKey: `${BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban'}_hub_line`,
-  lsTfKey: `${BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban'}_hub_tf`,
+  lsLineKey: `${LS_PREFIX}_hub_line`,
+  lsTfKey: `${LS_PREFIX}_hub_tf`,
   lineTitles: {},
   typeLabels: {},
   lineHintsHtml: '',
@@ -385,9 +380,6 @@ const LANE = cfg.lanes === 'lamos-legacy' ? {
   blStamp: '由 <code>gen.mjs</code> 生成自 <code>backlog-manifest.json</code> — 改完重跑生成。',
   decStamp: '由 <code>gen.mjs</code> 生成自 <code>decisions-manifest.json</code> — demo 存 <code>kanban/demos/</code>。',
 }
-const { decLine, iterLine, docLine, taskLine, blLine } = LANE
-const LANES_ON = cfg.lanes === 'lamos-legacy' // 线别 UI(工具条分段/文档库 chips/hint/h1 重写)只在此开
-const LANE_IDS = LANES_ON ? ['A', 'B', 'C'] : []
 
 // 长文折叠(信息密度):运行期在 pane 可见时量高打 .clamp(字符数近似会被列宽骗——
 // 三列栅格下 96 字 ≈5 行;display:none 面板量高为 0,故只量可见元素,见内联 clampScan)
@@ -425,8 +417,8 @@ const linkA = (l) => {
 
 // ---- demo 返回栏(幂等注入 demos/*.html 顶部;回看板「决策/Demo」tab)----
 // 版本号 bump 时:旧版本块整块剥离后重注入,文案/样式跟着 gen 演进(否则幂等守卫会让旧文案永远留在已注入的 demo 里)
-// v3 换章(BL-C41/42):元素/marker 改中性 ddd-backnav,ctx 文案随 config.brand;剥离同时认旧章 lamos-b-backnav
-// ponytail: 返回栏不进 v0.4.0 换装范围——它注入进全体 demos/*.html,动样式会 churn 全部 demo 文件;
+// 元素/marker 用中性 ddd-backnav,ctx 文案随 config.brand。
+// ponytail: 返回栏不进换装范围——它注入进全体 demos/*.html,动样式会 churn 全部 demo 文件;
 //           将来要主题化时走 BACKNAV_VER bump(旧块整块剥离重注入),色值对齐 index :root 令牌。
 const BACKNAV_VER = 'ddd-backnav v3'
 const BACKNAV_BLOCK = `<!-- ${BACKNAV_VER} -->
@@ -438,17 +430,16 @@ const BACKNAV_BLOCK = `<!-- ${BACKNAV_VER} -->
  #ddd-backnav .ctx{color:#6f6e6b;font-size:12px}
 </style>
 <nav id="ddd-backnav"><a href="../index.html#decisions">← 返回看板</a><span class="ctx">${esc(BRAND)} Demo · mock 数据</span></nav>`
-// 剥块:旧章(lamos-b-backnav vN)与新章(ddd-backnav vN)都认,/g 剥净(盖板事故:旧 gen 会把 v2 默认块
-// 插进已含 v3 块的 demo,单发正则剥不净)。块文法收紧为完整模板形制(注释→style→带 id 的 nav,
-// 新旧两章的注入模板都符合;手工只改过 <a>/ctx 不改结构):防 <pre> 里只贴注释行的原文示例被
-// 「注释→就近 </nav>」的松匹配误卷。已知边界:样例若把整块(注释+style+带真 nav id 的 nav)
-// 逐字节贴全,仍会被当真块剥掉——讲 backnav 机制的 demo 请至少转义 nav id。
-const BACKNAV_BLOCK_RE = /\n?<!-- (?:lamos-b-backnav|ddd-backnav) v[0-9]+ -->\n<style[^>]*>[\s\S]*?<\/style>\n<nav\b[^>]*\bid="(?:ddd-backnav|lamos-b-backnav)"[\s\S]*?<\/nav>/g
+// 剥块:任意版本的 ddd-backnav 块都认,/g 剥净(旧 gen 可能把默认块叠进已含当前块的 demo,单发正则剥不净)。
+// 块文法收紧为完整模板形制(注释→style→带 id 的 nav;手工只改过 <a>/ctx 不改结构):防 <pre> 里只贴注释行的
+// 原文示例被「注释→就近 </nav>」的松匹配误卷。已知边界:样例若把整块(注释+style+带真 nav id 的 nav)逐字节
+// 贴全,仍会被当真块剥掉——讲 backnav 机制的 demo 请至少转义 nav id。
+const BACKNAV_BLOCK_RE = /\n?<!-- ddd-backnav v[0-9]+ -->\n<style[^>]*>[\s\S]*?<\/style>\n<nav\b[^>]*\bid="ddd-backnav"[\s\S]*?<\/nav>/g
 const BACKNAV_MARK = `<!-- ${BACKNAV_VER} -->` // 闭合到 --> 才算命中当前版,防将来 v30 撞 v3 前缀
 // 换章保手工件:旧块里手工改过的返回链/ctx 注记(非默认件)原样携带进新章,默认件才随模板走。
-// 现存 79 个 demo 有 14 个手工调过(自定义回跳锚 #UXC47、真数据注记等);整块重置会把「真实台账数据」误标回「mock 数据」——伤信任,不做。
+// 有 demo 会手工调返回栏(自定义回跳锚、真数据注记等);整块重置会把这些手工件误标回默认——伤信任,不做。
 const BACKNAV_A_DEF = '<a href="../index.html#decisions">← 返回看板</a>'
-const BACKNAV_CTX_DEFS = new Set(['LAMOS Demo · mock 数据', `${esc(BRAND)} Demo · mock 数据`]) // v2 冻结默认 / 当前 brand 默认
+const BACKNAV_CTX_DEFS = new Set([`${esc(BRAND)} Demo · mock 数据`]) // 当前 brand 默认 ctx
 const backnavCustom = (blk) => {
   const nav = blk.match(/<nav [^>]*>([\s\S]*)<\/nav>/)
   const a = nav && nav[1].match(/<a [^>]*>[\s\S]*?<\/a>/)
@@ -1387,7 +1378,7 @@ const decByCode = Object.fromEntries(dm.entries.map((e) => [e.code, e]))
 const cIters = m.iterations.filter((it) => /^C\d+$/.test(it.id))
 const cTaskByIter = Object.fromEntries(m.tasks.filter((t) => /^TC\d+$/.test(t.id)).map((t) => [t.iteration, t]))
 // decByIter 已在进度看板区提升定义(进度面板 + 本 timeline 共用)
-const DESIGN_C_DOC = '../../docs/lamos-c/01-design.md'
+const DESIGN_DOC = pm?.designDoc || '' // 叙事段「设计文档分节链」的基址(可选,path-manifest.designDoc 提供;缺省不成链)
 
 function buildPathPane() {
   if (!pm) return '<p class="stamp">path-manifest.json 缺失,决策路径不可用。</p>'
@@ -1513,9 +1504,9 @@ function buildPathPane() {
         .join('')
       const secMap = {}
       decs.forEach(({ e }) => (e.designSec || []).forEach((s) => (secMap[s.anchor] = s.label)))
-      const secChips = Object.entries(secMap)
-        .map(([a, l]) => `<a class="tl-sec" href="${esc(cardLink(DESIGN_C_DOC + a).href)}">${esc(l)}</a>`)
-        .join('')
+      const secChips = DESIGN_DOC ? Object.entries(secMap)
+        .map(([a, l]) => `<a class="tl-sec" href="${esc(cardLink(DESIGN_DOC + a).href)}">${esc(l)}</a>`)
+        .join('') : ''
       const demoNotes = decs.filter((x) => x.decide).map((x) => x.e.demoNote).filter(Boolean)
       // 大批次(如 C14 打磨 14 决策)demoNote 全拼会变成一堵墙;超长就截首条 + 计数,详情去决策卡看
       let demoLine = demoNotes.join(' · ')

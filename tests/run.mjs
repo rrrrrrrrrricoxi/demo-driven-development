@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。
-// 源自 0.6.0 发版前的对抗验证(旧版盖板事故的攻击者 testPlan 可执行版),88 条断言:
-// 时光机(真实 v0.2.1 标本盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、
-// retire 注册守卫、byte-freeze 归一化、<pre> 误伤、全新项目首跑等。
-// 时光机标本 = tests/fixtures/legacy-0.2.1(字节级取自 v0.2.1 tag,出处见其 README)。
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。93 条断言:
+// 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
+// byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
+// 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -14,7 +13,6 @@ import { createHash } from 'node:crypto'
 const HERE_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE_DIR, '..')
 const NEW_SCRIPTS = join(REPO, 'scripts')
-const OLD_DIR = join(HERE_DIR, 'fixtures', 'legacy-0.2.1')
 const WORK = mkdtempSync(join(tmpdir(), 'ddd-tests-'))
 const MY_VER = JSON.parse(readFileSync(join(REPO, '.claude-plugin/plugin.json'), 'utf8')).version
 
@@ -26,16 +24,21 @@ const ok = (cond, name, detail = '') => {
 const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex')
 const count = (s, sub) => s.split(sub).length - 1
 
-// ---- v2 默认块(逐字节抄 v0.2.1 gen 源)与 demo 素材 ----
-const V2_BLOCK = `<!-- lamos-b-backnav v2 -->
-<style id="lamos-b-backnav-style">
+// ---- 过期默认块(ddd-backnav v2 = 当前 marker 的旧版本;strip regex 认得,应被自愈升到 v3)----
+const STALE_BLOCK = `<!-- ddd-backnav v2 -->
+<style id="ddd-backnav-style">
  body{padding-top:44px}
- #lamos-b-backnav{position:fixed;top:0;left:0;right:0;height:44px;z-index:9999;display:flex;align-items:center;gap:10px;padding:0 16px;background:#f6f5f2;border-bottom:1px solid #e3e2e0;font:13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
- #lamos-b-backnav a{display:inline-flex;align-items:center;gap:6px;text-decoration:none;font-weight:600;color:#2383e2;border:1px solid #e3e2e0;border-radius:8px;padding:5px 11px;background:#fff}
- #lamos-b-backnav a:hover{border-color:#2383e2}
- #lamos-b-backnav .ctx{color:#6f6e6b;font-size:12px}
+ #ddd-backnav{position:fixed;top:0;left:0;right:0;height:44px;z-index:9999;display:flex;align-items:center;gap:10px;padding:0 16px;background:#f6f5f2;border-bottom:1px solid #e3e2e0}
+ #ddd-backnav a{text-decoration:none;font-weight:600;color:#2383e2}
+ #ddd-backnav .ctx{color:#6f6e6b;font-size:12px}
 </style>
-<nav id="lamos-b-backnav"><a href="../index.html#decisions">← 返回看板</a><span class="ctx">LAMOS Demo · mock 数据</span></nav>`
+<nav id="ddd-backnav"><a href="../index.html#decisions">← 返回看板</a><span class="ctx">HTEST Demo · mock 数据</span></nav>`
+// 合成「旧 gen 盖板」:剥掉 index 戳 + 每个 demo 在 <body> 后叠一个过期块(不识别当前块,直接叠加)
+const mkOldCache = (verDir) => { // retire 用的最小假旧缓存:两个待 shim 的脚本文件
+  mkdirSync(join(verDir, 'scripts'), { recursive: true })
+  writeFileSync(join(verDir, 'scripts', 'gen.mjs'), '#!/usr/bin/env node\nconsole.log("stale gen")\n')
+  writeFileSync(join(verDir, 'scripts', 'stop-hook.mjs'), '#!/usr/bin/env node\nprocess.exit(0)\n')
+}
 const demoHtml = (title, extra = '') => `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title}</title></head>
 <body>
@@ -92,53 +95,55 @@ const fx1 = mkFixture('fx1', {
   ok(lines[1] === `<!-- ddd-gen v${MY_VER} -->`, `第二行是版本戳 v${MY_VER}`, lines[1])
   ok(count(idx, '<!-- ddd-gen v') === 1, '戳恰一枚')
   for (const f of ['d1.html', 'd2.html', 'd3.html'])
-    ok(count(readDemo(fx1.kb, f), '<!-- ddd-backnav v3 -->') === 1 && !readDemo(fx1.kb, f).includes('lamos-b'), `${f} 恰一个 v3 块`)
+    ok(count(readDemo(fx1.kb, f), '<!-- ddd-backnav v3 -->') === 1 && !readDemo(fx1.kb, f).includes('ddd-backnav v2'), `${f} 恰一个 v3 块`)
   const r2 = runGen(NEW_SCRIPTS, fx1.kb)
   ok(r2.status === 0 && r2.stdout.includes('(3 已是当前版)'), '重跑幂等:3 demo 全 skip', r2.stdout)
 }
 
-// ============ T1/T12 时光机复现 + 自愈 + 乒乓终止 ============
-console.log('T1/T12 时光机:旧 gen 盖板 → 新守卫自愈 → shim 断火')
+// ============ T1/T12 时光机:合成旧 gen 盖板 → 新守卫自愈 ============
+console.log('T1/T12 时光机:合成旧 gen 盖板 → 新守卫自愈')
 {
   // 给 d2 做手工件:自定义回跳锚 + 真数据注记(改注入后的 v3 块)
   let d2 = readDemo(fx1.kb, 'd2.html')
   d2 = d2.replace('href="../index.html#decisions"', 'href="../index.html#UXC47"')
          .replace(/<span class="ctx">[\s\S]*?<\/span>/, '<span class="ctx">真实台账数据 · 台账镜像</span>')
   writeFileSync(join(fx1.kb, 'demos/d2.html'), d2)
-  // 旧 session 记账:touch manifest → 旧 stop-hook(v0.2.1 标本)重跑旧 gen
-  touch(join(fx1.kb, 'manifest.json'))
-  const rOld = runStop(join(OLD_DIR, 'scripts'), fx1.root)
-  ok(rOld.status === 0, '旧 0.2.1 stop-hook 跑通(exit 0)', `${rOld.status} ${rOld.stderr}`)
-  const idxAfterOld = readFileSync(join(fx1.kb, 'index.html'), 'utf8')
-  ok(!idxAfterOld.includes('<!-- ddd-gen v'), 'bug 复现:旧 gen 盖板,戳消失')
-  const d1AfterOld = readDemo(fx1.kb, 'd1.html')
-  ok(d1AfterOld.includes('lamos-b-backnav v2') && d1AfterOld.includes('ddd-backnav v3'), 'bug 复现:d1 双块(v2 叠 v3)')
-  // 新守卫自愈:mtime 全新鲜,只有戳能触发
+  // 合成旧 gen 盖板:剥掉 index 戳(无戳=旧 gen 产物)+ 每个 demo 在 <body> 后叠一个过期块(叠在当前块之上)
+  const idxP = join(fx1.kb, 'index.html')
+  writeFileSync(idxP, readFileSync(idxP, 'utf8').replace(`\n<!-- ddd-gen v${MY_VER} -->`, ''))
+  for (const f of ['d1.html', 'd2.html', 'd3.html']) {
+    const p = join(fx1.kb, 'demos', f)
+    writeFileSync(p, readFileSync(p, 'utf8').replace(/(<body[^>]*>)/, `$1\n${STALE_BLOCK}`))
+  }
+  ok(!readFileSync(idxP, 'utf8').includes('<!-- ddd-gen v'), 'bug 复现:旧 gen 盖板,戳消失')
+  const d1Clobbered = readDemo(fx1.kb, 'd1.html')
+  ok(count(d1Clobbered, '<!-- ddd-backnav v2 -->') === 1 && count(d1Clobbered, '<!-- ddd-backnav v3 -->') === 1, 'bug 复现:d1 双块(过期 v2 叠当前 v3)')
+  // 新守卫自愈:index 无戳 → 判过期重生成
   const rNew = runStop(NEW_SCRIPTS, fx1.root)
   ok(rNew.status === 0, '新 stop-hook exit 0', rNew.stderr)
-  const idxHealed = readFileSync(join(fx1.kb, 'index.html'), 'utf8')
-  ok(idxHealed.includes(`<!-- ddd-gen v${MY_VER} -->`), '自愈:戳回来了(纯靠戳判过期,mtime 是新鲜的)')
+  const idxHealed = readFileSync(idxP, 'utf8')
+  ok(idxHealed.includes(`<!-- ddd-gen v${MY_VER} -->`), '自愈:戳回来了(无戳 = 旧 gen 产物 → 重生成)')
   for (const f of ['d1.html', 'd2.html', 'd3.html']) {
     const c = readDemo(fx1.kb, f)
-    ok(!c.includes('lamos-b-backnav'), `自愈:${f} 零 v2 残留`)
+    ok(!c.includes('ddd-backnav v2'), `自愈:${f} 零过期块残留`)
     ok(count(c, '<!-- ddd-backnav v3 -->') === 1, `自愈:${f} 恰一个 v3 块`)
   }
   const d2Healed = readDemo(fx1.kb, 'd2.html')
-  ok(d2Healed.includes('#UXC47') && d2Healed.includes('真实台账数据 · 台账镜像'), '自愈:d2 手工件存活(锚+真数据注记,未被 v2 默认块顶掉)')
+  ok(d2Healed.includes('#UXC47') && d2Healed.includes('真实台账数据 · 台账镜像'), '自愈:d2 手工件存活(锚+真数据注记,未被过期默认块顶掉)')
 }
 
 // ============ T2 回捞顺序双向 ============
 console.log('T2 手工件回捞:两种块序都存活')
 {
   const blk3 = readDemo(fx1.kb, 'd2.html').match(/<!-- ddd-backnav v3 -->[\s\S]*?<\/nav>/)[0]
-  const mk = (order) => demoHtml('dx').replace('<body>', order === 'v2first' ? `<body>\n${V2_BLOCK}\n${blk3}` : `<body>\n${blk3}\n${V2_BLOCK}`)
-  const fx2 = mkFixture('fx2', { 'a.html': mk('v2first'), 'b.html': mk('v3first') })
+  const mk = (order) => demoHtml('dx').replace('<body>', order === 'staleFirst' ? `<body>\n${STALE_BLOCK}\n${blk3}` : `<body>\n${blk3}\n${STALE_BLOCK}`)
+  const fx2 = mkFixture('fx2', { 'a.html': mk('staleFirst'), 'b.html': mk('v3first') })
   const r = runGen(NEW_SCRIPTS, fx2.kb)
   ok(r.status === 0, 'gen exit 0', r.stderr)
   for (const f of ['a.html', 'b.html']) {
     const c = readDemo(fx2.kb, f)
-    ok(!c.includes('lamos-b-backnav') && count(c, '<!-- ddd-backnav v3 -->') === 1, `${f} 归一为一个 v3 块`)
-    ok(c.includes('#UXC47') && c.includes('真实台账数据 · 台账镜像'), `${f} 自定义件存活(顺序=${f === 'a.html' ? 'v2 在上' : 'v3 在上'})`)
+    ok(!c.includes('ddd-backnav v2') && count(c, '<!-- ddd-backnav v3 -->') === 1, `${f} 归一为一个 v3 块`)
+    ok(c.includes('#UXC47') && c.includes('真实台账数据 · 台账镜像'), `${f} 自定义件存活(顺序=${f === 'a.html' ? '过期块在上' : 'v3 在上'})`)
   }
 }
 
@@ -147,13 +152,13 @@ console.log('T3 多块剥净')
 {
   const blk3def = readDemo(fx1.kb, 'd1.html').match(/<!-- ddd-backnav v3 -->[\s\S]*?<\/nav>/)[0]
   const fx3 = mkFixture('fx3', {
-    'c.html': demoHtml('c').replace('<body>', `<body>\n${V2_BLOCK}\n${V2_BLOCK}\n${blk3def}`),
+    'c.html': demoHtml('c').replace('<body>', `<body>\n${STALE_BLOCK}\n${STALE_BLOCK}\n${blk3def}`),
     'd.html': demoHtml('d').replace('<body>', `<body>\n${blk3def}\n${blk3def}`),
   })
   const r = runGen(NEW_SCRIPTS, fx3.kb)
   ok(r.status === 0, 'gen exit 0', r.stderr)
   const c = readDemo(fx3.kb, 'c.html'), d = readDemo(fx3.kb, 'd.html')
-  ok(!c.includes('lamos-b-backnav') && count(c, '<!-- ddd-backnav v3 -->') === 1, 'c.html [v2,v2,v3] → 恰一个 v3')
+  ok(!c.includes('ddd-backnav v2') && count(c, '<!-- ddd-backnav v3 -->') === 1, 'c.html [v2,v2,v3] → 恰一个 v3')
   ok(count(d, '<!-- ddd-backnav v3 -->') === 1, 'd.html 同版双块 [v3,v3] → 归一为一个')
 }
 
@@ -306,8 +311,8 @@ console.log('T17 retire 注册守卫')
   const plugroot = join(WORK, 'plugroot')
   const cache2 = join(plugroot, 'cache')
   const pdir2 = join(cache2, 'mp1', 'demo-driven-development')
-  cpSync(OLD_DIR, join(pdir2, '0.2.1'), { recursive: true })
-  cpSync(OLD_DIR, join(pdir2, '0.3.0'), { recursive: true })
+  mkOldCache(join(pdir2, '0.2.1'))
+  mkOldCache(join(pdir2, '0.3.0'))
   writeFileSync(join(plugroot, 'installed_plugins.json'), JSON.stringify({
     version: 2,
     plugins: { 'demo-driven-development@demo-driven-development': [{ scope: 'project', projectPath: '/tmp/other-proj', installPath: join(pdir2, '0.3.0'), version: '0.3.0' }] },
@@ -332,7 +337,7 @@ console.log('T11 扑灭存量')
 {
   const fakeCache = join(WORK, 'cache')
   const pdir = join(fakeCache, 'mp1', 'demo-driven-development')
-  cpSync(OLD_DIR, join(pdir, '0.2.1'), { recursive: true })
+  mkOldCache(join(pdir, '0.2.1'))
   mkdirSync(join(pdir, MY_VER, 'scripts'), { recursive: true })
   writeFileSync(join(pdir, MY_VER, 'scripts/gen.mjs'), '// current, must stay\n')
   writeFileSync(join(pdir, MY_VER, 'scripts/stop-hook.mjs'), '// current, must stay\n')
@@ -391,6 +396,34 @@ console.log('T19 工具条两行治理(D54-B)')
   ok(count(sess, 'tbrow-act') >= 3, '决策+Backlog 双 pane 都有动作行(HTML×2 + CSS×2)', `count=${count(sess, 'tbrow-act')}`)
   ok(sess.includes('sesschips'), 'session chips 在场(拆行前提成立)')
   ok(count(sess, 'id="decsort"') === 1 && count(sess, 'id="decsearch"') === 1, '排序/搜索控件 id 唯一(JS 接线不受拆行影响)')
+}
+
+// ============ T20 lanes 通用化(config 驱动 + 未配时无 UI + 零 lamos)============
+console.log('T20 lanes config 驱动')
+{
+  const fx20 = mkFixture('fx20', { 's.html': demoHtml('s') })
+  const cfgP = join(fx20.kb, 'kanban.config.json')
+  const decP = join(fx20.kb, 'decisions-manifest.json')
+  runGen(NEW_SCRIPTS, fx20.kb)
+  const off = readFileSync(join(fx20.kb, 'index.html'), 'utf8')
+  ok(!off.includes('declineseg'), '未配 lanes:无线别筛选段')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.lanes = { ids: ['A', 'B'], default: 'A', titles: { A: '甲档', B: '乙档' } }
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  const dec = JSON.parse(readFileSync(decP, 'utf8'))
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 't', line: 'A' }]
+  writeFileSync(decP, JSON.stringify(dec))
+  const r = runGen(NEW_SCRIPTS, fx20.kb)
+  ok(r.status === 0, '配 lanes 对象 gen exit 0', r.stderr)
+  const on = readFileSync(join(fx20.kb, 'index.html'), 'utf8')
+  ok(on.includes('declineseg') && on.includes('甲档'), 'lanes 对象:线别分段渲染 + config titles 生效')
+  ok(on.includes('id="D1" data-line="A"'), '卡片按显式 line 归属(D1 → A)')
+  ok(!on.includes('lamos'), 'lanes 开启也零 lamos')
+  // 弃用别名仍可用(带警告),不硬崩
+  cfg.lanes = 'lamos-legacy'
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  const ra = runGen(NEW_SCRIPTS, fx20.kb)
+  ok(ra.status === 0 && ra.stderr.includes('已弃用'), '弃用字符串别名:接受 + 警告(不崩)', ra.stderr.slice(0, 80))
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
