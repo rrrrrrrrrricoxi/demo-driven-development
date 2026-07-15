@@ -1054,7 +1054,7 @@ const decDimOpts = (() => {
 
 // 「去 live 页」:route 挂到 appBase(:8898 是静态站,裸 /templates 只会 404);
 // 参数化路由(/t/:id 的 :id 是占位符,不是可达路径)退回对应列表页
-const APP_BASE = dm.instance.appBase || 'http://100.78.143.7:5174'
+const APP_BASE = dm.instance.appBase || 'http://localhost:5174'
 const liveUrl = (route) => APP_BASE + (route.includes(':') ? '/tickets' : route)
 
 // 每条决策 entry 必须有 code(decByCode / becameD / refines 全以 code 为 join 键,缺了静默断链)

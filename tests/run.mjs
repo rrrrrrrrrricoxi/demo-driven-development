@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。
-// 源自 v0.6.0 发版前的对抗验证(issue #7 攻击者 testPlan 的可执行版),81 条断言:
+// 源自 0.6.0 发版前的对抗验证(旧版盖板事故的攻击者 testPlan 可执行版),88 条断言:
 // 时光机(真实 v0.2.1 标本盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、
 // retire 注册守卫、byte-freeze 归一化、<pre> 误伤、全新项目首跑等。
 // 时光机标本 = tests/fixtures/legacy-0.2.1(字节级取自 v0.2.1 tag,出处见其 README)。
