@@ -11,6 +11,23 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-16
+
+### Changed
+- Lanes are now config-driven. A board that tracks parallel timelines sets
+  `config.lanes` to an object (`ids`, `titles`, `hints`, and so on) and gives
+  each card an explicit `line`; the generator no longer carries any host-specific
+  derivation heuristics or hardcoded profile. Boards with `lanes` unset render
+  byte-identically to 0.7.0. The old string form `"lanes": "lamos-legacy"` is
+  accepted as a deprecated alias (with a warning) for one release and will be
+  removed next.
+
+### Removed
+- The first host project's baked-in lanes profile, back-navigation marker, and
+  the byte-copied legacy test fixture. The time-machine regression is now
+  reproduced synthetically (a stale `ddd-backnav v2` block), so the guard's
+  self-heal is still covered without shipping the old sources.
+
 ## [0.7.0] - 2026-07-15
 
 Initial public release. The plugin grew inside its first host project and was

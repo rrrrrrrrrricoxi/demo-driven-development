@@ -72,9 +72,9 @@ Release history is in [CHANGELOG.md](CHANGELOG.md); the process for cutting a re
 
 A mature board's `index.html` can reach hundreds of thousands of characters. `TOKEN-ECONOMY.md` is the cost discipline that keeps Claude from ever reading generated files: verify from the source of truth (manifests, markdown sources, generator exit codes) instead. `kanban-init` wires deny rules into the target project, so the discipline is enforced rather than advisory.
 
-## Legacy notes
+## Lanes (optional)
 
-`--lanes lamos-legacy` and the `lamos-b-backnav` markers form the compatibility profile for the plugin's first host project, the board this tool grew out of. New projects never need either. They stay so that old boards heal correctly and byte-level equivalence against the original baseline remains provable.
+Most boards do not need this. When a board tracks parallel timelines or eras (say A archived, B history, C current), set `config.lanes` to an object (`ids`, `titles`, `hints`, and so on) and give each card an explicit `line`. The kanban then renders per-lane filter chips and hints. Left unset, lanes are off and output is byte-identical to a board without the feature. See the kanban-init skill for the full shape.
 
 ## License
 

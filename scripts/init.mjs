@@ -5,7 +5,7 @@
 //   node scripts/init.mjs plan  [--dir <targetRoot>] [选项]     输出将执行的动作(只读)
 //   node scripts/init.mjs apply [--dir <targetRoot>] [选项]     动手(全程持 .init-lock)
 //
-// 选项:--brand X  --lang zh|en  --port N  --lanes null|lamos-legacy
+// 选项:--brand X  --lang zh|en  --port N
 //       --with-narrative(铺 path-manifest 叙事模块,缺省不铺——D45 拍板③)
 //       --take-assets(scan 列出的同层非 HTML 资源随归拢一起迁,缺省只列名不动)
 //       --only <p,..> | --exclude <p,..>(归拢挑选,互斥;逗号分隔 repo 相对路径或
@@ -57,7 +57,7 @@ import { pickStrings } from './strings.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const TPL = join(HERE, '..', 'templates')
 const MANIFEST_FILES = ['manifest.json', 'decisions-manifest.json', 'backlog-manifest.json', 'path-manifest.json']
-const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--brand X] [--lang zh|en] [--port N] [--lanes null|lamos-legacy] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
+const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--brand X] [--lang zh|en] [--port N] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
 
 let S = pickStrings('zh') // main() 里按 --lang / config.lang 重选
 
@@ -65,8 +65,8 @@ const fail = (msg) => { console.error(`[init] ✗ ${msg}`); process.exit(1) }
 
 // ---- CLI 解析 ----
 function parseArgs(argv) {
-  const opt = { cmd: null, dir: null, brand: null, lang: null, port: null, lanes: null, stubStatus: null, only: null, exclude: null, remember: false, withNarrative: false, takeAssets: false, yes: false }
-  const valued = { '--dir': 'dir', '--brand': 'brand', '--lang': 'lang', '--port': 'port', '--lanes': 'lanes', '--stub-status': 'stubStatus', '--only': 'only', '--exclude': 'exclude' }
+  const opt = { cmd: null, dir: null, brand: null, lang: null, port: null, stubStatus: null, only: null, exclude: null, remember: false, withNarrative: false, takeAssets: false, yes: false }
+  const valued = { '--dir': 'dir', '--brand': 'brand', '--lang': 'lang', '--port': 'port', '--stub-status': 'stubStatus', '--only': 'only', '--exclude': 'exclude' }
   const flags = { '--yes': 'yes', '--with-narrative': 'withNarrative', '--take-assets': 'takeAssets', '--remember': 'remember' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -80,10 +80,6 @@ function parseArgs(argv) {
   }
   if (!['scan', 'plan', 'apply'].includes(opt.cmd)) fail(USAGE)
   if (opt.lang !== null && !['zh', 'en'].includes(opt.lang)) fail(`--lang 只支持 zh|en,给了 ${opt.lang}`)
-  if (opt.lanes !== null) {
-    if (opt.lanes === 'null') opt.lanes = null
-    else if (opt.lanes !== 'lamos-legacy') fail(`--lanes 只支持 null|lamos-legacy,给了 ${opt.lanes}`)
-  }
   if (opt.port !== null) {
     opt.port = Number(opt.port)
     if (!Number.isInteger(opt.port) || opt.port < 1 || opt.port > 65535) fail('--port 需要 1-65535 的整数')
@@ -859,7 +855,6 @@ async function doApply(root, st, gi, opt, plan) {
       const cfg = JSON.parse(renderTpl(readFileSync(join(TPL, 'kanban.config.json'), 'utf8'), vars))
       cfg.lang = opt.lang ?? 'zh'
       cfg.port = plan.port
-      cfg.lanes = opt.lanes
       if (plan.legacy?.docs) cfg.docs = plan.legacy.docs // 旧装接管:docs 提取自旧 gen.mjs 的 REF_DOCS
       writeOnce('app/kanban/kanban.config.json', JSON.stringify(cfg, null, 2) + '\n')
     }
