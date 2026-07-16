@@ -419,7 +419,7 @@ const DK_SCHEME_CSS = !DARK ? '' : `
 // 切换钮(跟随系统 + 手动切;同一 LS key,index/refs/shots 偏好互通)。空 title 走 aria-label。
 const DK_TOGGLE_BTN = !DARK ? '' : `<button type="button" id="themetoggle" class="themetoggle" aria-label="切换明亮 / 暗夜" title="明亮 / 暗夜(跟随系统,可手动切)">☾</button>`
 const DK_TOGGLE_JS = !DARK ? '' : `
-  (function () {
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在 routeHash() 后会被解析成 routeHash()(…),必须挡开
     var KEY = '${LS_PREFIX}_theme', root = document.documentElement, btn = document.getElementById('themetoggle')
     var mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)')
     function eff() { var c = root.getAttribute('data-theme'); return c ? c : (mq && mq.matches ? 'dark' : 'light') }
