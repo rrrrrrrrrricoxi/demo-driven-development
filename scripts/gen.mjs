@@ -267,11 +267,79 @@ const DEC_STATUS_COLOR = tcMerge('DEC_STATUS_COLOR', { deciding: '#b7791f', mock
 const PRI_ORDER = { high: 0, med: 1, low: 2 }
 const CODE_EXT = /\.(py|ts|tsx|js|mjs|json|sh|sql|toml|cfg|txt|yml|yaml)$/i
 
+// ———— 明暗模式(v0.9.0,config.darkMode:布尔,默认关)————
+// 关 = 一切暗色注入不发生,输出逐字节冻结。开 = 每个色值包成 CSS light-dark(浅,深),
+// 由 :root 的 color-scheme(跟随系统)+ [data-theme] 手动钮切换;连逐卡内联 style="--c:…" 也随主题变。
+// 深色值:少量已拍板 pastel 锚点 + HSL 变换兜底(浅面翻深 / 深字翻浅 / 中间彩色压成 pastel)。
+// 要求现代浏览器(light-dark()/color-scheme,2024+);内部工具场景,足够。
+const DARK = cfg.darkMode === true
+const DK_OVERRIDE = {
+  '#f6f5f2': '#242220', '#ffffff': '#2d2a26', '#fff': '#2d2a26',
+  '#37352f': '#e6e2da', '#6f6e6b': '#a29d92', '#8a8884': '#87837b',
+  '#0f7b6c': '#8bc0b1', '#159b88': '#93c9ba', '#2383e2': '#95b5da',
+  '#b7791f': '#d6b98d', '#d44c47': '#d9a69d', '#8268b0': '#b7a9d1',
+  '#a8a29e': '#9b968c', '#8a8781': '#979288', '#e3e2e0': '#3a362f', '#ededec': '#33302b',
+  // 角色已知的深「ink」(浅底深字 → 深底浅字)
+  '#1f5066': '#a9cbdd', '#047857': '#6cc6a6', '#065f46': '#5fbd9c', '#b45309': '#e0b482',
+  '#9a6410': '#d8bb8a', '#6b5d3e': '#ccbd97', '#44403c': '#d8d3c9', '#57534e': '#c6c1b7',
+  '#2b2723': '#dcd7cd', '#78716c': '#a8a29a',
+  // 角色已知的深/中彩色「accent」(→ pastel,不能翻成浅字)
+  '#146152': '#8bc0b1', '#3f7d70': '#8bc0b1', '#1a6fc4': '#7ba0cf', '#d97706': '#dcb488',
+  '#b5843a': '#d6b98d', '#7c3aed': '#b79bd6', '#7c2d12': '#d6a488',
+  // 代码块本就深,保留
+  '#0f172a': '#0f172a', '#e2e8f0': '#e2e8f0',
+}
+const dkHexToRgb = (h) => { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map((c) => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)] }
+const dkRgbToHsl = (r, g, b) => {
+  r /= 255; g /= 255; b /= 255
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b); const l = (mx + mn) / 2; const d = mx - mn
+  let h = 0, s = 0
+  if (d) { s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = (mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 }
+  return [h, s, l]
+}
+const dkHslToHex = (h, s, l) => {
+  h = ((h % 360) + 360) % 360
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2
+  let r, g, b
+  if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0]; else if (h < 180) [r, g, b] = [0, c, x]
+  else if (h < 240) [r, g, b] = [0, x, c]; else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x]
+  const to = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return '#' + to(r) + to(g) + to(b)
+}
+const darkOf = (hex) => {
+  const raw = String(hex).toLowerCase()
+  const m8 = raw.match(/^#([0-9a-f]{6})([0-9a-f]{2})$/) // 8 位带 alpha:变主色接回 alpha
+  if (m8) return darkOf('#' + m8[1]) + m8[2]
+  if (DK_OVERRIDE[raw]) return DK_OVERRIDE[raw]
+  if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(raw)) return raw
+  const [h, s, l] = dkRgbToHsl(...dkHexToRgb(raw))
+  let nl, ns
+  if (s < 0.16) { // 中性:纯按亮度翻转,角色不明的中灰稳成中灰(两底都可见)
+    if (l >= 0.72) { nl = 0.13 + (1 - l) * 0.85; ns = s }
+    else if (l <= 0.42) { nl = 0.84 - l * 0.34; ns = s }
+    else { nl = 0.54; ns = Math.min(s, 0.05) }
+  } else if (l >= 0.82) { nl = 0.12 + (1 - l) * 0.9; ns = Math.min(s, 0.22) } // 彩色浅底/tint → 深
+  else if (l <= 0.30) { nl = 0.64; ns = Math.min(s * 0.7, 0.4) } // 彩色很深 → pastel
+  else { nl = 0.62 + (l - 0.34) * 0.26; ns = Math.min(s * 0.6, 0.42) } // 彩色中间 → pastel
+  return dkHslToHex(h, ns, nl)
+}
+// darkStyle:把一段 CSS 里的色值全包成 light-dark();color:#fff 特殊(白字在 pastel 底上要变深墨)。
+const DK_HEXRE = /#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g
+const darkStyle = (css) => css
+  .replace(/color:(\s*)#fff\b(?![0-9a-f])/gi, 'color:$1@@DKWT@@')
+  .replace(DK_HEXRE, (m) => `light-dark(${m},${darkOf(m)})`)
+  .replace(/@@DKWT@@/g, 'light-dark(#fff,#2a2620)')
+// darkenDoc:只在 <style> 块内做色值替换,不碰 body / script;关时原样返回。
+const darkenDoc = (docHtml) => !DARK ? docHtml : docHtml.replace(/<style>([\s\S]*?)<\/style>/g, (_, css) => `<style>${darkStyle(css)}</style>`)
+
 const esc = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 // 色值注入 style 属性专用:先 String() 再 esc —— 堵 config 色值的引号逃逸,同时把未知色键(如 TIER_COLOR[未定义 tier])
 // 的 undefined 保留成字面 "undefined"(esc 的 ?? '' 会吞成空串,改字节),与 v0.5.0 逐字节一致。
-const escC = (c) => esc(String(c))
+const escC = (c) => {
+  const s = esc(String(c))
+  return DARK && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(String(c)) ? `light-dark(${s},${darkOf(String(c))})` : s
+}
 
 // ———— session 权责标签(v0.5.0):机制归 plugin、数据归项目 ————
 // config.sessionTags(可选、保插入序):{ id: { label, desc, color? } };color 缺省从安静内置轮换板取。
@@ -337,6 +405,35 @@ const BRAND_JS = BRAND.replace(/[\\']/g, '\\$&') // 生成 JS 里的单引号字
 const BRAND_RE = BRAND.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') // 生成 JS 里的正则字面量
 // localStorage 前缀:brand slug(换名重置一次偏好,拍板不迁移)
 const LS_PREFIX = BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban'
+// ———— 明暗模式的门控注入片(DARK 关时全为 '',逐字节冻结)————
+// color-scheme 令 light-dark() 生效:基态跟随系统,[data-theme] 手动覆盖(手选压过系统)。
+const DK_SCHEME_CSS = !DARK ? '' : `
+  :root { color-scheme: light dark; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+  .themetoggle { appearance: none; cursor: pointer; font: inherit; font-size: 14px; line-height: 1; padding: 5px 9px;
+    border: 1px solid; border-color: color-mix(in srgb, currentColor 24%, transparent); border-radius: 8px;
+    background: transparent; color: inherit; opacity: .8; }
+  .themetoggle:hover { opacity: 1; border-color: color-mix(in srgb, currentColor 42%, transparent); }
+  .themetoggle:focus-visible { outline: 2px solid var(--accent, #2383e2); outline-offset: 2px; }`
+// 切换钮(跟随系统 + 手动切;同一 LS key,index/refs/shots 偏好互通)。空 title 走 aria-label。
+const DK_TOGGLE_BTN = !DARK ? '' : `<button type="button" id="themetoggle" class="themetoggle" aria-label="切换明亮 / 暗夜" title="明亮 / 暗夜(跟随系统,可手动切)">☾</button>`
+const DK_TOGGLE_JS = !DARK ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在 routeHash() 后会被解析成 routeHash()(…),必须挡开
+    var KEY = '${LS_PREFIX}_theme', root = document.documentElement, btn = document.getElementById('themetoggle')
+    var mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)')
+    function eff() { var c = root.getAttribute('data-theme'); return c ? c : (mq && mq.matches ? 'dark' : 'light') }
+    function paint() { if (btn) btn.textContent = eff() === 'dark' ? '☀' : '☾' }
+    try { var s = localStorage.getItem(KEY); if (s === 'dark' || s === 'light') root.setAttribute('data-theme', s) } catch (e) {}
+    paint()
+    if (mq && mq.addEventListener) mq.addEventListener('change', paint)
+    if (btn) btn.addEventListener('click', function () {
+      var n = eff() === 'dark' ? 'light' : 'dark'
+      root.setAttribute('data-theme', n)
+      try { localStorage.setItem(KEY, n) } catch (e) {}
+      paint()
+    })
+  })();`
 const LANES_ON = LANES !== null // 线别 UI(工具条分段/文档库 chips/hint/h1 重写)只在此开
 const LANE_IDS = LANES_ON ? LANES.ids : []
 // 线别归属:开时读每条 entry 的显式 line 字段(通用、可审计);关时恒空 —— 产物与未开线别逐字节一致。
@@ -769,26 +866,26 @@ function renderRefPage({ title, bodyHtml, srcLabel, headings }) {
 })();
 </script>`
     : ''
-  return `<!doctype html>
+  return darkenDoc(`<!doctype html>
 <html lang="${HTML_LANG}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} · ${esc(BRAND)} 看板</title>
-<style>${REF_CSS}</style>${THEME_STYLE}
+<style>${REF_CSS}${DK_SCHEME_CSS}</style>${THEME_STYLE}
 </head>
 <body>
-<nav id="refnav"><a class="back" href="../index.html">← 决策看板</a><span class="src">${esc(srcLabel)}</span></nav>
+<nav id="refnav"><a class="back" href="../index.html">← 决策看板</a><span class="src">${esc(srcLabel)}</span>${DK_TOGGLE_BTN ? `<span style="flex:1"></span>${DK_TOGGLE_BTN}` : ''}</nav>
 <div class="reflayout${toc ? ' has-toc' : ''}">
 ${toc}
 <main class="refmain"><article class="md">
 ${bodyHtml}
 </article></main>
 </div>
-${spy}
+${spy}${DK_TOGGLE_JS ? `\n<script>${DK_TOGGLE_JS}\n</script>` : ''}
 </body>
 </html>
-`
+`)
 }
 
 function writeRefs() {
@@ -922,16 +1019,16 @@ let SHOT_COUNT = 0 // 提级入口徽章用(tab 行「截图 · N ↗」)
   .shot .fn{font-size:11px;color:var(--text);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .shot .dt{font-size:10.5px;color:var(--muted)}
   .shots-empty{color:var(--muted);padding:40px 0;text-align:center}`
-  writeFileSync(join(HERE, 'shots.html'), `<!doctype html>
+  writeFileSync(join(HERE, 'shots.html'), darkenDoc(`<!doctype html>
 <html lang="${HTML_LANG}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>截图廊 · ${esc(BRAND)} 看板</title>
-<style>${REF_CSS}${SHOTS_CSS}</style>${THEME_STYLE}
+<style>${REF_CSS}${SHOTS_CSS}${DK_SCHEME_CSS}</style>${THEME_STYLE}
 </head>
 <body>
-<nav id="refnav"><a class="back" href="index.html">← 决策看板</a><span class="src">${KANBAN_REL}/shots/ · 验证截图存档,随 PR 入库</span></nav>
+<nav id="refnav"><a class="back" href="index.html">← 决策看板</a><span class="src">${KANBAN_REL}/shots/ · 验证截图存档,随 PR 入库</span>${DK_TOGGLE_BTN ? `<span style="flex:1"></span>${DK_TOGGLE_BTN}` : ''}</nav>
 <div class="reflayout${shotsToc ? ' has-toc' : ''}">
 ${shotsToc}
 <main class="shotsmain">
@@ -940,10 +1037,10 @@ ${shotsToc}
 ${shotsBody}
 </main>
 </div>
-${shotsSpy}
+${shotsSpy}${DK_TOGGLE_JS ? `\n<script>${DK_TOGGLE_JS}\n</script>` : ''}
 </body>
 </html>
-`, 'utf8')
+`), 'utf8')
   console.log(`[gen] 截图廊 ${shotFiles.length} 张 / ${groups.size} 组 → shots.html`)
 }
 
@@ -2184,7 +2281,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -2197,7 +2294,7 @@ const html = `<!doctype html>
     <button class="tf lf tf-active" data-days="0">全部</button>
     <button class="tf lf" data-days="3">近 3 天</button>
     <button class="tf lf" data-days="7">近 7 天</button>
-    <button class="tf lf" data-days="30">近 30 天</button>
+    <button class="tf lf" data-days="30">近 30 天</button>${DK_TOGGLE_BTN ? `\n    <span class="lf-lbl" style="margin-left:10px"></span>${DK_TOGGLE_BTN}` : ''}
   </div>
 </nav>
 <div class="wrap" data-line="all">${LANE.lineHintsHtml}
@@ -2604,13 +2701,13 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}
 </script>
 `
 
 injectDemoBacknav()
 writeRefs()
-writeFileSync(join(HERE, 'index.html'), html)
+writeFileSync(join(HERE, 'index.html'), darkenDoc(html))
 console.log(
   `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${blCount} 条` +
     `(${b.groups.map((g) => `${b.statuses[g.id]} ${b.items.filter((it) => it.status === g.id).length}`).join(' / ')})` +

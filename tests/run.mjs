@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。93 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。101 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -424,6 +424,38 @@ console.log('T20 lanes config 驱动')
   writeFileSync(cfgP, JSON.stringify(cfg))
   const ra = runGen(NEW_SCRIPTS, fx20.kb)
   ok(ra.status === 0 && ra.stderr.includes('已弃用'), '弃用字符串别名:接受 + 警告(不崩)', ra.stderr.slice(0, 80))
+}
+
+// ============ T21 darkMode(opt-in light-dark() + 切换钮;未配/显式 false = 字节冻结)============
+console.log('T21 darkMode opt-in')
+{
+  const fx21 = mkFixture('fx21', { 's.html': demoHtml('s') })
+  const cfgP = join(fx21.kb, 'kanban.config.json')
+  const idxP = join(fx21.kb, 'index.html')
+  runGen(NEW_SCRIPTS, fx21.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('light-dark(') && !off.includes('themetoggle'), '未配 darkMode:零 light-dark / 零切换钮')
+  const offSha = sha(idxP)
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.darkMode = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx21.kb)
+  ok(sha(idxP) === offSha, 'darkMode:false 与未配逐字节相同(冻结)')
+  cfg.darkMode = true
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  const decP = join(fx21.kb, 'decisions-manifest.json')
+  const dec = JSON.parse(readFileSync(decP, 'utf8'))
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 't' }] // 模板零卡,注一张走 escC 内联路径
+  writeFileSync(decP, JSON.stringify(dec))
+  const r = runGen(NEW_SCRIPTS, fx21.kb)
+  ok(r.status === 0, 'darkMode:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('--c:light-dark(') && count(on, 'light-dark(') > 50, '样式与逐卡内联 --c 均包 light-dark()')
+  ok(on.includes('color-scheme: light dark') && on.includes(':root[data-theme="dark"]'), 'color-scheme 基态 + data-theme 手动覆盖规则齐')
+  ok(on.includes('id="themetoggle"') && on.includes(';(function'), '切换钮渲染 + IIFE 带防御分号(ASI 回归锚)')
+  ok(on.includes('light-dark(#f6f5f2,#242220)'), 'pastel 锚点命中(bg → #242220)')
+  const shots = readFileSync(join(fx21.kb, 'shots.html'), 'utf8')
+  ok(shots.includes('themetoggle') && shots.includes('light-dark('), 'shots.html 同步暗夜(钮 + light-dark)')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
