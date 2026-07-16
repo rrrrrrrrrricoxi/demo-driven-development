@@ -11,6 +11,18 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-16
+
+### Added
+- Dark mode, opt-in via `config.darkMode: true`. The board, doc pages, and the
+  screenshot gallery follow the system light/dark preference, with a manual
+  toggle in the top bar that remembers the choice (shared across the three page
+  kinds). Every color — including the per-card inline status colors — is baked
+  as a CSS `light-dark()` pair; the dark side is a warm pastel palette tuned
+  for night reading rather than an inversion. Requires a 2024+ browser when
+  enabled. Boards without `darkMode` (or with `false`) render byte-identically
+  to 0.8.0.
+
 ## [0.8.0] - 2026-07-16
 
 ### Changed

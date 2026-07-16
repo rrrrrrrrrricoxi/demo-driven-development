@@ -76,6 +76,10 @@ A mature board's `index.html` can reach hundreds of thousands of characters. `TO
 
 Most boards do not need this. When a board tracks parallel timelines or eras (say A archived, B history, C current), set `config.lanes` to an object (`ids`, `titles`, `hints`, and so on) and give each card an explicit `line`. The kanban then renders per-lane filter chips and hints. Left unset, lanes are off and output is byte-identical to a board without the feature. See the kanban-init skill for the full shape.
 
+## Dark mode (optional)
+
+Set `config.darkMode` to `true` and the board (plus doc pages and the screenshot gallery) follows the system light/dark preference, with a manual toggle in the top bar that remembers your choice. Colors are baked as CSS `light-dark()` pairs — the dark side is a warm pastel tuned for night reading, not an inversion. Left unset, output is byte-identical to a board without the feature. Needs a 2024+ browser.
+
 ## License
 
 [MIT](LICENSE)
