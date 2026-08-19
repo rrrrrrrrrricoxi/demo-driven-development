@@ -11,6 +11,27 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-19
+
+### Added
+- Demo form conventions in the `ddd-workflow` skill, promoted from host-project
+  practice to plugin mechanism: a multi-variant selection demo is one single
+  HTML page (never one file per variant); three or more variants get a fixed
+  left-side navigable TOC (click-to-jump plus scrollspy, with the two
+  field-tested pitfalls documented — the injected back-nav bar's 44px offset,
+  and a bottom-of-page fallback so the last item still lights up); on
+  multi-round decisions the card's `demo` field always points at the latest
+  round, with older rounds kept in `links` and labeled by round.
+- `docs/demo-binding.md` — the binding recipe for consolidating an old
+  multi-file round into a single archive page via same-origin iframes with
+  zero interaction loss (lazy `data-src`, back-nav stripping inside the child
+  document, auto-height with re-measure and MutationObserver, hard fallback).
+- The Stop guard's orphan audit now recognizes binding references: a demo
+  embedded via iframe (`data-src`/`src`, same-directory) from an already
+  covered demo is not an orphan, and the exemption propagates through nested
+  bindings. Placeholder card links for bound children are no longer needed;
+  a broken reference makes the child an orphan again.
+
 ## [0.9.0] - 2026-07-16
 
 ### Added

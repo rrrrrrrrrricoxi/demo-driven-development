@@ -10,6 +10,8 @@
 //      绝不 exit 2——「重启我自己」是 Claude 修不了的状态,阻断只会造死循环。审计(只读)照做。
 //   2. 审计:demos/*.html 凡未被任何 *.json manifest 引用、且不在 demos/.no-card-ok
 //      豁免名单(一行一个文件名)的,即「孤儿 demo」→ 阻断收工,要求当场补卡。
+//      v0.10.0 起认「合订引用」:被已豁免 demo 用 iframe(data-src/src)内嵌的同目录子页
+//      不算孤儿,逐层传递——合订页挂卡即可,子页不必挂占位链接(见 docs/demo-binding.md)。
 //      防死循环:同一次收工最多拦一次(stop_hook_active 时只警告并放行)。
 //
 // plugin 化改造(设计 §6):
@@ -95,7 +97,29 @@ let allow = []
 try {
   allow = readFileSync(join(DEMOS, '.no-card-ok'), 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
 } catch {}
-const orphans = demos.filter((f) => !corpus.includes(f) && !allow.includes(f))
+// 合订引用(v0.10.0):被已豁免 demo 用 iframe 内嵌的同目录子页随之豁免,逐层传递(合订页可再被合订)。
+// 只认同目录裸文件名引用(同源内嵌是合订术前提;带路径/锚/查询串的不认),引用断了照常报孤儿。
+const IFRAME_REF_RE = /<iframe\b[^>]*?\b(?:data-src|src)\s*=\s*(?:"([^"#?]+)"|'([^'#?]+)')/gi
+const refsOf = new Map()
+for (const f of demos) {
+  let html = ''
+  try { html = readFileSync(join(DEMOS, f), 'utf8') } catch { continue }
+  const set = new Set()
+  for (const m of html.matchAll(IFRAME_REF_RE)) {
+    const t = (m[1] ?? m[2]).trim().replace(/^\.\//, '')
+    if (t && !t.includes('/') && t.endsWith('.html') && t !== f) set.add(t)
+  }
+  if (set.size) refsOf.set(f, set)
+}
+const covered = new Set(demos.filter((f) => corpus.includes(f) || allow.includes(f)))
+for (let grew = true; grew;) {
+  grew = false
+  for (const [f, set] of refsOf) {
+    if (!covered.has(f)) continue
+    for (const t of set) if (!covered.has(t) && demos.includes(t)) { covered.add(t); grew = true }
+  }
+}
+const orphans = demos.filter((f) => !covered.has(f))
 
 if (orphans.length === 0) {
   if (notices.length) console.log(JSON.stringify({ systemMessage: notices.join('\n') }))
