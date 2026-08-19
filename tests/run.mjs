@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。104 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。114 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -479,6 +479,51 @@ console.log('T22 合订引用豁免')
   writeFileSync(join(fx22.kb, 'demos/bind.html'), demoHtml('bind', `<iframe data-src="child-a.html"></iframe>`))
   const r2 = runStop(NEW_SCRIPTS, fx22.root)
   ok(r2.stdout.includes('child-b.html') && !r2.stdout.includes('child-a.html'), '引用断裂即回归孤儿,未断的照旧豁免')
+}
+
+// ============ T23 lazyTabs 懒加载拆页(opt-in;未配/false = 字节冻结,开 = 正文外提 + 壳骨架)============
+console.log('T23 lazyTabs 拆页')
+{
+  const fx23 = mkFixture('fx23', { 's.html': demoHtml('s') })
+  const cfgP = join(fx23.kb, 'kanban.config.json')
+  const idxP = join(fx23.kb, 'index.html')
+  // 造一张决策卡 + 一张 backlog 卡,拆页时应双双外提
+  const decP = join(fx23.kb, 'decisions-manifest.json')
+  const dec = JSON.parse(readFileSync(decP, 'utf8'))
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲' }]
+  writeFileSync(decP, JSON.stringify(dec))
+  const blP = join(fx23.kb, 'backlog-manifest.json')
+  const bl = JSON.parse(readFileSync(blP, 'utf8'))
+  bl.tiers = { 1: '核心' } // 模板词表为空,补一档供卡引用
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: '待办乙' }]
+  writeFileSync(blP, JSON.stringify(bl))
+  runGen(NEW_SCRIPTS, fx23.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('lazyskel') && !off.includes('lazybar') && !existsSync(join(fx23.kb, 'parts')), '未配 lazyTabs:无骨架/进度条/parts 目录')
+  const offSha = sha(idxP)
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.lazyTabs = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx23.kb)
+  ok(sha(idxP) === offSha, 'lazyTabs:false 与未配逐字节相同(冻结)')
+  cfg.lazyTabs = true
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  const r = runGen(NEW_SCRIPTS, fx23.kb)
+  ok(r.status === 0, 'lazyTabs:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  const partD = readFileSync(join(fx23.kb, 'parts/decisions.html'), 'utf8')
+  const partB = readFileSync(join(fx23.kb, 'parts/backlog.html'), 'utf8')
+  ok(partD.includes('id="D1"') && partB.includes('id="BL-1"'), 'parts/ 两 chunk 落盘且含卡正文')
+  ok(!on.includes('id="D1"') && !on.includes('id="BL-1"'), '壳 index 不再含两大 pane 卡正文')
+  ok(on.includes('lazyskel') && on.includes('id="lazybar"') && on.includes('LAZY_PANE_OF'), '骨架 + 进度条 + 卡号→pane 映射入壳')
+  ok(on.includes('"D1":"decisions"') && on.includes('"BL-1":"backlog"'), '深链映射含两卡')
+  ok(on.includes('决策/Demo · 1') && on.includes('Backlog · 1'), 'tab 徽章计数仍烤入壳')
+  // 关回:parts 陈迹清理
+  cfg.lazyTabs = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx23.kb)
+  ok(!existsSync(join(fx23.kb, 'parts')), '关回后 parts/ 目录清除,index 复原单文件')
+  ok(sha(idxP) === offSha, '关回后 index 与冻结基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
