@@ -62,6 +62,13 @@ if (existsSync(GEN)) {
     ...manifests.map((f) => mtime(join(KANBAN, f))),
     ...demos.map((f) => mtime(join(DEMOS, f))),
   )
+  // v0.11.0:lazyTabs 板若 parts/ 缺件(手删/半拷贝),index 再新也是残废态 → 视同过期重跑自愈
+  let lazyBroken = false
+  try {
+    const c = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8'))
+    lazyBroken = c.lazyTabs === true &&
+      !(existsSync(join(KANBAN, 'parts', 'decisions.html')) && existsSync(join(KANBAN, 'parts', 'backlog.html')))
+  } catch {}
   const myVer = readPluginVersion() // null = 安装异常(plugin.json 缺失/损坏/非纯数字版本)
   const stamp = readStamp(indexPath) // 版本串 | null(有产物无戳=旧 gen 产物)| undefined(无产物,首跑)
   const stampNewer = Boolean(myVer && stamp && cmpVer(stamp, myVer) > 0)
@@ -71,7 +78,7 @@ if (existsSync(GEN)) {
   } else if (!myVer) {
     // gen 读不到自身版本必硬失败——别 spawn 一个注定 exit 2 的 gen 造不可自修的阻断循环
     if (newest > indexAt) notices.push(S.noSelfVersion())
-  } else if (newest > indexAt || stampStale) {
+  } else if (newest > indexAt || stampStale || lazyBroken) {
     const r = spawnSync(process.execPath, [GEN], { cwd: KANBAN, stdio: ['ignore', 'ignore', 'pipe'] })
     const err = (r.stderr || r.error?.message || '').toString()
     if (r.status !== 0) {

@@ -16,7 +16,7 @@
  *
  * 改任一 manifest 或被引用文档后重跑;refs/*.html 与 index.html 都提交进 git。
  */
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs'
 import { execSync, execFileSync } from 'node:child_process'
 import { join, resolve, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
@@ -405,6 +405,28 @@ const BRAND_JS = BRAND.replace(/[\\']/g, '\\$&') // 生成 JS 里的单引号字
 const BRAND_RE = BRAND.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') // 生成 JS 里的正则字面量
 // localStorage 前缀:brand slug(换名重置一次偏好,拍板不迁移)
 const LS_PREFIX = BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban'
+// ———— 懒加载拆页(v0.11.0,config.lazyTabs:布尔,默认关)————
+// 关 = 单文件,输出逐字节冻结。开 = 决策/Backlog 两 pane 正文外提 parts/*.html(其余 pane 留壳内),
+// 壳内放骨架卡,切 tab 即时切换、fetch 注入正文(真字节进度走顶部 2px 细线);注入后补课一条链
+// (工具条接线 → 搜索补戳 → 时间筛补戳,全幂等)闭合跨 pane 契约;深链靠 gen 期烤入的
+// 卡号→pane 映射先取再定位;搜索框一有输入即拉全未取 chunk,保住全局搜索/徽章计数口径。
+// 看板只经 serve.py 访问(无 file:// 口径),fetch 无兼容包袱。
+const LAZY = cfg.lazyTabs === true
+const LAZY_CSS = !LAZY ? '' : `
+  #lazybar { position: fixed; top: 0; left: 0; height: 2px; background: var(--brand); width: 0; z-index: 70; opacity: 0; transition: width .12s linear, opacity .3s; }
+  #lazybar.on { opacity: 1; }
+  .lazyskel { padding-top: 6px; }
+  .lazyskel .skel { border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: var(--card); }
+  .lazyskel .sb { height: 10px; border-radius: 5px; background: linear-gradient(90deg, ${tk('seg-bg')} 25%, ${tk('faint-bg')} 45%, ${tk('seg-bg')} 65%); background-size: 200% 100%; animation: lazyshim 1.2s linear infinite; }
+  .lazyskel .sb.w1 { width: 64px; }
+  .lazyskel .sb.w2 { width: 72%; height: 12px; margin-top: 8px; }
+  .lazyskel .sb.w3 { width: 34%; margin-top: 9px; }
+  @keyframes lazyshim { from { background-position: 200% 0 } to { background-position: -200% 0 } }
+  @media (prefers-reduced-motion: reduce) { .lazyskel .sb { animation: none } }
+  .lazyerr { color: var(--mut); font-size: 13px; padding: 34px 0; text-align: center; }
+  .lazyerr button { font: inherit; font-size: 12.5px; color: var(--accent); background: var(--card); border: 1px solid var(--line-strong); border-radius: 7px; padding: 3px 12px; cursor: pointer; margin-left: 6px; }`
+const LAZY_SKEL = !LAZY ? '' : `\n  <div class="lazyskel">${`\n    <div class="skel"><div class="sb w1"></div><div class="sb w2"></div><div class="sb w3"></div></div>`.repeat(4)}\n  </div>\n  `
+const LAZY_BAR = !LAZY ? '' : `\n<div id="lazybar"></div>`
 // ———— 明暗模式的门控注入片(DARK 关时全为 '',逐字节冻结)————
 // color-scheme 令 light-dark() 生效:基态跟随系统,[data-theme] 手动覆盖(手选压过系统)。
 const DK_SCHEME_CSS = !DARK ? '' : `
@@ -1748,6 +1770,82 @@ const SESS_INIT = !SESSION_ON ? '' : `\n    try { const s = localStorage.getItem
 // ============================================================================
 //  组装 index.html
 // ============================================================================
+// ———— 懒加载装配件(v0.11.0;OFF 全为空串/空表,模板逐字节冻结)————
+const LAZY_IDMAP = {}
+if (LAZY) {
+  for (const e of dm.entries) LAZY_IDMAP[e.id] = 'decisions'
+  for (const it of b.items) LAZY_IDMAP[it.id] = 'backlog'
+}
+const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
+const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = LAZY_PANE_OF[id]\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
+const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
+const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
+const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(工具条/搜索/时间筛全幂等重跑)————
+  const LAZY_PANE_OF = ${JSON.stringify(LAZY_IDMAP).replace(/</g, '\\u003c')}
+  const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')} } // 未压缩字节 = 真进度分母
+  let curTf = 0
+  const lazyDone = {}, lazyInflight = {}
+  let lazyRx = 0, lazyExp = 0
+  const lazyBarEl = document.getElementById('lazybar')
+  function lazyBarTick() {
+    if (!lazyBarEl) return
+    if (!lazyExp) { lazyBarEl.classList.remove('on'); lazyBarEl.style.width = '0'; return }
+    lazyBarEl.classList.add('on')
+    lazyBarEl.style.width = Math.min(97, lazyRx / lazyExp * 100) + '%'
+  }
+  function lazyPending() { return Object.keys(LAZY_BYTES).some((p) => !lazyDone[p]) }
+  function ensureAll() { return Promise.all(Object.keys(LAZY_BYTES).map(ensurePane)) }
+  function onPaneInjected(name) {
+    if (name === 'decisions') initToolbar({ pane: 'pane-decisions', pre: 'dec', cardSel: '.deccard', dimAttr: 'type' })
+    if (name === 'backlog') initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })
+    applySearch() // 幂等全文档补 search-hide 戳
+    setTime(curTf) // 补 tf-hide 戳;内含 setLine 终算计数/组显隐/徽章/空态
+    clampScan(document.querySelector('.pane-active'))
+  }
+  function ensurePane(name) {
+    if (!(name in LAZY_BYTES) || lazyDone[name]) return Promise.resolve()
+    if (lazyInflight[name]) return lazyInflight[name]
+    lazyExp += LAZY_BYTES[name]; lazyBarTick()
+    let lzRx = 0 // 本 pane 已收字节:失败时精确退账,不清别家的
+    lazyInflight[name] = fetch('parts/' + name + '.html').then(async (r) => {
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      let text
+      if (r.body && r.body.getReader) { // 逐块读出真字节进度(解压后字节,与分母同口径)
+        const reader = r.body.getReader(), dec = new TextDecoder()
+        let out = ''
+        for (;;) {
+          const c = await reader.read()
+          if (c.done) break
+          lazyRx += c.value.length; lzRx += c.value.length; lazyBarTick()
+          out += dec.decode(c.value, { stream: true })
+        }
+        text = out + dec.decode()
+      } else { text = await r.text() }
+      const pane = document.getElementById('pane-' + name)
+      pane.innerHTML = text
+      pane.removeAttribute('data-lazy-pending')
+      lazyDone[name] = true
+      if (!lazyPending()) { if (lazyBarEl) lazyBarEl.style.width = '100%'; lazyRx = 0; lazyExp = 0; setTimeout(lazyBarTick, 260) }
+      onPaneInjected(name)
+    }).catch(() => {
+      lazyInflight[name] = null
+      lazyExp -= LAZY_BYTES[name]; lazyRx -= lzRx; if (lazyRx < 0) lazyRx = 0; lazyBarTick()
+      const pane = document.getElementById('pane-' + name)
+      if (pane && !lazyDone[name]) pane.innerHTML = '<p class="lazyerr">内容取回失败(网络中断?)<button type="button" class="lazyretry" data-pane="' + name + '">重试</button></p>'
+    })
+    return lazyInflight[name]
+  }
+  document.addEventListener('click', (ev) => {
+    const rb = ev.target.closest('.lazyretry')
+    if (rb) ensurePane(rb.dataset.pane)
+  })
+  function lazySearchInput() {
+    if ((searchInput.value || '').trim() && lazyPending()) ensureAll()
+    applySearch()
+  }
+  // 首屏立稳后空闲预取其余 pane:徽章口径差与搜索首键延迟随之消除;总字节与单文件持平,首屏赢面不变
+  if ('requestIdleCallback' in window) requestIdleCallback(() => ensureAll(), { timeout: 4000 })`
+
 const html = `<!doctype html>
 <!-- ddd-gen v${GEN_VER} -->
 <html lang="${HTML_LANG}">
@@ -2281,7 +2379,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -2296,7 +2394,7 @@ const html = `<!doctype html>
     <button class="tf lf" data-days="7">近 7 天</button>
     <button class="tf lf" data-days="30">近 30 天</button>${DK_TOGGLE_BTN ? `\n    <span class="lf-lbl" style="margin-left:10px"></span>${DK_TOGGLE_BTN}` : ''}
   </div>
-</nav>
+</nav>${LAZY_BAR}
 <div class="wrap" data-line="all">${LANE.lineHintsHtml}
   <div class="tabbar">
     <button class="tab tab-active" data-pane="progress">进度看板</button>
@@ -2308,8 +2406,8 @@ const html = `<!doctype html>
   </div>
   <section class="pane pane-active" id="pane-progress">${progressPane}</section>
   ${pm ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
-  <section class="pane" id="pane-decisions">${decisionsPane}</section>
-  <section class="pane" id="pane-backlog">${backlogPane}</section>
+  <section class="pane" id="pane-decisions"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : decisionsPane}</section>
+  <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>
   <section class="pane" id="pane-docs">${docsPane}</section>
 </div>
 <script>
@@ -2327,7 +2425,7 @@ const html = `<!doctype html>
   const show = (name) => {
     tabs.forEach((t) => t.classList.toggle('tab-active', t.dataset.pane === name))
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('pane-active', p.id === 'pane-' + name))
-    clampScan(document.getElementById('pane-' + name))
+    ${LAZY_SHOW}clampScan(document.getElementById('pane-' + name))
     if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)
   }
   tabs.forEach((t) => t.addEventListener('click', () => { show(t.dataset.pane); history.replaceState(null, '', t.dataset.pane === 'progress' ? '#' : '#' + t.dataset.pane) }))
@@ -2337,7 +2435,7 @@ const html = `<!doctype html>
     if (!id) return
     if (PANES.has(id)) { show(id); return }
     const el = document.getElementById(id)
-    if (!el) return
+    ${LAZY_ROUTE}if (!el) return
     const pane = el.closest('.pane')
     if (pane) show(pane.id.replace('pane-', ''))
     // 目标卡被线路/时间筛掉时先放开筛选,否则跳到 display:none 元素=毫无反应(A 线卡在 C 档下就是这样)
@@ -2423,7 +2521,7 @@ const html = `<!doctype html>
     // tab 徽章随线路重算(决策/Backlog;进度/路径 tab 无数字)
     document.querySelectorAll('.tab[data-label]').forEach((t) => {
       const pane = document.getElementById('pane-' + t.dataset.pane)
-      if (pane) t.textContent = t.dataset.label + ' · ' + nVis(pane, '.lcard')
+      ${LAZY_BADGE}if (pane) t.textContent = t.dataset.label + ' · ' + nVis(pane, '.lcard')
     })
     // 汇总行(决策/Backlog 各一条):总数 + 分状态 chip 重算
     // 进度条按线路重算(与 gen 同口径:separate 不计;非全部档加线路前缀)
@@ -2458,7 +2556,7 @@ const html = `<!doctype html>
   let curLine = '${LANE.defaultLine}'
   let curIter = null // 当前选中的 pathmap 步(selectIter 读写)
   function setTime(days) {
-    tfBtns.forEach((b2) => b2.classList.toggle('tf-active', Number(b2.dataset.days) === days))
+    ${LAZY_TF}tfBtns.forEach((b2) => b2.classList.toggle('tf-active', Number(b2.dataset.days) === days))
     let cutoff = ''
     if (days > 0) {
       const d = new Date(Date.now() - days * 86400000)
@@ -2482,7 +2580,7 @@ const html = `<!doctype html>
     })
     setLine(curLine)
   }
-  if (searchInput) searchInput.addEventListener('input', applySearch)
+  if (searchInput) searchInput.addEventListener('input', ${LAZY ? 'lazySearchInput' : 'applySearch'})
   document.addEventListener('keydown', (ev) => {
     const ae = document.activeElement || {}
     if (ev.key === '/' && searchInput && ae !== searchInput && !/^(INPUT|TEXTAREA)$/.test(ae.tagName || '')) {
@@ -2593,8 +2691,8 @@ const html = `<!doctype html>
     if (el('emptyclear')) el('emptyclear').addEventListener('click', clearAll)${SESS_WIRE}${SESS_INIT}
     toolbars.push({ refresh, clearAll })
   }
-  initToolbar({ pane: 'pane-decisions', pre: 'dec', cardSel: '.deccard', dimAttr: 'type' })
-  initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })
+  ${LAZY ? LAZY_JS : `initToolbar({ pane: 'pane-decisions', pre: 'dec', cardSel: '.deccard', dimAttr: 'type' })
+  initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })`}
 
   // ———— 文档库 Hub(D46 方案B):已读进度(localStorage)+ 更新时间标签 + scrollspy + 段计数/空段/状态行 ————
   const docsPaneEl = document.getElementById('pane-docs')
@@ -2708,6 +2806,18 @@ ${LANE.savedLineJs}
 injectDemoBacknav()
 writeRefs()
 writeFileSync(join(HERE, 'index.html'), darkenDoc(html))
+// v0.11.0 lazyTabs:两大 pane 正文外提 parts/;关闭时清掉陈迹目录(勿留旧 chunk 误导)
+const PARTS_DIR = join(HERE, 'parts')
+if (LAZY) {
+  mkdirSync(PARTS_DIR, { recursive: true })
+  writeFileSync(join(PARTS_DIR, 'decisions.html'), decisionsPane)
+  writeFileSync(join(PARTS_DIR, 'backlog.html'), backlogPane)
+  console.log(`[gen] lazyTabs:parts/decisions ${(Buffer.byteLength(decisionsPane, 'utf8') / 1024).toFixed(0)}KB + parts/backlog ${(Buffer.byteLength(backlogPane, 'utf8') / 1024).toFixed(0)}KB 已外提,壳留骨架`)
+} else if (existsSync(PARTS_DIR)) {
+  // 只清己产的两个文件;目录非空(有别人的东西)绝不整删
+  for (const f of ['decisions.html', 'backlog.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
+  try { if (readdirSync(PARTS_DIR).length === 0) rmSync(PARTS_DIR, { recursive: true }) } catch {}
+}
 console.log(
   `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${blCount} 条` +
     `(${b.groups.map((g) => `${b.statuses[g.id]} ${b.items.filter((it) => it.status === g.id).length}`).join(' / ')})` +

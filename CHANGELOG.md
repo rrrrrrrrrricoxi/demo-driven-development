@@ -11,6 +11,29 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-20
+
+### Added
+- Lazy tab loading, opt-in via `config.lazyTabs: true`, for boards grown heavy
+  on slow links. The two largest panes (decisions, backlog) are emitted as
+  `parts/*.html` and fetched on first visit; the first-paint shell keeps every
+  tab (with baked badge counts), skeleton cards in the lazy panes, and a thin
+  top progress bar driven by real byte counts (the uncompressed pane size is
+  baked in as the denominator, so gzip transfer still reports true progress).
+  After injection the runtime re-wires the pane — toolbar factory, global
+  search stamps, time-filter stamps, all idempotent — so deep links (via a
+  baked card-id → pane map), cross-tab search, lane/time/session filters, and
+  hash routing behave exactly as in single-file mode. A failed fetch shows a
+  quiet retry line. Serving through the bundled `serve.py` is assumed (the
+  documented path). Unset or `false`: single-file output, byte-identical, and
+  any stale `parts/` directory is cleaned up.
+
+### Changed
+- `templates/serve.py` gains the two host-proven patches upstream: a threading
+  server (one slow client no longer blocks everyone) and per-request gzip for
+  text types (~75% transfer cut), plus a `Vary: Accept-Encoding` header and a
+  directory-redirect edge fix.
+
 ## [0.10.0] - 2026-08-19
 
 ### Added
