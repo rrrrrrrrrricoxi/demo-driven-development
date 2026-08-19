@@ -44,19 +44,19 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         ext = os.path.splitext(path)[1].lower()
         accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "")
         if ext in COMPRESSIBLE and os.path.isfile(path) and accepts_gzip:
-            try:
+            try:  # try 只包「读 + 压」:发头之前失败才可安全落回基类;写体异常照常向上抛,绝不在同一连接答第二次
                 with open(path, "rb") as f:
                     body = gzip.compress(f.read(), 6)
-                self.send_response(200)
-                self.send_header("Content-Type", self.guess_type(path))
-                self.send_header("Content-Encoding", "gzip")
-                self.send_header("Vary", "Accept-Encoding")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
             except OSError:
-                pass  # 读失败退回基类路径(404/权限等由它处理)
+                return super().do_GET()
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(path))
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         super().do_GET()
 
 

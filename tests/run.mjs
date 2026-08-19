@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。114 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。117 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -518,6 +518,18 @@ console.log('T23 lazyTabs 拆页')
   ok(on.includes('lazyskel') && on.includes('id="lazybar"') && on.includes('LAZY_PANE_OF'), '骨架 + 进度条 + 卡号→pane 映射入壳')
   ok(on.includes('"D1":"decisions"') && on.includes('"BL-1":"backlog"'), '深链映射含两卡')
   ok(on.includes('决策/Demo · 1') && on.includes('Backlog · 1'), 'tab 徽章计数仍烤入壳')
+  { // 整壳 <script> 编译级断言:任何把整板 JS 打死的语法级回归在此现形(子串断言挡不住)
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/)
+    let compiled = true
+    try { new Function(sc[1]) } catch (e) { compiled = false }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  { // 真进度分母 = parts 实际未压缩字节,烤入值与落盘文件对账
+    const bd = on.match(/decisions: (\d+), backlog: (\d+)/)
+    const { Buffer } = await import('node:buffer')
+    ok(bd && Number(bd[1]) === Buffer.byteLength(partD, 'utf8') && Number(bd[2]) === Buffer.byteLength(partB, 'utf8'), 'LAZY_BYTES 分母与 parts 字节一致')
+  }
+  ok(on.includes('if (lazyDone[lzp]) routeHash()'), '深链重试护栏在壳内(成功翻转才重入,防无限风暴)')
   // 关回:parts 陈迹清理
   cfg.lazyTabs = false
   writeFileSync(cfgP, JSON.stringify(cfg))

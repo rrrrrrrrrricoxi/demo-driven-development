@@ -1777,11 +1777,11 @@ if (LAZY) {
   for (const it of b.items) LAZY_IDMAP[it.id] = 'backlog'
 }
 const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
-const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { ensurePane(LAZY_PANE_OF[id]).then(routeHash); return }\n    `
+const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = LAZY_PANE_OF[id]\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
 const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
 const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
 const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(工具条/搜索/时间筛全幂等重跑)————
-  const LAZY_PANE_OF = ${JSON.stringify(LAZY_IDMAP)}
+  const LAZY_PANE_OF = ${JSON.stringify(LAZY_IDMAP).replace(/</g, '\\u003c')}
   const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')} } // 未压缩字节 = 真进度分母
   let curTf = 0
   const lazyDone = {}, lazyInflight = {}
@@ -1806,6 +1806,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
     if (!(name in LAZY_BYTES) || lazyDone[name]) return Promise.resolve()
     if (lazyInflight[name]) return lazyInflight[name]
     lazyExp += LAZY_BYTES[name]; lazyBarTick()
+    let lzRx = 0 // 本 pane 已收字节:失败时精确退账,不清别家的
     lazyInflight[name] = fetch('parts/' + name + '.html').then(async (r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status)
       let text
@@ -1815,7 +1816,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
         for (;;) {
           const c = await reader.read()
           if (c.done) break
-          lazyRx += c.value.length; lazyBarTick()
+          lazyRx += c.value.length; lzRx += c.value.length; lazyBarTick()
           out += dec.decode(c.value, { stream: true })
         }
         text = out + dec.decode()
@@ -1828,7 +1829,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
       onPaneInjected(name)
     }).catch(() => {
       lazyInflight[name] = null
-      lazyRx = 0; lazyExp = 0; lazyBarTick()
+      lazyExp -= LAZY_BYTES[name]; lazyRx -= lzRx; if (lazyRx < 0) lazyRx = 0; lazyBarTick()
       const pane = document.getElementById('pane-' + name)
       if (pane && !lazyDone[name]) pane.innerHTML = '<p class="lazyerr">内容取回失败(网络中断?)<button type="button" class="lazyretry" data-pane="' + name + '">重试</button></p>'
     })
@@ -1841,7 +1842,9 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
   function lazySearchInput() {
     if ((searchInput.value || '').trim() && lazyPending()) ensureAll()
     applySearch()
-  }`
+  }
+  // 首屏立稳后空闲预取其余 pane:徽章口径差与搜索首键延迟随之消除;总字节与单文件持平,首屏赢面不变
+  if ('requestIdleCallback' in window) requestIdleCallback(() => ensureAll(), { timeout: 4000 })`
 
 const html = `<!doctype html>
 <!-- ddd-gen v${GEN_VER} -->
@@ -2811,7 +2814,9 @@ if (LAZY) {
   writeFileSync(join(PARTS_DIR, 'backlog.html'), backlogPane)
   console.log(`[gen] lazyTabs:parts/decisions ${(Buffer.byteLength(decisionsPane, 'utf8') / 1024).toFixed(0)}KB + parts/backlog ${(Buffer.byteLength(backlogPane, 'utf8') / 1024).toFixed(0)}KB 已外提,壳留骨架`)
 } else if (existsSync(PARTS_DIR)) {
-  rmSync(PARTS_DIR, { recursive: true, force: true })
+  // 只清己产的两个文件;目录非空(有别人的东西)绝不整删
+  for (const f of ['decisions.html', 'backlog.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
+  try { if (readdirSync(PARTS_DIR).length === 0) rmSync(PARTS_DIR, { recursive: true }) } catch {}
 }
 console.log(
   `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${blCount} 条` +
