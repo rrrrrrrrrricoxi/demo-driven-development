@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。101 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。104 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -456,6 +456,29 @@ console.log('T21 darkMode opt-in')
   ok(on.includes('light-dark(#f6f5f2,#242220)'), 'pastel 锚点命中(bg → #242220)')
   const shots = readFileSync(join(fx21.kb, 'shots.html'), 'utf8')
   ok(shots.includes('themetoggle') && shots.includes('light-dark('), 'shots.html 同步暗夜(钮 + light-dark)')
+}
+
+// ============ T22 合订引用豁免(v0.10.0:被挂卡 demo iframe 内嵌的子页不算孤儿)============
+console.log('T22 合订引用豁免')
+{
+  const fx22 = mkFixture('fx22', { 's.html': demoHtml('s') })
+  // 合订页 bind(挂卡)→ 子页 child-a(data-src 双引号,自身再合订 grandchild)/ child-b(src 单引号带 ./)
+  writeFileSync(join(fx22.kb, 'demos/bind.html'), demoHtml('bind', `<iframe data-src="child-a.html"></iframe><iframe src='./child-b.html'></iframe>`))
+  writeFileSync(join(fx22.kb, 'demos/child-a.html'), demoHtml('a', `<iframe data-src="grandchild.html"></iframe>`))
+  writeFileSync(join(fx22.kb, 'demos/child-b.html'), demoHtml('b'))
+  writeFileSync(join(fx22.kb, 'demos/grandchild.html'), demoHtml('g'))
+  writeFileSync(join(fx22.kb, 'demos/stray.html'), demoHtml('stray'))
+  const decP = join(fx22.kb, 'decisions-manifest.json')
+  const dec = JSON.parse(readFileSync(decP, 'utf8'))
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 't', demo: 'demos/bind.html' }]
+  writeFileSync(decP, JSON.stringify(dec))
+  const r = runStop(NEW_SCRIPTS, fx22.root)
+  ok(r.stdout.includes('"decision":"block"') && r.stdout.includes('stray.html'), '真孤儿(无卡无引用)仍阻断')
+  ok(!r.stdout.includes('child-a.html') && !r.stdout.includes('child-b.html') && !r.stdout.includes('grandchild.html'), '合订子页豁免(data-src/src·单双引号·嵌套逐层传递)')
+  // 引用断裂:合订页不再嵌 child-b → 它回归孤儿
+  writeFileSync(join(fx22.kb, 'demos/bind.html'), demoHtml('bind', `<iframe data-src="child-a.html"></iframe>`))
+  const r2 = runStop(NEW_SCRIPTS, fx22.root)
+  ok(r2.stdout.includes('child-b.html') && !r2.stdout.includes('child-a.html'), '引用断裂即回归孤儿,未断的照旧豁免')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

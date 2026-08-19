@@ -21,6 +21,10 @@ description: Demo-driven development workflow for a project that has the demo-dr
 每个功能一条 feature 分支、一个 PR。顺序不可跳:
 
 1. **设计 + demo**:每个过了第 0 步自检的 UI/UX 决策,先做独立自包含 HTML demo(认知验证、秒级选型;并排展示比抽象规则快得多)。设计文稿进 repo(`docs/` 或 `plans/`)。**每个 demo 必挂一张卡**(决策卡 / backlog 卡的 links)—— 守卫会阻断孤儿 demo。
+   **demo 形制(宿主实战定型,v0.10.0 起为机制)**:
+   - **多方案选型 demo 一律单 HTML 文件**,一页含全部变体。禁止一方案一文件——拍板的动作是并排比较,分文件等于把比较成本转嫁给用户,让人在看板与 demo 之间点出点进。
+   - **方案 ≥3 或页面长,左侧带固定可导航目录**(`position:fixed`,点击直达 + scrollspy 高亮)。两个实测坑:①守卫注入的返回栏占顶部 44px,目录的 `top` 要让位(参考值 76px);②页底最后一节的 `offsetTop` 可能永远够不到判定线,须加「滚到底 = 点亮末项」的兜底。
+   - **多轮 demo 时,卡片的 `demo` 字段(主按钮)必须指向最新一轮**;旧轮留在 `links` 里并标注轮次。旧轮的多个文件可按「合订术」归并成单页存档(同源 iframe 组装,交互零损失,配方见 plugin 根 `docs/demo-binding.md`);被已挂卡 demo 用 iframe 内嵌的子页,守卫自动豁免,不必挂占位链接。
 2. **★评审**:人审设计 + demo,拍板后才动代码。别默默替用户拍板。
 3. **代码**:实现落地;改 manifest 后跑 `node app/kanban/gen.mjs` 重生成看板。
 4. **验证**:定义成功标准并跑到验证(测试 / 构建 / 手工 smoke);"写完了"≠"验证过了"。
