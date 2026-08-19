@@ -11,6 +11,18 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-20
+
+### Fixed
+- Theme flash on load (FOUC) when a manual light/dark choice differs from the
+  system preference: the stored choice was only restored by script at the very
+  end of the document, so on large boards or slow links the page rendered in
+  the system theme for seconds before snapping to the chosen one. A three-line
+  synchronous boot script now stamps `data-theme` in `<head>` before the
+  stylesheet on all three page kinds (board, doc pages, screenshot gallery),
+  so the first painted frame is already the chosen theme. Boards without
+  `darkMode` are unaffected (byte-identical).
+
 ## [0.11.0] - 2026-08-20
 
 ### Added

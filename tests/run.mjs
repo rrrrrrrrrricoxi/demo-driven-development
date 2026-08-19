@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。117 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。119 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -456,6 +456,11 @@ console.log('T21 darkMode opt-in')
   ok(on.includes('light-dark(#f6f5f2,#242220)'), 'pastel 锚点命中(bg → #242220)')
   const shots = readFileSync(join(fx21.kb, 'shots.html'), 'utf8')
   ok(shots.includes('themetoggle') && shots.includes('light-dark('), 'shots.html 同步暗夜(钮 + light-dark)')
+  { // v0.11.1 防主题闪错:手选恢复脚本必须前置于首个 <style>(否则大文件弱链路下闪错主题几秒)
+    const BOOT = "_theme')"
+    ok(on.indexOf(BOOT) > -1 && on.indexOf(BOOT) < on.indexOf('<style>'), 'index 主题引导脚本前置于样式')
+    ok(shots.indexOf(BOOT) > -1 && shots.indexOf(BOOT) < shots.indexOf('<style>'), 'shots 主题引导脚本前置于样式')
+  }
 }
 
 // ============ T22 合订引用豁免(v0.10.0:被挂卡 demo iframe 内嵌的子页不算孤儿)============
