@@ -439,6 +439,10 @@ const DK_SCHEME_CSS = !DARK ? '' : `
   .themetoggle:hover { opacity: 1; border-color: color-mix(in srgb, currentColor 42%, transparent); }
   .themetoggle:focus-visible { outline: 2px solid var(--accent, #2383e2); outline-offset: 2px; }`
 // 切换钮(跟随系统 + 手动切;同一 LS key,index/refs/shots 偏好互通)。空 title 走 aria-label。
+// 防主题闪错(FOUC):手选主题的恢复必须在首帧之前——三行同步脚本前置 <head>、样式之前,
+// 否则大文件/弱链路下「按系统渲染几秒 → 末尾脚本才拨回手选」肉眼可见(宿主 app 侧 BL-C49 同款打法)。
+const DK_BOOT = !DARK ? '' : `
+<script>try { var t = localStorage.getItem('${LS_PREFIX}_theme'); if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t) } catch (e) {}</script>`
 const DK_TOGGLE_BTN = !DARK ? '' : `<button type="button" id="themetoggle" class="themetoggle" aria-label="切换明亮 / 暗夜" title="明亮 / 暗夜(跟随系统,可手动切)">☾</button>`
 const DK_TOGGLE_JS = !DARK ? '' : `
   ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在 routeHash() 后会被解析成 routeHash()(…),必须挡开
@@ -893,7 +897,7 @@ function renderRefPage({ title, bodyHtml, srcLabel, headings }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · ${esc(BRAND)} 看板</title>
+<title>${esc(title)} · ${esc(BRAND)} 看板</title>${DK_BOOT}
 <style>${REF_CSS}${DK_SCHEME_CSS}</style>${THEME_STYLE}
 </head>
 <body>
@@ -1046,7 +1050,7 @@ let SHOT_COUNT = 0 // 提级入口徽章用(tab 行「截图 · N ↗」)
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>截图廊 · ${esc(BRAND)} 看板</title>
+<title>截图廊 · ${esc(BRAND)} 看板</title>${DK_BOOT}
 <style>${REF_CSS}${SHOTS_CSS}${DK_SCHEME_CSS}</style>${THEME_STYLE}
 </head>
 <body>
@@ -1851,7 +1855,7 @@ const html = `<!doctype html>
 <html lang="${HTML_LANG}">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(BRAND)} 决策看板</title>
+<title>${esc(BRAND)} 决策看板</title>${DK_BOOT}
 <style>
   /* 令牌对齐 app/demo:暖纸底 + ink 阶梯 + Notion 蓝 accent + teal 品牌/成功色(见 index.css) */
   :root { --ink:#37352f; --mut:#6f6e6b; --faint:#8a8884; --line:#ededec; --line-strong:#e3e2e0;
