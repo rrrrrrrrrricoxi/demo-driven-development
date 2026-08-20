@@ -11,6 +11,18 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-20
+
+### Fixed
+- Horizontal jump when filtering. Filters hide cards with `display: none`, so
+  narrowing a board to a couple of cards collapses the page below one viewport
+  and the vertical scrollbar disappears; the wider viewport re-centres the
+  `margin: 0 auto` container and the whole page shifts sideways. `<html>` now
+  reserves the scrollbar gutter (`scrollbar-gutter: stable`) on the board, doc
+  pages, and the screenshot gallery, so width stays constant across filtering.
+  Only visible with classic (space-taking) scrollbars; no effect where the OS
+  uses overlay scrollbars.
+
 ## [0.11.1] - 2026-08-20
 
 ### Fixed
