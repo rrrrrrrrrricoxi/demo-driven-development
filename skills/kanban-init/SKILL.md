@@ -39,6 +39,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs apply --dir <projectRoot> <同 plan 
 
 v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片第二行)与 `order`(阅读动线序号,点开计已读);顶层可选 `docSegments`(category→地基/流程/操作/存档 段名覆盖映射,缺省映射见 templates/kanban.config.json 的 $comment)。都可后补,缺省不渲染对应 UI。
 
+**存续纪律(v0.11.3)**:init 之后,新写的 spec / 评审稿 / 实施 plan / 交接档 / 运维手册要在**落盘的同一次提交**里进 `config.docs[]` —— 与「demo 必挂卡」同源:产出必须可被发现。详见 ddd-workflow SKILL 第 1 步。
+
 ## 项目换装(v0.4.0)
 
 看板配色/字体的项目级替换,两个旋钮,全部可选、不启用则**生成物逐字节不变**:
