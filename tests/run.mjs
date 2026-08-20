@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。122 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。126 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -461,6 +461,17 @@ console.log('T21 darkMode opt-in')
     ok(on.indexOf(BOOT) > -1 && on.indexOf(BOOT) < on.indexOf('<style>'), 'index 主题引导脚本前置于样式')
     ok(shots.indexOf(BOOT) > -1 && shots.indexOf(BOOT) < shots.indexOf('<style>'), 'shots 主题引导脚本前置于样式')
   }
+}
+
+// ============ T25 文稿必挂文档库(纪律入 SKILL,字面可查)============
+console.log('T25 文稿必挂文档库纪律')
+{
+  const wf = readFileSync(join(REPO, 'skills/ddd-workflow/SKILL.md'), 'utf8')
+  const init = readFileSync(join(REPO, 'skills/kanban-init/SKILL.md'), 'utf8')
+  ok(wf.includes('文稿必挂文档库') && wf.includes('config.docs[]'), 'ddd-workflow 第 1 步载明「文稿必挂文档库」')
+  ok(/同一次提交/.test(wf), '写明「同一次提交」的时机口径(别攒着批量补)')
+  ok(wf.includes('过期或与现状冲突的先修再挂'), '写明「先修再挂」的质量闸(挂错比不挂更伤信任)')
+  ok(init.includes('存续纪律') && init.includes('config.docs[]'), 'kanban-init 也载明存续纪律(init 后新文稿照挂)')
 }
 
 // ============ T24 滚动条槽位常驻(筛选致横向弹动的回归锚)============

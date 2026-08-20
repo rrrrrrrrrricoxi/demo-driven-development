@@ -21,6 +21,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 每个功能一条 feature 分支、一个 PR。顺序不可跳:
 
 1. **设计 + demo**:每个过了第 0 步自检的 UI/UX 决策,先做独立自包含 HTML demo(认知验证、秒级选型;并排展示比抽象规则快得多)。设计文稿进 repo(`docs/` 或 `plans/`)。**每个 demo 必挂一张卡**(决策卡 / backlog 卡的 links)—— 守卫会阻断孤儿 demo。
+   **文稿必挂文档库(v0.11.3 起为机制,与「demo 必挂卡」同源)**:spec / 评审稿 / 实施 plan / 交接档 / 运维手册落进 `docs/` 或 `plans/` 的**同一次提交**里,就要加进 `config.docs[]`(字段 `path` / `out` 纯文件名不重名 / `title` / `baseDir` / `category` / `desc` 一句话定位 / 可选 `order`、`line`),让它在看板文档库可读。**产出必须可被发现**——只躺在仓库里的文稿,协作者和其他会话线都看不见,等于没写。别攒着批量补:攒出来的欠账要靠「`config.docs` 的 path 集合 vs `docs/`+`plans/` 下 .md 求差集」才盘得回来。挂之前先扫一眼内容是否还准,过期或与现状冲突的先修再挂(挂上一份错的比不挂更伤信任),确属只考古的就别挂。
    **demo 形制(宿主实战定型,v0.10.0 起为机制)**:
    - **多方案选型 demo 一律单 HTML 文件**,一页含全部变体。禁止一方案一文件——拍板的动作是并排比较,分文件等于把比较成本转嫁给用户,让人在看板与 demo 之间点出点进。
    - **方案 ≥3 或页面长,左侧带固定可导航目录**(`position:fixed`,点击直达 + scrollspy 高亮)。两个实测坑:①守卫注入的返回栏占顶部 44px,目录的 `top` 要让位(参考值 76px);②页底最后一节的 `offsetTop` 可能永远够不到判定线,须加「滚到底 = 点亮末项」的兜底。

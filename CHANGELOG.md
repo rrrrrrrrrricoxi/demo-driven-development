@@ -11,6 +11,21 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-08-20
+
+### Added
+- A documentation-mounting rule in the `ddd-workflow` skill, promoted from host
+  practice and framed as the sibling of "every demo hangs off a card": a spec,
+  review write-up, implementation plan, handover, or ops runbook goes into
+  `config.docs[]` **in the same commit that lands the file**, so it is readable
+  from the board's document library. Output must be discoverable — a document
+  that only exists in the repo is invisible to collaborators and to other
+  sessions. The rule also states the timing (do not batch up a backlog; the way
+  back is a set-difference between mounted paths and the markdown on disk) and
+  the quality gate (check the content is still accurate; fix a stale or
+  contradicted document before mounting it, and leave the purely-archival ones
+  off). `kanban-init` carries the same rule as a post-init note.
+
 ## [0.11.2] - 2026-08-20
 
 ### Fixed
