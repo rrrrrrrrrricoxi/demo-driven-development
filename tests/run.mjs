@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。119 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。122 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -461,6 +461,18 @@ console.log('T21 darkMode opt-in')
     ok(on.indexOf(BOOT) > -1 && on.indexOf(BOOT) < on.indexOf('<style>'), 'index 主题引导脚本前置于样式')
     ok(shots.indexOf(BOOT) > -1 && shots.indexOf(BOOT) < shots.indexOf('<style>'), 'shots 主题引导脚本前置于样式')
   }
+}
+
+// ============ T24 滚动条槽位常驻(筛选致横向弹动的回归锚)============
+console.log('T24 scrollbar-gutter')
+{
+  const fx24 = mkFixture('fx24', { 's.html': demoHtml('s') })
+  runGen(NEW_SCRIPTS, fx24.kb)
+  const idx = readFileSync(join(fx24.kb, 'index.html'), 'utf8')
+  const shots = readFileSync(join(fx24.kb, 'shots.html'), 'utf8')
+  ok(/html\s*{[^}]*scrollbar-gutter:\s*stable/.test(idx), '主看板 html 预留滚动条槽位')
+  ok(/html\s*{[^}]*scrollbar-gutter:\s*stable/.test(shots), '截图廊(REF_CSS 同源,含文档页)同款')
+  ok(idx.includes('.wrap { max-width: 1060px; margin: 0 auto'), '居中容器仍在(槽位是为它而留,一起钉住)')
 }
 
 // ============ T22 合订引用豁免(v0.10.0:被挂卡 demo iframe 内嵌的子页不算孤儿)============

@@ -815,7 +815,9 @@ const REF_CSS = `${REF_VARS}
   body{margin:0;padding-top:46px;background:var(--bg);color:var(--text);font-family:var(--font-body);
     font-size:14px;line-height:1.72;-webkit-font-smoothing:antialiased}
   code,pre{font-family:var(--font-mono)}
-  html{scroll-behavior:smooth}
+  /* 滚动条槽位常驻:筛选/折叠令页面在「够一屏」与「不够一屏」间跳变时,滚动条出没会改变可用宽度,
+     居中容器随即重新居中 = 整页横向弹动。stable 预留槽位消除跳变(经典滚动条下可见;覆盖式滚动条本就不占宽,零影响) */
+  html{scroll-behavior:smooth;scrollbar-gutter:stable}
   #refnav{position:fixed;top:0;left:0;right:0;height:46px;z-index:50;display:flex;align-items:center;gap:12px;
     padding:0 18px;background:var(--panel);border-bottom:1px solid var(--border);box-shadow:var(--shadow)}
   #refnav a.back{display:inline-flex;align-items:center;gap:6px;text-decoration:none;font-weight:600;color:var(--accent);
@@ -1863,6 +1865,9 @@ const html = `<!doctype html>
           --accent:#2383e2; --accent-deep:#1a6fc4; --accent-soft:#e7f3f8;
           --brand:#0f7b6c; --brand-soft:#eaf5f1;${MAIN_THEME_VARS} }
   * { box-sizing: border-box; }
+  /* 滚动条槽位常驻:筛选把卡筛到不足一屏时纵向滚动条消失 → 可用宽度增加 → .wrap(水平居中)重新居中
+     = 整页横向弹动。stable 预留槽位,筛选前后宽度恒定(覆盖式滚动条环境本就不占宽,零影响) */
+  html { scrollbar-gutter: stable; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 15px/1.6 ${FONT_UI_TK};
          -webkit-font-smoothing: antialiased; }
