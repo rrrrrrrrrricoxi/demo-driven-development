@@ -563,6 +563,10 @@ const relPr = new Map() // PR 号 → pr 记录
 if (rlm) for (const p of rlm.prs || []) if (p && p.number != null) relPr.set(Number(p.number), p)
 // 归版规则(显式 releases[].prs 优先,否则 at ≥ mergedAt 的最早 release)住在 relstage.mjs,
 // 芯片后缀与发布进度 tab 共用同一个 relTagFor —— 两处各写一遍就是两套口径。
+// at 是打 tag 的精确时刻:归版、分组、排序全挂在它上面。缺了不阻断(显式 prs 仍认),但要出声。
+if (rlm) for (const r of rlm.releases || []) if (r && r.tag && !r.at) {
+  console.warn(`[gen] ⚠ release-manifest.json:版本 ${r.tag} 没写 at(打 tag 的精确时刻)—— 归版与分组全靠它,这一版只认显式写在 prs 里的 PR;补上 at,或跑一次 pr-sync.mjs`)
+}
 const REL_IDX = relIndex(rlm ? rlm.releases || [] : [])
 const relSorted = REL_IDX.sorted
 const relTagFor = REL_IDX.tagFor
@@ -2311,7 +2315,8 @@ for (const r of REL_ROWS) REL_COUNT[r.sg.id in REL_COUNT ? r.sg.id : 'other']++
 const relDate = (r) => String(r.p.mergedAt || r.p.closedAt || r.p.createdAt || '')
 // 默认序 = 日期降序;但已归版的行拿「打 tag 时刻」当键 —— 同版共键才保证一版聚成连续一块,
 // 否则一个七月开着没合的 PR 会按自己的日期插进 v0.0.2 组中间,分组头就得重复出现。
-const relSortKey = (r) => (r.sg.tag && REL_AT.get(r.sg.tag)) || relDate(r)
+// 没写 at 的版本退回拿 tag 本身当键(而不是行自己的日期)—— 键只要一版一个常量,同版就还是连续一块。
+const relSortKey = (r) => r.sg.tag ? (REL_AT.get(r.sg.tag) || r.sg.tag) : relDate(r)
 const relCmp = (a, b) => {
   const ka = relSortKey(a), kb = relSortKey(b)
   if (ka !== kb) return ka < kb ? 1 : -1
@@ -2362,10 +2367,11 @@ const relGroupHtml = (tag) => {
 const relTableRows = (() => {
   if (!REL) return ''
   const out = []
+  const seenGh = new Set() // 一个 tag 只出一次分组头:运行期 ghs 按 tag 索引,多出来的那个永远没人收拾
   let prev = null
   for (const r of REL_ROWS.slice().sort(relCmp)) {
     const g = r.sg.tag
-    if (g && g !== prev) out.push(relGroupHtml(g))
+    if (g && g !== prev && !seenGh.has(g)) { out.push(relGroupHtml(g)); seenGh.add(g) }
     prev = g
     out.push(relRowHtml(r))
   }
@@ -2547,7 +2553,7 @@ const REL_JS = !REL ? '' : `
       return !v || d.q.indexOf(v) >= 0
     }
     function picked() { var out = [], k; for (k = 0; k < D.length; k++) if (pass(D[k])) out.push(D[k]); return out }
-    function keyOf(d) { return (d.tag && ATOF[d.tag]) || d.d }
+    function keyOf(d) { return d.tag ? (ATOF[d.tag] || d.tag) : d.d } // 没写 at 的版本拿 tag 当键,同版仍共键
     function cmp(a, b) { // 与 gen 烤入的默认序同一口径:已归版的行拿打 tag 时刻当键 → 一版一块
       if (sortKey === 'n') return (a.n - b.n) * sortDir
       var ka = keyOf(a), kb = keyOf(b)
