@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。230 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。233 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
-// 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)等。
+// 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap 等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -530,6 +530,20 @@ console.log('T24 scrollbar-gutter')
   ok(/html\s*{[^}]*scrollbar-gutter:\s*stable/.test(idx), '主看板 html 预留滚动条槽位')
   ok(/html\s*{[^}]*scrollbar-gutter:\s*stable/.test(shots), '截图廊(REF_CSS 同源,含文档页)同款')
   ok(idx.includes('.wrap { max-width: 1060px; margin: 0 auto'), '居中容器仍在(槽位是为它而留,一起钉住)')
+}
+
+// ============ T34 状态药丸不逐字竖排(长标题行卡的回归锚)============
+// .rhead 是 flex 行,除 .badge 外的兄弟全 flex:none;.badge 一旦可收缩,就与 .rtitle 按比例分摊挤压,
+// 而中文逐字都是断行点 → min-content 只有一个字宽 → 药丸竖成一条,把 min-height:38px 的行撑到 88px。
+console.log('T34 状态药丸 nowrap')
+{
+  const fx34 = mkFixture('fx34', { 's.html': demoHtml('s') })
+  runGen(NEW_SCRIPTS, fx34.kb)
+  const idx = readFileSync(join(fx34.kb, 'index.html'), 'utf8')
+  const badgeRule = (idx.match(/\.badge\s*\{[^}]*\}/) || [''])[0]
+  ok(/white-space:\s*nowrap/.test(badgeRule), '.badge 钉了 white-space: nowrap(逐字可断 → min-content 一字宽)', badgeRule.slice(0, 80))
+  ok(/flex:\s*none/.test(badgeRule), '.badge 钉了 flex: none(行卡里只有 .rtitle 该被压)', badgeRule.slice(0, 80))
+  ok(/\.rtitle\s*\{[^}]*min-width:\s*0/.test(idx), '.rtitle 仍是那个唯一该收缩的(min-width: 0 + 省略号)')
 }
 
 // ============ T22 合订引用豁免(v0.10.0:被挂卡 demo iframe 内嵌的子页不算孤儿)============
