@@ -28,7 +28,7 @@ downgrade would freeze every already-stamped board. See
   paste back into the manifest so a finished round of acceptance lands in git
   rather than in one browser. The card head of a pull request that has a
   checklist gains a link to it and a live `n/N` counter.
-- Three non-blocking guard notices for the acceptance data: `current` pointing
+- Four non-blocking guard notices for the acceptance data: `current` pointing
   at a pull request no checklist covers, one pull request claimed by two
   checklists, duplicate item ids, and card ids that do not exist on the board.
   A malformed manifest produces one notice instead of a crash.
@@ -45,9 +45,12 @@ downgrade would freeze every already-stamped board. See
   into a stage. A merged pull request belongs to the earliest release tagged at
   or after its merge — the precise tagging instant, so something merged an hour
   after the tag counts as not yet shipped; an explicit `releases[].prs` list
-  wins over that interval. Two views of the same data: a sortable, searchable
-  table (number, title, stage, status and date, cards, branch, acceptance
-  progress; shipped ones folded by version, newest open) and a timeline (one bar
+  wins over that interval. Instants, not strings: a hand-written `+08:00` `at`
+  and the UTC stamps `gh` returns can sit in the same file. Two views of the
+  same data: a sortable, searchable table (number, title, stage, status and
+  date, cards, branch, acceptance progress; ordered by stage before date, so
+  open pull requests stay on top instead of sinking below the newest version's
+  block; shipped ones folded by version, newest open) and a timeline (one bar
   per pull request from opened to merged, open ones dashed to today, releases as
   vertical lines). Every table row carries a `pr-<number>` anchor for deep links.
 - `scripts/pr-sync.mjs` — the script that fills that manifest from `gh pr list`
@@ -58,8 +61,10 @@ downgrade would freeze every already-stamped board. See
   network and clock: "today" and "this may be stale" are computed in the browser
   from the baked `syncedAt`.
 - The card chips gained their state suffix (open / draft / merged 08-26 /
-  shipped v0.0.3 / closed), which the release manifest now supplies. It works
-  whenever the file is present, whether or not the tab is on.
+  shipped v0.0.3 / closed, and off-mainline for one based on another branch),
+  which the release manifest now supplies. Same caliber as the tab, so a chip
+  and a table row never disagree about the same pull request. It works whenever
+  the file is present, whether or not the tab is on.
 - `scripts/relstage.mjs` (the stage decision as a pure function) and
   `scripts/kanban-dir.mjs` (one definition of `--dir`, shared by the generator
   and `pr-sync`).

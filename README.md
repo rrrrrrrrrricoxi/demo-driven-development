@@ -116,7 +116,7 @@ node <plugin>/scripts/pr-sync.mjs [--dir <kanban>] [--dry-run]
 ```
 
 which calls `gh` for the repository's pull requests and releases. The generator
-never does: it makes no network call and reads no clock — "today" and "this is
+itself makes no network call and reads no clock — "today" and "this may be
 stale" are computed in the browser. Run the script after opening or merging a
 pull request, and after tagging a release. Left unset, output is byte-identical
 to a board without the feature.
