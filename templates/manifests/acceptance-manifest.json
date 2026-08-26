@@ -1,0 +1,5 @@
+{
+  "$comment": "验收清单源(config.acceptanceTab 为 true 时才读;缺省/false 一律不读,输出逐字节冻结)。current = 正在验收的 PR 号(null = 没有);lists[] 每份清单对应一个或多个 PR(pr 是数字或数字数组)。条目 do/exp/bad/why 是纯文本,允许 **粗体** 与换行,写成数组则按段落渲染;data.<key>.rows 是二维数组(首行表头),渲染成表并可一键复制成 TSV;item.data 引用 data 的键。revision 缺省 1,改动即作废浏览器里的旧勾选。env / rounds / groups / cards / result 都可选:env{url,backend,branch,commit,accounts,notes[]} 是环境交代(accounts 只写角色,不写真人姓名),rounds[{id,label,date}] 与 item.pr 是两个独立维度、筛选芯片按有哪个维度自动出,cards[] 显式补充关联卡(自动反查靠卡上的 pr 字段与 links 里的 /pull/N 链接),result{checked[],at} 是一次验收的勾选结果回写 —— gen 烤成预勾选,页面上的「复制勾选结果」按钮产出的就是这段。",
+  "current": null,
+  "lists": []
+}

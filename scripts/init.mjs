@@ -57,6 +57,9 @@ import { pickStrings } from './strings.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const TPL = join(HERE, '..', 'templates')
 const MANIFEST_FILES = ['manifest.json', 'decisions-manifest.json', 'backlog-manifest.json', 'path-manifest.json']
+// v0.12.0 的两份 opt-in manifest:只在全新看板铺空模板(存量看板升级时不动 —— 铺进去就成了
+// 「板上多了两个没人填的文件」;两个 tab 缺省关,文件不在也毫无影响)。
+const OPTIN_MANIFEST_FILES = ['acceptance-manifest.json', 'release-manifest.json']
 const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--brand X] [--lang zh|en] [--port N] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
 
 let S = pickStrings('zh') // main() 里按 --lang / config.lang 重选
@@ -597,6 +600,7 @@ async function buildPlan(root, st, gi, opt, det) {
   if (!st.hasConfig) plan.creates.push('app/kanban/kanban.config.json')
   // path-manifest 缺省不铺(D45 拍板③:新项目不写该文件,标签页自动不出现);--with-narrative 才铺;已有则原样尊重
   plan.layManifests = MANIFEST_FILES.filter((f) => f !== 'path-manifest.json' || opt.withNarrative)
+    .concat(st.hasConfig ? [] : OPTIN_MANIFEST_FILES)
   for (const f of plan.layManifests) if (!existsSync(join(st.kanban, f))) plan.creates.push(`app/kanban/${f}`)
   plan.narrativeSkip = !st.hasConfig && !opt.withNarrative && !existsSync(join(st.kanban, 'path-manifest.json'))
   for (const d of ['demos', 'shots']) if (!existsSync(join(st.kanban, d))) plan.dirs.push(`app/kanban/${d}/`)

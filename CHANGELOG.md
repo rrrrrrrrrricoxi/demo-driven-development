@@ -9,7 +9,69 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
-## [Unreleased]
+## [0.12.0] - 2026-08-26
+
+### Added
+- An optional `pr` card field on progress, backlog and decision cards — `230`,
+  `[227, 230]`, or `"owner/repo#4"` for another repository. It renders a quiet
+  chip in the card head next to the session seals, linking to the pull request.
+  This is the first structured link between a card and the work that implements
+  it; until now it lived in prose. Cards without the field render
+  byte-identically to 0.11.4.
+- An optional **acceptance tab** (`"acceptanceTab": true` in
+  `kanban.config.json`), fed by a new `acceptance-manifest.json` next to the
+  other manifests. One checklist per pull request (or per group of them):
+  environment notes, grouped items with what to do / what to expect / what is
+  wrong / why, data blocks rendered as tables and copyable as TSV, round and PR
+  filters, tick-off state in `localStorage` keyed by revision, a group index
+  with per-group progress, and a "copy result" button that produces the JSON to
+  paste back into the manifest so a finished round of acceptance lands in git
+  rather than in one browser. The card head of a pull request that has a
+  checklist gains a link to it and a live `n/N` counter.
+- Four non-blocking guard notices for the acceptance data: `current` pointing
+  at a pull request no checklist covers, one pull request claimed by two
+  checklists, duplicate item ids, and card ids that do not exist on the board.
+  A malformed manifest produces one notice instead of a crash.
+- `scripts/prlink.mjs` — the single definition of "which pull requests does this
+  card belong to" (the explicit field, plus `links[]` entries pointing at
+  `/pull/N` in the board's own repository). Chips render only from the explicit
+  field, so an existing board full of pull-request links does not sprout chips.
+- An optional **release progress tab** (`"releaseTab": true`), fed by a new
+  `release-manifest.json`. Every pull request lands in one of three fixed stages
+  — `dev` (open), `test` (merged into the main branch, not yet shipped), `prod`
+  (shipped with a release) — with labels and hints the board may rename, and a
+  board that ships on merge may list only two. Pull requests based on another
+  branch, and ones closed without merging, are counted apart rather than forced
+  into a stage. A merged pull request belongs to the earliest release tagged at
+  or after its merge — the precise tagging instant, so something merged an hour
+  after the tag counts as not yet shipped; an explicit `releases[].prs` list
+  wins over that interval. Instants, not strings: a hand-written `+08:00` `at`
+  and the UTC stamps `gh` returns can sit in the same file. Two views of the
+  same data: a sortable, searchable table (number, title, stage, status and
+  date, cards, branch, acceptance progress; ordered by stage before date, so
+  open pull requests stay on top instead of sinking below the newest version's
+  block; shipped ones folded by version, newest open) and a timeline (one bar
+  per pull request from opened to merged, open ones dashed to today, releases as
+  vertical lines). Every table row carries a `pr-<number>` anchor for deep links.
+- `scripts/pr-sync.mjs` — the script that fills that manifest from `gh pr list`
+  and `gh release list`. It rewrites `prs[]` wholesale, appends release tags it
+  has not seen, and never overwrites a hand-written `note` or `prs` list. If
+  `gh` is missing, logged out, or offline it exits non-zero without touching a
+  byte. `--dry-run` prints what it would write. The generator stays free of
+  network and clock: "today" and "this may be stale" are computed in the browser
+  from the baked `syncedAt`.
+- The card chips gained their state suffix (open / draft / merged 08-26 /
+  shipped v0.0.3 / closed, and off-mainline for one based on another branch),
+  which the release manifest now supplies. Same caliber as the tab, so a chip
+  and a table row never disagree about the same pull request. It works whenever
+  the file is present, whether or not the tab is on.
+- `scripts/relstage.mjs` (the stage decision as a pure function) and
+  `scripts/kanban-dir.mjs` (one definition of `--dir`, shared by the generator
+  and `pr-sync`).
+- A new board created by `init` gets both new manifests as empty templates.
+  Existing boards are left alone — both tabs default to off, and a board with
+  neither key set nor either manifest present generates byte-identical output to
+  0.11.4.
 
 ## [0.11.4] - 2026-08-20
 
