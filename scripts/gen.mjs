@@ -25,6 +25,7 @@ import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
+import { dormantDate, settleOf, staleLink } from './settle.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -526,7 +527,8 @@ function cardLink(href) {
 }
 const linkA = (l) => {
   const r = cardLink(l.href)
-  return `<a href="${esc(r.href)}"${r.ext ? ' target="_blank" rel="noopener"' : ''}>↗ ${esc(l.title)}</a>`
+  const rs = respLinkParts(l) // v0.13.0:本仓 PR 链接补真实状态(无 release-manifest 时恒 null,零差异)
+  return `<a href="${esc(r.href)}"${r.ext ? ' target="_blank" rel="noopener"' : ''}>↗ ${rs ? rs.title : esc(l.title)}${rs ? rs.suffix : ''}</a>`
 }
 
 // ============================================================================
@@ -584,6 +586,43 @@ const prStatus = (p) => {
   if (r.state !== 'merged') return ''
   const tag = relTagFor(r)
   return tag ? `已发 ${tag}` : `已合 ${String(r.mergedAt || '').slice(5, 10)}`
+}
+
+// ———— 进度响应(v0.13.0,定稿 §2):PR 状态回流到卡片 ————
+// 门控与芯片后缀同一条:release-manifest.json 在场才有判断依据,缺文件 = 本节全部空串、零差异。
+// 「PR 合了」≠「卡可以收」——所以只出提示,不静默改 manifest(改写走 pr-sync --settle --write)。
+const RESP = Boolean(rlm)
+const RESP_DORM = 30 // 沉睡阈值(天);天数在浏览器算,gen 只烤日期
+const respOf = (entry) => settleOf(entry, prsOfCard(entry, PR_REPO), relPr, PR_REPO)
+// 卡头芯片:settle / reopen 各一枚;都不是但多 PR 部分合并 → 安静报个「2/3 已合」。
+const respChips = (entry) => {
+  if (!RESP) return ''
+  const s = respOf(entry)
+  if (s.kind === 'settle') return '<span class="rspchip rsp-settle" title="所有关联 PR 都已合并,卡还没收到终态 —— 跑 pr-sync.mjs --settle 看清单">PR 已合 · 待收账</span>'
+  if (s.kind === 'reopen') return '<span class="rspchip rsp-reopen" title="卡已在终态,但还有关联 PR 开着">已收账但 PR 未合</span>'
+  if (s.total > 1 && s.merged > 0 && s.merged < s.total) return `<span class="rspchip rsp-part" title="这张卡跨了 ${s.total} 个 PR">${s.merged}/${s.total} 已合</span>`
+  return ''
+}
+// 沉睡:ready + 有日期 + 一个 PR 都没挂。天数与阈值判定都在浏览器(gen 零时间),这里只烤日期。
+const dormChip = (entry) => {
+  if (!RESP) return ''
+  const d = dormantDate(entry)
+  return d && !prsOfCard(entry, PR_REPO).length ? `<span class="rspdorm" data-dorm="${esc(d)}" hidden></span>` : ''
+}
+// links 里指向本仓 /pull/N 的链接:补真实状态后缀;标题里手写的状态词若已过时,划掉(不改数据)。
+// 复用 prsOfCard 认号 —— 与卡的 PR 集合同一条口径,不另写一遍 href 正则。
+const respLinkParts = (l) => {
+  if (!RESP) return null
+  const p = prsOfCard({ links: [l] }, PR_REPO)[0]
+  if (!p) return null
+  const st = prStatus(p)
+  if (!st) return null // 没同步过的号:不知道就不说
+  const hit = staleLink(l, relPr, PR_REPO)
+  const title = esc(String(l.title ?? ''))
+  return {
+    title: hit ? title.replace(hit.word, `<s class="stale">${hit.word}</s>`) : title,
+    suffix: `<span class="prst">${esc(st)}</span>`,
+  }
 }
 
 // ———— acceptance-manifest.json(config.acceptanceTab === true 才读;缺省即使文件在也不读)————
@@ -1273,7 +1312,7 @@ const rowHead = ({ id, badge, title, tags = '', line = '', date = '' }) => `
 
 const card = (t) => `
   <article class="card lcard rcard card-${t.status}" id="${esc(t.id)}" data-line="${taskLine(t)}" style="--c:${escC(STATUS_COLOR[t.status])}">
-    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t), line: taskLine(t) })}
+    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t) + respChips(t), line: taskLine(t) })}
     <div class="rbody">
       <dl>
         ${t.problem ? `<dt>问题</dt><dd class="x">${rt(t.problem)}</dd>` : ''}
@@ -1497,7 +1536,7 @@ const blCard = (it) => `
       id: it.id,
       badge: `<span class="badge" style="--c:${escC(BL_STATUS_COLOR[it.status])}">${esc(b.statuses[it.status])}</span>`,
       title: it.title,
-      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}`,
+      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}${respChips(it)}${dormChip(it)}`,
       line: blLine(it),
       date: it.date,
     })}
@@ -1585,7 +1624,7 @@ const decCard = (e) => {
   const iters = (e.iters || []).map((c) => `<a class="iterchip" href="#TC${esc(c.slice(1))}" title="迭代 ${esc(c)}">${esc(c)}</a>`).join('')
   const refines = (e.refines || []).map((r) => `<a class="refchip" href="#${esc(r.code)}" title="${esc(r.note)}">⤴ 修订 ${esc(r.code)}</a>`).join('')
   const hasMeta = secs || iters || refines
-  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e)
+  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e) + respChips(e)
   return `
   <article class="deccard lcard rcard dec-${e.status}" id="${esc(e.id)}" data-line="${decLine(e)}" data-date="${esc(e.date || '')}" data-status="${esc(e.status)}" data-type="${esc(tbPrefix(e.id))}" data-search="${esc((e.id + ' ' + e.title).toLowerCase())}"${sessAttr(e)} style="--c:${escC(DEC_STATUS_COLOR[e.status])}">
     ${rowHead({
@@ -2422,6 +2461,27 @@ const relTableRows = (() => {
   return out.join('')
 })()
 
+// 待收账段(v0.13.0,定稿 §2.2-2):settle 的卡按 PR 分组。一张没有就整段不渲染 —— 空段比没有更吵。
+const relSettleGroups = !REL ? [] : (() => {
+  const byPr = new Map()
+  for (const c of CARD_INDEX) {
+    const prs = prsOfCard(c.e, PR_REPO)
+    if (settleOf(c.e, prs, relPr, PR_REPO).kind !== 'settle') continue
+    for (const p of prs) {
+      if (p.repo !== PR_REPO || !relPr.has(p.num)) continue
+      if (!byPr.has(p.num)) byPr.set(p.num, [])
+      byPr.get(p.num).push(c)
+    }
+  }
+  return [...byPr.entries()].sort((a, b) => b[0] - a[0]).map(([n, cards]) => ({ n, cards }))
+})()
+const relSettleCards = new Set(relSettleGroups.flatMap((g) => g.cards.map((c) => c.id)))
+const relSettleHtml = !relSettleGroups.length ? '' : `
+  <div class="rspsettle">
+    <p class="rspsh">待收账 · ${relSettleCards.size} 张卡<span class="rspsm">PR 都合了,卡还停在非终态。跑 <code>pr-sync.mjs --settle</code> 看清单,确认后 <code>--settle --write</code> 收账。</span></p>${relSettleGroups.map((g) => `
+    <p class="rspsr"><a class="prchip" href="${esc(prUrl({ repo: PR_REPO, num: g.n }))}" target="_blank" rel="noopener">PR #${g.n}</a><span class="rspst">${esc((relPr.get(g.n) || {}).title || '')}</span>${g.cards.map((c) => `<a class="relcard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}</a>`).join('')}</p>`).join('')}
+  </div>`
+
 const relStageChip = (id, label, n, hint) =>
   `<button type="button" class="relfb" data-relst="${esc(id)}"${hint ? ` title="${esc(hint)}"` : ''}>${esc(label)} <span class="relfn">${n}</span></button>`
 
@@ -2437,7 +2497,7 @@ const releasePane = !REL ? '' : `
   </div>
   <div class="relbar2">
     <input type="search" class="relq" placeholder="搜号 / 标题 / 分支 / 卡号" aria-label="搜索 PR">
-  </div>${REL_ROWS.length ? '' : `
+  </div>${relSettleHtml}${REL_ROWS.length ? '' : `
   <p class="pane-empty" style="display:block">还没有同步过 PR —— 在看板目录跑一次 <code>node &lt;plugin&gt;/scripts/pr-sync.mjs</code>,它会把 <code>gh</code> 看到的 PR 与版本写进 <code>release-manifest.json</code>。</p>`}
   <div class="relview" data-relpane="table">
     <div class="reltw"><div class="reltsc"><table class="relt">
@@ -2836,6 +2896,44 @@ const RICH_JS = !RICH ? '' : `
     })
   })()`
 
+// ———— 进度响应:门控注入片(RESP 关 = 无 release-manifest 时全为空串)————
+// 颜色只用既有令牌/变量:琥珀走 warn 一族(与「没有验收清单的 PR」那块同源),暗档由 darkStyle 包。
+const RESP_CSS = !RESP ? '' : `
+  /* ============ 进度响应(v0.13.0,release-manifest.json 在场即生效)============ */
+  .rspchip { display: inline-flex; align-items: baseline; font-size: 10.5px; font-weight: 600; line-height: 17px;
+     padding: 0 7px; border-radius: 5px; white-space: nowrap; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
+     font-variant-numeric: tabular-nums; }
+  .rsp-part { font-weight: 400; color: var(--mut); background: ${tk('seg-bg')}; }
+  .rspdorm { font-size: 10.5px; line-height: 17px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* 手写状态词过时:划掉但不删 —— 数据是人写的,看板只表态不改口 */
+  .row.links s.stale { color: var(--faint); text-decoration-thickness: 1px; }
+  .row.links .prst { font-weight: 400; color: var(--mut); margin-left: 5px; font-variant-numeric: tabular-nums; }
+  .rspsettle { border: 1px solid var(--line-strong); border-left: 3px solid ${tk('warn-ink')}; border-radius: 10px;
+     background: ${tk('warn-bg')}; padding: 10px 14px; margin-bottom: 14px; }
+  .rspsh { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .rspsm { margin-left: 9px; font-size: 11.5px; font-weight: 400; color: var(--mut); }
+  .rspsr { margin: 4px 0; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; font-size: 12.5px; }
+  .rspst { color: var(--mut); }`
+// 沉睡天数:gen 只烤 data-dorm 的日期,「今天」永远是浏览器的事(gen 零时间是硬纪律)。
+// 懒加载的 pane 是后到的,注入完要再扫一次(幂等:未过阈值的芯片保持 hidden)。
+const RESP_JS = !RESP ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    function respDorm() {
+      var now = Date.now()
+      document.querySelectorAll('.rspdorm[data-dorm]').forEach(function (el) {
+        var t = Date.parse(el.getAttribute('data-dorm') + 'T00:00:00')
+        if (!isFinite(t)) return
+        var d = Math.floor((now - t) / 86400000)
+        if (d <= ${RESP_DORM}) return
+        el.textContent = '沉睡 ' + d + ' 天'
+        el.hidden = false
+      })
+    }
+    window.respDorm = respDorm
+    respDorm()
+  })()`
+const RESP_INJECTED = !RESP ? '' : `\n    if (window.respDorm) window.respDorm()`
+
 
 // ============================================================================
 //  组装 index.html
@@ -2870,7 +2968,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
     if (name === 'backlog') initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })
     applySearch() // 幂等全文档补 search-hide 戳
     setTime(curTf) // 补 tf-hide 戳;内含 setLine 终算计数/组显隐/徽章/空态
-    clampScan(document.querySelector('.pane-active'))${ACC_INJECTED}
+    clampScan(document.querySelector('.pane-active'))${ACC_INJECTED}${RESP_INJECTED}
   }
   function ensurePane(name) {
     if (!(name in LAZY_BYTES) || lazyDone[name]) return Promise.resolve()
@@ -3454,7 +3552,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -3874,7 +3972,7 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}${RESP_JS}
 </script>
 `
 

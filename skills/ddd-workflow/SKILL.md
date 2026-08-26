@@ -43,6 +43,8 @@ description: Demo-driven development workflow for a project that has the demo-dr
 5. **PR**:开 PR 合入;PR 后推进相关卡状态(gh-pr 提醒 hook 会提示)。
    **开 PR 的同时在卡上写 `pr` 字段**(`230` / `[227, 230]` / `"owner/repo#4"`)—— 卡与实现它的那段工作从此是数据关系,不是散文。
    **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。
+   **合完 PR 用 `pr-sync.mjs --settle` 收账**(v0.13.0):它同步之后列出「关联 PR 都合了、卡还停在非终态」的卡与建议 status(backlog / 进度卡 `done`,决策卡 `live`),**默认只打印**;核对无误再加 `--write`(改 status,并在 `note` / `notes` 末尾追一行时间线)。守卫在收工时也会点名这两种卡(待收账 / 已收账但 PR 未合),非阻断。
+   **`links[]` 的标题不写状态词**:「(开而不合)」「(待合)」「(已合并)」这类手写注解一定会过时 —— 板上有了 `release-manifest.json` 之后,指向本仓 PR 的链接自动带真实状态(开着 / 已合 08-26 / 已发 v0.0.3),写过的旧词若与实际不符会被划掉。标题只写这个 PR 干了什么。
 
 **发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。
 

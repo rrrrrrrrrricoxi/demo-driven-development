@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PR / 版本同步(v0.12.0)。gh → release-manifest.json,给「发布进度」tab 与卡头芯片后缀供数。
 //
-//   node scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run]
+//   node scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run] [--settle [--write]]
 //
 // 为什么是独立脚本而不是 hook:gen 必须零网络零时间(测试床里没有 gh、没有 remote),
 // 「现在几点、GitHub 上是什么状态」只能由一个人/工作流显式触发的脚本落进数据里。
@@ -13,7 +13,16 @@
 //   syncedAt  当前 ISO(脚本可以用时间,gen 不行)
 //   stages / $comment 原样不动 —— 那是人写的口径
 // gh 缺席 / 未登录 / 网络不通 → stderr 一条文案 + exit 1,文件一个字节都不动。
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+//
+// --settle(v0.13.0,定稿 §2.2-4):同步之后列出「关联 PR 都合了、卡还没收到终态」的卡与建议 status。
+// 默认只打印;--write 才改 —— 「PR 合了」≠「卡可以收」(一张卡跨三个 PR、一个 PR 只落一半都常见),
+// 所以机器判断 + 提示 + 一键收账,不做静默改写。--write 只动两个字段:
+//   status → 终态(backlog / 进度卡 done,决策卡 live)
+//   时间线字段(items 的 note、tasks 的 notes)末尾追加一行「【日期 收账】PR#N 已合(自动)」
+//     决策卡没有时间线字段(gen 不渲染 note),不硬塞一个没人读的字段进去,只改 status。
+// 改写前先验一遍「原文 === JSON.stringify(解析结果, null, 2) + 换行」:对不上就整份跳过,
+// 免得一次收账把别人手写的排版整份重排(那种 diff 没人敢看)。落盘走 tmp + rename。
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -21,11 +30,15 @@ import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { cmpAt } from './relstage.mjs'
+import { KIND_TERMINAL, settleOf } from './settle.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KANBAN = resolveKanbanDir()
 const S = loadStrings(KANBAN).prSync
-const DRY = process.argv.slice(2).includes('--dry-run')
+const ARGV = process.argv.slice(2)
+const DRY = ARGV.includes('--dry-run')
+const SETTLE = ARGV.includes('--settle')
+const WROTE_ASKED = ARGV.includes('--write') && SETTLE // --write 是 --settle 的修饰,单独给不作数
 const OUT = join(KANBAN, 'release-manifest.json')
 const die = (msg) => { console.error(msg); process.exit(1) }
 
@@ -116,9 +129,70 @@ for (const r of out.releases) {
 
 out.syncedAt = new Date().toISOString()
 
-if (DRY) {
-  console.log(S.dry(out.prs.length, out.releases.length, added))
+if (DRY) console.log(S.dry(out.prs.length, out.releases.length, added))
+else {
+  writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n')
+  console.log(S.done(out.prs.length, out.releases.length, added, OUT))
+}
+
+// ---- --settle:待收账清单(默认只打印)----
+if (!SETTLE) process.exit(0)
+
+const relPr = new Map(out.prs.map((p) => [p.number, p]))
+const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' } // 决策卡没有时间线字段,只改 status
+const rows = []
+for (const x of MANIFESTS) {
+  const to = KIND_TERMINAL[x.key]
+  if (!to) continue
+  for (const c of x.data[x.key] || []) {
+    if (!c || !c.id) continue
+    const prs = prsOfCard(c, REPO)
+    if (settleOf(c, prs, relPr, REPO).kind !== 'settle') continue
+    rows.push({
+      f: x.f, key: x.key, id: String(c.id), from: String(c.status || ''), to,
+      nums: prs.filter((p) => p.repo === REPO && relPr.has(p.num)).map((p) => p.num).sort((a, b) => a - b),
+    })
+  }
+}
+if (!rows.length) {
+  console.log(S.settleNone())
   process.exit(0)
 }
-writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n')
-console.log(S.done(out.prs.length, out.releases.length, added, OUT))
+console.log(S.settleHead(rows.length))
+for (const r of rows) console.log(S.settleRow(r.id, r.from, r.to, 'PR #' + r.nums.join(' #')))
+if (!WROTE_ASKED || DRY) {
+  console.log(WROTE_ASKED && DRY ? S.settleDryWins() : S.settleDry())
+  process.exit(0)
+}
+
+// ---- --settle --write:只改这两个字段,其它字节不动 ----
+const d = new Date()
+const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const atomicWrite = (p, text) => { // 同目录 tmp + rename:半截文件永远不会出现在 manifest 的位置上
+  const tmp = `${p}.tmp-${process.pid}`
+  writeFileSync(tmp, text)
+  renameSync(tmp, p)
+}
+let settled = 0
+const touched = []
+for (const f of [...new Set(rows.map((r) => r.f))]) {
+  const path = join(KANBAN, f)
+  const text = readFileSync(path, 'utf8')
+  const data = JSON.parse(text)
+  if (JSON.stringify(data, null, 2) + '\n' !== text) { console.error(S.settleReformat(f)); continue }
+  for (const r of rows.filter((x) => x.f === f)) {
+    const card = (data[r.key] || []).find((c) => c && String(c.id) === r.id)
+    if (!card) continue
+    card.status = r.to
+    const nf = NOTE_FIELD[r.key]
+    if (nf) {
+      const line = `【${today} 收账】PR#${r.nums.join(' #')} 已合(自动)`
+      const cur = String(card[nf] || '')
+      card[nf] = cur ? `${cur}\n\n${line}` : line
+    }
+    settled++
+  }
+  atomicWrite(path, JSON.stringify(data, null, 2) + '\n')
+  touched.push(f)
+}
+console.log(S.settleWrote(settled, touched.join(', ')))

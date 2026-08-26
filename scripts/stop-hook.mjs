@@ -18,6 +18,9 @@
 //      各出一条非阻断 notice;清单 JSON 坏了也只报一条,不崩、不拦。
 //   4. 正文长度审计(v0.13.0,只在 config.richText 开时):某长文本字段 > 800 字且卡无 detail
 //      字段 → 一条非阻断 notice,最多点名 5 张(摘要与细节分家的写法规矩见 ddd-workflow)。
+//   5. 进度响应审计(v0.13.0,只在 release-manifest.json 在场时):关联 PR 全合了却没收账的卡、
+//      已收账却还有 PR 开着的卡,各出一条非阻断 notice(各最多点名 5 张 + 总数)。收账动作在
+//      pr-sync.mjs --settle,守卫只提示 —— 静默改 manifest 会跟并行会话抢写。
 //
 // plugin 化改造(设计 §6):
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
@@ -35,6 +38,8 @@ import { fileURLToPath } from 'node:url'
 import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
+import { prsOfCard } from './prlink.mjs'
+import { settleOf } from './settle.mjs'
 
 const KANBAN = detect()
 if (!KANBAN) process.exit(0)
@@ -202,6 +207,36 @@ const orphans = demos.filter((f) => !covered.has(f))
       hits.sort((a, b) => b.n - a.n)
       notices.push(S.richLongText(hits.slice(0, 5), hits.length))
     }
+  }
+}
+
+// ---- ⑤ 进度响应审计(v0.13.0,只在 release-manifest.json 在场时跑):待收账 / 已收账但 PR 未合 ----
+// 与卡上的芯片同一口径(settle.mjs),两边都只提示 —— 「PR 合了」≠「卡可以收」,静默改 manifest
+// 会跟并行会话抢写。收账走 pr-sync.mjs --settle(默认还只打印)。
+{
+  const relPath = join(KANBAN, 'release-manifest.json')
+  if (existsSync(relPath)) {
+    let rlm = null
+    try { rlm = JSON.parse(readFileSync(relPath, 'utf8')) } catch {} // 坏 JSON:gen 已经出过声,守卫不重复吵
+    const relPr = new Map()
+    for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
+    const settle = [], reopen = []
+    if (relPr.size) {
+      for (const [f, k] of [['manifest.json', 'tasks'], ['backlog-manifest.json', 'items'], ['decisions-manifest.json', 'entries']]) {
+        let data = null
+        try { data = JSON.parse(readFileSync(join(KANBAN, f), 'utf8')) } catch { continue }
+        const repo = String((data.instance || {}).ghRepo || '')
+        if (!repo) continue
+        for (const c of data[k] || []) {
+          if (!c || !c.id) continue
+          const s = settleOf(c, prsOfCard(c, repo), relPr, repo)
+          if (s.kind === 'settle') settle.push(String(c.id))
+          else if (s.kind === 'reopen') reopen.push(String(c.id))
+        }
+      }
+    }
+    if (settle.length) notices.push(S.respSettle(settle.slice(0, 5), settle.length))
+    if (reopen.length) notices.push(S.respReopen(reopen.slice(0, 5), reopen.length))
   }
 }
 
