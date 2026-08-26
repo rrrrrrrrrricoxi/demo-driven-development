@@ -1,0 +1,11 @@
+{
+  "$comment": "发布进度源。stages 固定语义 dev(开着)/ test(已合主线未发)/ prod(已随 release 发出),只改 label/hint,可只列两段(缺 test = 合了即发,merged 未归版直接算 prod;缺 dev 不允许);releases[] 每个版本 tag / at(打 tag 的精确时刻,ISO)/ prs(缺省由 pr-sync 按 at 区间自动填,人手写则不覆盖)/ note;prs[] 与 syncedAt 由 scripts/pr-sync.mjs 写,不要手改。开「发布进度」tab:kanban.config.json 里 \"releaseTab\": true。",
+  "stages": [
+    { "id": "dev", "label": "dev", "hint": "开着的 PR" },
+    { "id": "test", "label": "test", "hint": "已合主线,未随版本发出" },
+    { "id": "prod", "label": "prod", "hint": "已随版本发出" }
+  ],
+  "releases": [],
+  "prs": [],
+  "syncedAt": null
+}

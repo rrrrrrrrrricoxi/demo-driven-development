@@ -18,26 +18,15 @@
  */
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs'
 import { execSync, execFileSync } from 'node:child_process'
-import { join, resolve, relative, sep } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { genStrings } from './strings.mjs'
 import { declaredPrs, prsOfCard } from './prlink.mjs'
+import { resolveKanbanDir } from './kanban-dir.mjs'
+import { relIndex, stageOf } from './relstage.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
-function resolveKanbanDir() {
-  const args = process.argv.slice(2)
-  const i = args.indexOf('--dir')
-  if (i >= 0) {
-    if (!args[i + 1]) throw new Error('--dir 需要参数:看板目录(含 kanban.config.json)/ --dir requires an argument: the kanban directory (contains kanban.config.json)')
-    return resolve(args[i + 1])
-  }
-  if (process.env.CLAUDE_PROJECT_DIR) {
-    const d = join(process.env.CLAUDE_PROJECT_DIR, 'app', 'kanban')
-    if (existsSync(join(d, 'kanban.config.json'))) return d
-  }
-  if (existsSync(join(process.cwd(), 'kanban.config.json'))) return process.cwd()
-  throw new Error('定位不到看板目录:传 --dir <kanbanDir>,或设 CLAUDE_PROJECT_DIR(取其 app/kanban),或在含 kanban.config.json 的目录下运行 / Cannot locate the kanban directory: pass --dir <kanbanDir>, set CLAUDE_PROJECT_DIR (its app/kanban is used), or run inside a directory containing kanban.config.json')
-}
+// v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
 const HERE = resolveKanbanDir()
 const REPO_ROOT = join(HERE, '..', '..') // 项目根(读 docs 用)
 const REFS_DIR = join(HERE, 'refs')
@@ -552,29 +541,31 @@ const HAS_PR = ALL_CARDS.some((c) => c && c.pr !== undefined && c.pr !== null)
 const prUrl = (p) => `https://github.com/${p.repo}/pull/${p.num}`
 const prLabel = (p) => (p.repo === PR_REPO ? `PR #${p.num}` : `${p.repo.split('/').pop()}#${p.num}`)
 
-// ———— release-manifest.json(可选;由 pr-sync 写,gen 只读)————
-// 在场才读:给 PR 芯片配状态后缀。缺席 = 后缀恒空,不读、不渲染,零差异。
+// ———— release-manifest.json(由 pr-sync 写,gen 只读)————
+// releaseTab 开 → 必须在场且合法(硬报错);关 → 在场才读,只用来给 PR 芯片配状态后缀。
+// 两者都缺席 = 后缀恒空,不读、不渲染,零差异。
+const REL = cfg.releaseTab === true
+const REL_PATH = join(HERE, 'release-manifest.json')
 let rlm = null
-if (existsSync(join(HERE, 'release-manifest.json'))) {
-  try { rlm = JSON.parse(readFileSync(join(HERE, 'release-manifest.json'), 'utf8')) }
+if (REL) {
+  try { rlm = JSON.parse(readFileSync(REL_PATH, 'utf8')) }
+  catch (e) { throw new Error(GS.relManifestMissing(e.message)) }
+} else if (existsSync(REL_PATH)) {
+  try { rlm = JSON.parse(readFileSync(REL_PATH, 'utf8')) }
   catch (e) { console.warn(`[gen] ⚠ release-manifest.json 无法解析,PR 状态后缀不渲染:${e.message}`) }
 }
+// 段:语义固定,宿主只改 label/hint,可只列两段(缺 test = 合了即发);缺 dev 不允许。
+const REL_STAGES = !REL ? [] : (rlm.stages || []).filter((s) => s && s.id != null).map((s) => ({ id: String(s.id), label: String(s.label ?? s.id), hint: String(s.hint ?? '') }))
+const REL_STAGE_IDS = new Set(REL_STAGES.map((s) => s.id))
+if (REL && !REL_STAGE_IDS.has('dev')) throw new Error(GS.relStagesNoDev())
+const REL_MAIN = (m.instance && m.instance.branch) || '' // 主线分支:base 不是它的 PR 标「非主线」
 const relPr = new Map() // PR 号 → pr 记录
-const relTagOfPr = new Map() // PR 号 → 人手写在 releases[].prs 里的版本
-if (rlm) {
-  for (const p of rlm.prs || []) if (p && p.number != null) relPr.set(Number(p.number), p)
-  for (const r of rlm.releases || []) for (const n of r.prs || []) if (!relTagOfPr.has(Number(n))) relTagOfPr.set(Number(n), r.tag)
-}
-// 归版:显式 releases[].prs 优先;否则找 at ≥ mergedAt 的最早 release(按打 tag 的精确时刻,
-// 同一天在 tag 之后才合的算「未随版本发出」)。
-const relSorted = (rlm ? rlm.releases || [] : []).filter((r) => r && r.at).slice().sort((x, y) => (String(x.at) < String(y.at) ? -1 : 1))
-const relTagFor = (r) => {
-  const explicit = relTagOfPr.get(Number(r.number))
-  if (explicit) return explicit
-  if (!r.mergedAt) return ''
-  const hit = relSorted.find((rel) => String(rel.at) >= String(r.mergedAt))
-  return hit ? hit.tag : ''
-}
+if (rlm) for (const p of rlm.prs || []) if (p && p.number != null) relPr.set(Number(p.number), p)
+// 归版规则(显式 releases[].prs 优先,否则 at ≥ mergedAt 的最早 release)住在 relstage.mjs,
+// 芯片后缀与发布进度 tab 共用同一个 relTagFor —— 两处各写一遍就是两套口径。
+const REL_IDX = relIndex(rlm ? rlm.releases || [] : [])
+const relSorted = REL_IDX.sorted
+const relTagFor = REL_IDX.tagFor
 const prStatus = (p) => {
   if (p.repo !== PR_REPO) return '' // 跨仓 PR 的状态不在本仓 manifest 里
   const r = relPr.get(p.num)
@@ -1903,17 +1894,17 @@ const SESS_INIT = !SESSION_ON ? '' : `\n    try { const s = localStorage.getItem
 //  验收 pane(v0.12.0):当前 PR 面板 + 清单本体 + 已验收 + 没清单的 PR
 //  ACC 关时本节所有产物为空串/空表,index.html 逐字节冻结。
 // ============================================================================
-// 反查:哪些卡属于这份清单(prsOfCard = 显式 pr ∪ links 兼容;再并上清单自己写的 cards[])
-const ACC_CARD_INDEX = !ACC ? [] : [
+// 反查底表:全板卡片(验收清单的关联卡、发布进度表的关联卡列共用;prsOfCard = 显式 pr ∪ links 兼容)
+const CARD_INDEX = !(ACC || REL) ? [] : [
   ...m.tasks.map((t) => ({ e: t, id: t.id, title: t.title, st: m.statuses[t.status] || '' })),
   ...b.items.map((it) => ({ e: it, id: it.id, title: it.title, st: b.statuses[it.status] || '' })),
   ...dm.entries.map((e) => ({ e, id: e.id, title: e.title, st: dm.statuses[e.status] || '' })),
 ]
 const accCardsOf = (l) => {
   const nums = new Set(l.nums)
-  const hit = ACC_CARD_INDEX.filter((c) => prsOfCard(c.e, PR_REPO).some((p) => p.repo === PR_REPO && nums.has(p.num)))
+  const hit = CARD_INDEX.filter((c) => prsOfCard(c.e, PR_REPO).some((p) => p.repo === PR_REPO && nums.has(p.num)))
   for (const id of l.cards) {
-    const c = ACC_CARD_INDEX.find((x) => x.id === String(id))
+    const c = CARD_INDEX.find((x) => x.id === String(id))
     if (!c) accWarn(`清单 ${l.key} 的 cards 引用了不存在的卡号「${id}」`)
     else if (!hit.includes(c)) hit.push(c)
   }
@@ -2288,6 +2279,458 @@ const ACC_JS = !ACC ? '' : `
     window.accSync()
     accRoute()
   })();`
+
+// ============================================================================
+//  发布进度 pane(v0.12.0):release-manifest.json → 三段计数 + 时间线 / 表格两视图
+//  REL 关时本节所有产物为空串/空表,index.html 逐字节冻结。
+//  gen 零时间:「今天」「同步过时」全在浏览器算;这里只烤入 ISO 原文。
+// ============================================================================
+const REL_AT = new Map() // 版本 → 打 tag 时刻(排序键:同一版本的行共用它才聚得成块)
+const REL_NOTE = new Map()
+if (REL) for (const r of rlm.releases || []) if (r && r.tag) { REL_AT.set(String(r.tag), String(r.at || '')); REL_NOTE.set(String(r.tag), String(r.note || '')) }
+const REL_LATEST = relSorted.length ? String(relSorted[relSorted.length - 1].tag) : '' // 最新版:默认展开的那组
+
+// PR 号 → 关联卡。gen 现算,不用 pr-sync 写进 prs[].cards 的那份 —— manifest 改过卡就该跟着变,
+// 同一口径 prsOfCard(显式 pr ∪ links 兼容),与验收 pane 的关联卡是同一套反查。
+const relCardsOfPr = new Map()
+if (REL) for (const c of CARD_INDEX) for (const p of prsOfCard(c.e, PR_REPO)) {
+  if (p.repo !== PR_REPO) continue
+  if (!relCardsOfPr.has(p.num)) relCardsOfPr.set(p.num, [])
+  relCardsOfPr.get(p.num).push(c)
+}
+
+const REL_ROWS = !REL ? [] : (rlm.prs || []).filter((p) => p && p.number != null).map((p) => {
+  const n = Number(p.number)
+  return { n, p, sg: stageOf(p, REL_IDX, REL_MAIN, REL_STAGE_IDS), cards: relCardsOfPr.get(n) || [], list: ACC_BY_PR.get(n) || null }
+})
+const REL_COUNT = { dev: 0, test: 0, prod: 0, other: 0 }
+for (const r of REL_ROWS) REL_COUNT[r.sg.id in REL_COUNT ? r.sg.id : 'other']++
+
+const relDate = (r) => String(r.p.mergedAt || r.p.closedAt || r.p.createdAt || '')
+// 默认序 = 日期降序;但已归版的行拿「打 tag 时刻」当键 —— 同版共键才保证一版聚成连续一块,
+// 否则一个七月开着没合的 PR 会按自己的日期插进 v0.0.2 组中间,分组头就得重复出现。
+const relSortKey = (r) => (r.sg.tag && REL_AT.get(r.sg.tag)) || relDate(r)
+const relCmp = (a, b) => {
+  const ka = relSortKey(a), kb = relSortKey(b)
+  if (ka !== kb) return ka < kb ? 1 : -1
+  if (a.sg.tag !== b.sg.tag) return a.sg.tag < b.sg.tag ? 1 : -1
+  const da = relDate(a), db = relDate(b)
+  if (da !== db) return da < db ? 1 : -1
+  return b.n - a.n
+}
+const relMd = (s) => String(s || '').slice(5, 10) // ISO → MM-DD(只用于展示)
+const REL_LABEL = new Map(REL_STAGES.map((s) => [s.id, s.label]))
+const relStageText = (r) => r.sg.id === 'offline' ? '非主线'
+  : r.sg.id === 'closed' ? '已关闭'
+    : `${REL_LABEL.get(r.sg.id) || r.sg.id}${r.sg.tag ? ` ${r.sg.tag}` : ''}`
+const relStatusText = (r) => {
+  const p = r.p
+  if (p.state === 'open') return `${p.draft ? '草稿' : '开着'} · ${relMd(p.createdAt)}`
+  if (p.state === 'closed') return `已关闭 · ${relMd(p.closedAt || p.createdAt)}`
+  if (p.state === 'merged') return r.sg.tag ? `已发 ${r.sg.tag} · ${relMd(p.mergedAt)}` : `已合 · ${relMd(p.mergedAt)}`
+  return relMd(p.createdAt)
+}
+
+const relRowHtml = (r) => {
+  const p = r.p
+  const cur = ACC && Number(acm.current) === r.n
+  return `
+            <tr class="relr" id="pr-${r.n}" data-relnum="${r.n}">
+              <td class="rc-n"><a href="${esc(p.url || prUrl({ repo: PR_REPO, num: r.n }))}" target="_blank" rel="noopener">#${r.n}</a></td>
+              <td class="rc-t">${esc(p.title || '')}${cur ? '<span class="relnow">验收中</span>' : ''}</td>
+              <td class="rc-s"><span class="relsg s-${r.sg.id}">${esc(relStageText(r))}</span></td>
+              <td class="rc-d">${esc(relStatusText(r))}</td>
+              <td class="rc-k">${r.cards.length ? r.cards.map((c) => `<a class="relcard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}</a>`).join('') : '<span class="relnil">—</span>'}</td>
+              <td class="rc-b">${esc(p.branch || '')}${r.sg.id === 'offline' && p.base ? ` <span class="relbase">→ ${esc(p.base)}</span>` : ''}</td>
+              <td class="rc-a">${r.list ? `<a class="acclink" href="#acc-${r.n}"><span data-acc="${r.n}">0/${r.list.items.length}</span></a>` : '<span class="relnil">—</span>'}</td>
+            </tr>`
+}
+const relGroupHtml = (tag) => {
+  const n = REL_ROWS.filter((x) => x.sg.tag === tag).length
+  const at = REL_AT.get(tag) || ''
+  const note = REL_NOTE.get(tag) || ''
+  const open = tag === REL_LATEST
+  return `
+            <tr class="relgh" data-relgh="${esc(tag)}"${open ? ' data-relopen="1"' : ''}>
+              <td colspan="7"><button type="button" class="relgb"><span class="relgc">${open ? '▾' : '▸'}</span><b>${esc(tag)}</b><span class="relgn"><span class="relgv">${n}</span> 个 PR${at ? ` · ${esc(at.slice(0, 10))}` : ''}</span>${note ? `<span class="relgt">${esc(note)}</span>` : ''}</button></td>
+            </tr>`
+}
+// 表体烤入(而不是运行期生成):#pr-230 深链要在静态 HTML 里就找得到锚,
+// 也让「没开 JS / 抓页面 grep」的人看得到全表。运行期只做排序 / 筛选 / 折叠。
+const relTableRows = (() => {
+  if (!REL) return ''
+  const out = []
+  let prev = null
+  for (const r of REL_ROWS.slice().sort(relCmp)) {
+    const g = r.sg.tag
+    if (g && g !== prev) out.push(relGroupHtml(g))
+    prev = g
+    out.push(relRowHtml(r))
+  }
+  return out.join('')
+})()
+
+const relStageChip = (id, label, n, hint) =>
+  `<button type="button" class="relfb" data-relst="${esc(id)}"${hint ? ` title="${esc(hint)}"` : ''}>${esc(label)} <span class="relfn">${n}</span></button>`
+
+const releasePane = !REL ? '' : `
+  <div class="topbar">
+    <h1>${esc(BRAND)} · 发布进度</h1>
+    <span class="sess">数据源 <code>release-manifest.json</code>(<code>pr-sync.mjs</code> 从 <code>gh</code> 同步,gen 只读、不联网)</span>
+  </div>
+  <div class="relbar">
+    <div class="relf" data-relf="stage"><button type="button" class="relfb on" data-relst="all">全部 <span class="relfn">${REL_ROWS.length}</span></button>${REL_STAGES.map((s) => relStageChip(s.id, s.label, REL_COUNT[s.id] || 0, s.hint)).join('')}${REL_COUNT.other ? relStageChip('other', '其它', REL_COUNT.other, '非主线 base 的 PR 与关掉未合的 PR:不属于任何一段') : ''}</div>
+    <span class="relsync" data-relsync="${esc(String(rlm.syncedAt || ''))}"></span>
+    <span class="relseg" data-relf="view"><button type="button" data-relv="timeline">时间线</button><button type="button" class="on" data-relv="table">表格</button></span>
+  </div>
+  <div class="relbar2">
+    <input type="search" class="relq" placeholder="搜号 / 标题 / 分支 / 卡号" aria-label="搜索 PR">
+  </div>${REL_ROWS.length ? '' : `
+  <p class="pane-empty" style="display:block">还没有同步过 PR —— 在看板目录跑一次 <code>node &lt;plugin&gt;/scripts/pr-sync.mjs</code>,它会把 <code>gh</code> 看到的 PR 与版本写进 <code>release-manifest.json</code>。</p>`}
+  <div class="relview" data-relpane="table">
+    <div class="reltw"><div class="reltsc"><table class="relt">
+      <thead><tr>
+        <th class="relso" data-relsort="n">号 <span class="relar" data-relarr="n"></span></th>
+        <th>标题</th>
+        <th>段</th>
+        <th class="relso" data-relsort="d">状态 · 日期 <span class="relar" data-relarr="d">▾</span></th>
+        <th>关联卡</th>
+        <th>分支</th>
+        <th>验收</th>
+      </tr></thead>
+      <tbody id="reltb">${relTableRows}
+            <tr class="relnone" hidden><td colspan="7">没有匹配的 PR</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="relview" data-relpane="timeline" hidden>
+    <div class="relf relwf" data-relf="win"><button type="button" class="on" data-relwin="60">近 60 天</button><button type="button" data-relwin="all">全部</button></div>
+    <div class="reltlw"><div class="reltlsc" id="reltl"></div></div>
+    <p class="rellg"><span class="relk s-dev"></span>dev<span class="relk s-test"></span>test<span class="relk s-prod"></span>prod<span class="relk s-closed"></span>已关闭 / 非主线<span class="relmore">横杠 = 开 PR → 合并;开着的延到今天并画成虚线;竖线 = 版本;横向可滚</span></p>
+  </div>
+  <div class="reltip" id="reltip" hidden></div>
+  <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>release-manifest.json</code> —— PR 状态与版本由 <code>pr-sync.mjs</code>(调 <code>gh</code>)写入,gen 本身不联网、不取时间;关联卡是每次生成时从三份 manifest 现查的。</p>`
+
+// ———— 发布进度:门控注入片(REL 关时全为空串)————
+const REL_TAB = !REL ? '' : `\n    <button class="tab" data-pane="release">发布进度 · ${REL_COUNT.dev}</button>`
+const REL_PANE_HTML = !REL ? '' : `\n  <section class="pane" id="pane-release">${releasePane}</section>`
+const REL_PANE_ID = !REL ? '' : `, 'release'`
+const REL_SHOW = !REL ? '' : `\n    if (name === 'release' && window.relSync) relSync()`
+const REL_CSS = !REL ? '' : `
+  /* ============ 发布进度 tab(v0.12.0,config.releaseTab)============ */
+  .relbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 9px; }
+  .relbar2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .relf { display: flex; gap: 6px; flex-wrap: wrap; }
+  .relf button { appearance: none; font: inherit; font-size: 11.5px; padding: 2px 11px; border-radius: 99px; cursor: pointer;
+     border: 1px solid var(--line-strong); background: var(--card); color: var(--mut); white-space: nowrap; }
+  .relf button.on { background: var(--brand-soft); border-color: transparent; color: var(--ink); font-weight: 600; }
+  .relfn { font-variant-numeric: tabular-nums; color: var(--faint); }
+  .relf button.on .relfn { color: var(--mut); }
+  .relwf { margin-bottom: 10px; }
+  .relseg { display: inline-flex; margin-left: auto; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+  .relseg button { appearance: none; font: inherit; font-size: 11.5px; padding: 3px 12px; border: 0; cursor: pointer;
+     background: var(--card); color: var(--mut); white-space: nowrap; }
+  .relseg button.on { background: var(--brand-soft); color: var(--ink); font-weight: 600; }
+  .relsync { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .relstale { font-style: normal; color: ${tk('warn-ink')}; }
+  .relq { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--line-strong);
+     background: var(--card); color: var(--ink); min-width: 170px; flex: 0 1 260px; }
+  .reltw { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); overflow: hidden; }
+  .reltsc { max-height: 72vh; overflow: auto; }
+  table.relt { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 880px; }
+  table.relt th { position: sticky; top: 0; z-index: 2; background: ${tk('faint-bg')}; text-align: left; font-weight: 500;
+     color: var(--faint); font-size: 11px; padding: 8px 9px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+  table.relt th.relso { cursor: pointer; user-select: none; }
+  table.relt th.relso:hover { color: var(--ink); }
+  .relar { font-size: 9px; opacity: .55; }
+  table.relt td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.relt tr[hidden] { display: none; }
+  .relr.relhit { background: ${tk('gold-bg')}; }
+  .rc-n { width: 54px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .rc-n a { color: inherit; text-decoration: none; }
+  .rc-n a:hover { color: var(--accent); }
+  .rc-t { min-width: 230px; line-height: 1.5; }
+  .rc-s { width: 88px; }
+  .rc-d { width: 126px; color: var(--mut); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .rc-k { width: 130px; }
+  .rc-b { width: 150px; color: var(--faint); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+     overflow-wrap: anywhere; }
+  .rc-a { width: 74px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .relnil { color: var(--faint); }
+  .relsg { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 5px; font-weight: 600; white-space: nowrap; }
+  .relsg.s-dev { background: ${tk('warn-bg')}; color: ${tk('warn-ink')}; }
+  .relsg.s-test { background: var(--accent-soft); color: var(--accent); }
+  .relsg.s-prod { background: var(--brand-soft); color: var(--brand); }
+  .relsg.s-closed, .relsg.s-offline { background: ${tk('seg-bg')}; color: var(--faint); }
+  .relnow { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 600;
+     background: ${tk('gold-bg')}; color: ${tk('gold-ink')}; vertical-align: 1px; white-space: nowrap; }
+  .relcard { display: inline-block; margin: 0 4px 2px 0; font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 7px;
+     border-radius: 99px; text-decoration: none; color: var(--brand); background: var(--brand-soft); white-space: nowrap; }
+  .relbase { color: var(--faint); }
+  .relgh > td { padding: 0; background: ${tk('faint-bg')}; border-bottom: 1px solid var(--line-strong); }
+  .relgb { display: flex; align-items: baseline; gap: 8px; width: 100%; appearance: none; font: inherit; text-align: left;
+     border: 0; background: none; cursor: pointer; padding: 6px 9px; color: var(--mut); }
+  .relgb:hover { color: var(--ink); }
+  .relgc { flex: none; font-size: 10px; color: var(--faint); }
+  .relgb b { flex: none; font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .relgn { flex: none; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .relgt { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--faint);
+     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .relnone > td, .relnone2 { padding: 22px; text-align: center; color: var(--faint); font-size: 12.5px; }
+  .relnone2 { margin: 0; }
+  .reltlw { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); overflow: hidden; }
+  .reltlsc { overflow-x: auto; }
+  .reltlsvg { display: block; }
+  .relgl { stroke: var(--line); }
+  .relvl { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .7; }
+  text.relax { font-size: 10px; fill: var(--faint); font-variant-numeric: tabular-nums; }
+  text.relvt { font-size: 9.5px; font-weight: 700; fill: var(--accent); }
+  text.rellb { font-size: 9.5px; fill: var(--faint); font-variant-numeric: tabular-nums; }
+  rect.relb { cursor: pointer; }
+  rect.relb.s-dev { fill: ${tk('warn-ink')}; }
+  rect.relb.s-test { fill: var(--accent); }
+  rect.relb.s-prod { fill: var(--brand); }
+  rect.relb.s-closed, rect.relb.s-offline { fill: var(--faint); opacity: .5; }
+  rect.relb.open { fill-opacity: .28; stroke: ${tk('warn-ink')}; stroke-dasharray: 4 3; }
+  .rellg { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 9px 0 0; font-size: 11.5px; color: var(--faint); }
+  .relk { display: inline-block; width: 16px; height: 6px; border-radius: 99px; margin-left: 9px; }
+  .rellg .relk:first-child { margin-left: 0; }
+  .relk.s-dev { background: ${tk('warn-ink')}; }
+  .relk.s-test { background: var(--accent); }
+  .relk.s-prod { background: var(--brand); }
+  .relk.s-closed { background: var(--faint); opacity: .5; }
+  .relmore { margin-left: auto; }
+  .reltip { position: fixed; z-index: 60; max-width: 320px; padding: 7px 10px; border-radius: 8px;
+     border: 1px solid var(--line-strong); background: var(--card); box-shadow: 0 6px 18px rgba(${SHADOW_INK},.16);
+     font-size: 11.5px; line-height: 1.6; color: var(--mut); pointer-events: none; }
+  .reltip b { display: block; font-size: 12px; color: var(--ink); }
+  .reltip span { display: block; }
+  @media (max-width: 820px) { .relseg { margin-left: 0; } .relmore { margin-left: 0; } }`
+// 运行期:筛选 / 搜索 / 排序 / 版本折叠 / 视图切换 / 时间线绘制 / syncedAt 换算。
+// 两视图共用同一份 REL_D 与同一个 pass():筛选一次,表格与时间线看到的是同一批 PR。
+const REL_JS = !REL ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    var D = ${accJson(REL_ROWS.map((r) => ({
+      n: r.n, t: r.p.title || '', s: String(r.p.state || ''), b: String(r.p.branch || ''),
+      c: String(r.p.createdAt || ''), m: String(r.p.mergedAt || ''), x: String(r.p.closedAt || ''),
+      d: relDate(r), st: r.sg.id, tag: r.sg.tag, stx: relStatusText(r), sgx: relStageText(r),
+      k: r.cards.map((c) => c.id),
+      q: `${r.n} ${r.p.title || ''} ${r.p.branch || ''} ${r.cards.map((c) => c.id).join(' ')}`.toLowerCase(),
+    })))}
+    var RELS = ${accJson(relSorted.map((r) => ({ tag: String(r.tag), at: String(r.at) })))}
+    var ATOF = ${accJson(Object.fromEntries(REL_AT))}
+    var pane = document.getElementById('pane-release')
+    if (!pane) return
+    var tb = document.getElementById('reltb')
+    var tip = document.getElementById('reltip')
+    var host = document.getElementById('reltl')
+    var qbox = pane.querySelector('.relq')
+    var none = tb.querySelector('.relnone')
+    var rows = {}, ghs = {}, open = {}, byN = {}
+    var i, list = tb.querySelectorAll('tr.relr')
+    for (i = 0; i < list.length; i++) rows[list[i].dataset.relnum] = list[i]
+    var heads = tb.querySelectorAll('tr.relgh')
+    for (i = 0; i < heads.length; i++) { ghs[heads[i].dataset.relgh] = heads[i]; open[heads[i].dataset.relgh] = heads[i].dataset.relopen === '1' }
+    for (i = 0; i < D.length; i++) byN[D[i].n] = D[i]
+    var sortKey = 'd', sortDir = -1, sfil = 'all', view = 'table', win = '60'
+    var p2 = function (n) { return (n < 10 ? '0' : '') + n }
+    var xe = function (s) { return String(s).replace(/&/g, '&amp;').replace(/\\u003c/g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+
+    function pass(d) {
+      if (sfil !== 'all') {
+        if (sfil === 'other') { if (d.st !== 'offline' && d.st !== 'closed') return false }
+        else if (d.st !== sfil) return false
+      }
+      var v = (qbox.value || '').trim().toLowerCase()
+      return !v || d.q.indexOf(v) >= 0
+    }
+    function picked() { var out = [], k; for (k = 0; k < D.length; k++) if (pass(D[k])) out.push(D[k]); return out }
+    function keyOf(d) { return (d.tag && ATOF[d.tag]) || d.d }
+    function cmp(a, b) { // 与 gen 烤入的默认序同一口径:已归版的行拿打 tag 时刻当键 → 一版一块
+      if (sortKey === 'n') return (a.n - b.n) * sortDir
+      var ka = keyOf(a), kb = keyOf(b)
+      if (ka !== kb) return (ka < kb ? -1 : 1) * sortDir
+      if (a.tag !== b.tag) return (a.tag < b.tag ? -1 : 1) * sortDir
+      if (a.d !== b.d) return (a.d < b.d ? -1 : 1) * sortDir
+      return (a.n - b.n) * sortDir
+    }
+    function renderTable() {
+      var pick = picked().sort(cmp), k
+      for (k = 0; k < D.length; k++) rows[D[k].n].hidden = true
+      for (k in ghs) { ghs[k].hidden = true; ghs[k].dataset.relcnt = '0' }
+      // 搜索时不让折叠藏掉命中 —— 搜到了却看不见,比没搜到更伤
+      var all = (qbox.value || '').trim().length > 0
+      var frag = document.createDocumentFragment(), prev = null, grouped = sortKey === 'd'
+      for (k = 0; k < pick.length; k++) {
+        var d = pick[k], g = grouped && ghs[d.tag] ? d.tag : ''
+        if (g) {
+          if (g !== prev) { ghs[g].hidden = false; frag.appendChild(ghs[g]) }
+          ghs[g].dataset.relcnt = String(Number(ghs[g].dataset.relcnt) + 1)
+        }
+        prev = g
+        rows[d.n].hidden = Boolean(g) && !all && !open[g]
+        frag.appendChild(rows[d.n])
+      }
+      frag.appendChild(none)
+      none.hidden = pick.length > 0
+      tb.appendChild(frag)
+      for (k in ghs) {
+        ghs[k].querySelector('.relgc').textContent = (all || open[k]) ? '▾' : '▸'
+        ghs[k].querySelector('.relgv').textContent = ghs[k].dataset.relcnt
+      }
+    }
+    function day(s) { return Date.parse(String(s).slice(0, 10) + 'T00:00:00Z') }
+    function drawTl() {
+      var now = new Date(), today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+      var pick = picked().sort(function (a, b) { return a.c < b.c ? -1 : a.c > b.c ? 1 : a.n - b.n })
+      var t0 = today - 59 * 864e5, k
+      if (win === 'all') for (k = 0; k < pick.length; k++) { var c0 = day(pick[k].c); if (c0 < t0) t0 = c0 }
+      var bars = []
+      for (k = 0; k < pick.length; k++) {
+        var d = pick[k], s = day(d.c), em = d.m || d.x, e = em ? day(em) : today
+        if (!(e >= t0)) continue // 整段落在窗口左边:这个窗口里没有它
+        if (s < t0) s = t0
+        if (e > today) e = today
+        if (e < s) e = s
+        bars.push({ d: d, s: s, e: e })
+      }
+      var span = Math.max(1, Math.round((today - t0) / 864e5))
+      var PPD = span <= 70 ? 16 : Math.max(3, 1120 / span), PAD = 12, RH = 13, AX = 24
+      var W = span * PPD, H = AX + bars.length * RH + 14
+      if (!bars.length) { host.innerHTML = '<p class="relnone2">这个窗口里没有 PR</p>'; return }
+      var svg = '<svg class="reltlsvg" width="' + Math.round(W + PAD * 2 + 62) + '" height="' + H + '">'
+      var step = span <= 75 ? 7 : span <= 200 ? 14 : 30 // 默认 60 天窗口下一周一格
+      for (k = 0; k <= span; k += step) {
+        var gx = Math.round(PAD + k * PPD)
+        svg += '<line class="relgl" x1="' + gx + '" y1="0" x2="' + gx + '" y2="' + H + '"/>'
+        svg += '<text class="relax" x="' + (gx + 3) + '" y="15">' + new Date(t0 + k * 864e5).toISOString().slice(5, 10) + '</text>'
+      }
+      for (k = 0; k < RELS.length; k++) {
+        var rt = day(RELS[k].at)
+        if (rt < t0 || rt > today) continue
+        var rx = Math.round(PAD + (rt - t0) / 864e5 * PPD)
+        svg += '<line class="relvl" x1="' + rx + '" y1="' + AX + '" x2="' + rx + '" y2="' + H + '"/>'
+        svg += '<text class="relvt" x="' + (rx + 3) + '" y="' + (AX + 10) + '">' + xe(RELS[k].tag) + '</text>'
+      }
+      for (k = 0; k < bars.length; k++) {
+        var b = bars[k]
+        var bx = Math.round(PAD + (b.s - t0) / 864e5 * PPD)
+        var bw = Math.max(4, Math.round((b.e - b.s) / 864e5 * PPD))
+        var by = AX + k * RH + 4
+        svg += '<rect class="relb s-' + b.d.st + (b.d.s === 'open' ? ' open' : '') + '" x="' + bx + '" y="' + by
+          + '" width="' + bw + '" height="6" rx="3" data-relnum="' + b.d.n + '"/>'
+        svg += '<text class="rellb" x="' + (bx + bw + 5) + '" y="' + (by + 6) + '">#' + b.d.n + '</text>'
+      }
+      host.innerHTML = svg + '</svg>'
+    }
+    function showTip(d, ev) {
+      tip.textContent = ''
+      var t = document.createElement('b'); t.textContent = '#' + d.n + ' ' + d.t; tip.appendChild(t)
+      var a = document.createElement('span'); a.textContent = d.stx + ' · ' + d.sgx + (d.b ? ' · ' + d.b : ''); tip.appendChild(a)
+      var c = document.createElement('span'); c.textContent = d.k.length ? '关联卡 ' + d.k.join(' / ') : '无关联卡'; tip.appendChild(c)
+      tip.hidden = false
+      place(ev)
+    }
+    function place(ev) {
+      var x = ev.clientX + 14, y = ev.clientY + 14
+      if (x + 330 > window.innerWidth) x = Math.max(8, ev.clientX - 334)
+      if (y + 110 > window.innerHeight) y = Math.max(8, ev.clientY - 114)
+      tip.style.left = x + 'px'; tip.style.top = y + 'px'
+    }
+    var pinned = false
+    host.addEventListener('mouseover', function (ev) {
+      var r = ev.target.closest ? ev.target.closest('rect.relb') : null
+      if (r && !pinned) showTip(byN[r.dataset.relnum], ev)
+    })
+    host.addEventListener('mousemove', function (ev) { if (!tip.hidden && !pinned) place(ev) })
+    host.addEventListener('mouseleave', function () { if (!pinned) tip.hidden = true })
+    host.addEventListener('click', function (ev) { // 触屏没有 hover:点一下钉住,再点别处收起
+      var r = ev.target.closest ? ev.target.closest('rect.relb') : null
+      if (r) { pinned = false; showTip(byN[r.dataset.relnum], ev); pinned = true }
+      else { pinned = false; tip.hidden = true }
+    })
+    function setView(v, save) {
+      view = v === 'timeline' ? 'timeline' : 'table'
+      var vs = pane.querySelectorAll('[data-relpane]'), k
+      for (k = 0; k < vs.length; k++) vs[k].hidden = vs[k].dataset.relpane !== view
+      var bs = pane.querySelectorAll('[data-relf="view"] button')
+      for (k = 0; k < bs.length; k++) bs[k].classList.toggle('on', bs[k].dataset.relv === view)
+      if (save) { try { localStorage.setItem('${LS_PREFIX}_rel_view', view) } catch (e) {} }
+      pinned = false; tip.hidden = true
+      if (view === 'timeline') drawTl()
+    }
+    function render() { renderTable(); if (view === 'timeline') drawTl() }
+    function stamp() { // syncedAt 烤的是 ISO;本地时间与「可能过时」都在这台浏览器上算(gen 零时间)
+      var el = pane.querySelector('.relsync')
+      var iso = el.dataset.relsync
+      if (!iso) { el.textContent = '尚未同步'; el.classList.add('relstale'); return }
+      var t = Date.parse(iso)
+      if (isNaN(t)) { el.textContent = 'syncedAt ' + iso; return }
+      var d = new Date(t)
+      el.classList.remove('relstale')
+      el.textContent = 'syncedAt ' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+      if (Date.now() - t > 72 * 3600 * 1000) {
+        var w = document.createElement('i'); w.className = 'relstale'; w.textContent = ' · 可能过时'
+        el.appendChild(w)
+      }
+    }
+    pane.addEventListener('click', function (ev) {
+      var t = ev.target
+      if (!t.closest) return
+      var vb = t.closest('[data-relv]')
+      if (vb) { setView(vb.dataset.relv, true); return }
+      var fb = t.closest('[data-relst]')
+      if (fb) {
+        sfil = fb.dataset.relst
+        var bs = pane.querySelectorAll('[data-relst]')
+        for (var k = 0; k < bs.length; k++) bs[k].classList.toggle('on', bs[k] === fb)
+        render()
+        return
+      }
+      var wb = t.closest('[data-relwin]')
+      if (wb) {
+        win = wb.dataset.relwin
+        var ws = pane.querySelectorAll('[data-relwin]')
+        for (var j = 0; j < ws.length; j++) ws[j].classList.toggle('on', ws[j] === wb)
+        drawTl()
+        return
+      }
+      var sh = t.closest('[data-relsort]')
+      if (sh) {
+        var kk = sh.dataset.relsort
+        if (sortKey === kk) sortDir = -sortDir
+        else { sortKey = kk; sortDir = -1 }
+        var ar = pane.querySelectorAll('[data-relarr]')
+        for (var a = 0; a < ar.length; a++) ar[a].textContent = ar[a].dataset.relarr === sortKey ? (sortDir < 0 ? '▾' : '▴') : ''
+        renderTable()
+        return
+      }
+      var gb = t.closest('.relgb')
+      if (gb) { var g = gb.closest('tr').dataset.relgh; open[g] = !open[g]; renderTable() }
+    })
+    qbox.addEventListener('input', render)
+    function relRoute() { // #pr-230 深链:切回表格、展开它所在的版本组、再滚过去
+      var id = decodeURIComponent(location.hash.slice(1))
+      var hit = id.match(/^pr-(\\d+)$/)
+      if (!hit || !rows[hit[1]]) return
+      var d = byN[hit[1]]
+      if (d && d.tag) open[d.tag] = true
+      setView('table', false)
+      renderTable()
+      var tr = rows[hit[1]]
+      tr.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      tr.classList.add('relhit')
+      setTimeout(function () { tr.classList.remove('relhit') }, 1800)
+    }
+    window.relSync = function () { stamp(); render() }
+    try { var sv = localStorage.getItem('${LS_PREFIX}_rel_view'); if (sv === 'timeline' || sv === 'table') view = sv } catch (e) {}
+    setView(view, false)
+    stamp()
+    renderTable()
+    window.addEventListener('hashchange', relRoute)
+    relRoute()
+  })();`
+
 
 // ============================================================================
 //  组装 index.html
@@ -2904,7 +3347,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -2925,14 +3368,14 @@ const html = `<!doctype html>
     <button class="tab tab-active" data-pane="progress">进度看板</button>
     ${pm ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
     <button class="tab" data-pane="decisions" data-label="决策/Demo">决策/Demo · ${decCount}</button>
-    <button class="tab" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}
+    <button class="tab" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}${REL_TAB}
     <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>
     <a class="tab tab-shots" href="shots.html" title="验证截图存档(随 PR 入库)">截图 · ${SHOT_COUNT} ↗</a>
   </div>
   <section class="pane pane-active" id="pane-progress">${progressPane}</section>
   ${pm ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
   <section class="pane" id="pane-decisions"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : decisionsPane}</section>
-  <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>${ACC_PANE_HTML}
+  <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>${ACC_PANE_HTML}${REL_PANE_HTML}
   <section class="pane" id="pane-docs">${docsPane}</section>
 </div>
 <script>
@@ -2951,10 +3394,10 @@ const html = `<!doctype html>
     tabs.forEach((t) => t.classList.toggle('tab-active', t.dataset.pane === name))
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('pane-active', p.id === 'pane-' + name))
     ${LAZY_SHOW}clampScan(document.getElementById('pane-' + name))
-    if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}
+    if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}${REL_SHOW}
   }
   tabs.forEach((t) => t.addEventListener('click', () => { show(t.dataset.pane); history.replaceState(null, '', t.dataset.pane === 'progress' ? '#' : '#' + t.dataset.pane) }))
-  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'${ACC_PANE_ID}])
+  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}])
   function routeHash() {
     const id = decodeURIComponent(location.hash.slice(1))
     if (!id) return
@@ -3324,7 +3767,7 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}
 </script>
 `
 

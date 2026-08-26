@@ -84,6 +84,43 @@ Set `config.darkMode` to `true` and the board (plus doc pages and the screenshot
 
 For boards that have grown heavy on slow links, `config.lazyTabs: true` splits the two biggest tabs (decisions, backlog) into `parts/*.html` fetched on first visit, leaving a small first-paint shell with skeleton cards and a thin real-progress bar. Deep links, global search, and every filter keep working — the runtime re-wires each pane after injection. Requires serving via the bundled `serve.py` (the documented path anyway). Left unset, output is a single file, byte-identical to a board without the feature.
 
+## Acceptance tab (optional)
+
+Set `config.acceptanceTab` to `true` and the board grows a tab fed by a new
+`acceptance-manifest.json` sitting next to the other manifests: one checklist
+per pull request (or per group of them), with the environment under test, items
+built from *what to do / what to expect / what is wrong / why*, data blocks
+rendered as tables and copyable as TSV, and round and pull-request filters.
+Ticks live in `localStorage`, keyed by the checklist's `revision` — bump it and
+the previous round's ticks retire. A "copy result" button produces the JSON to
+paste back into the manifest's `result`, so a finished round of acceptance lands
+in git instead of in one browser. Cards whose pull request has a checklist gain a
+link to it and a live `n/N` counter. Left unset, output is byte-identical to a
+board without the feature; turning it on without the manifest is a hard error.
+
+## Release progress (optional)
+
+Set `config.releaseTab` to `true` and the board grows a tab showing where every
+pull request stands: **dev** (open), **test** (merged into the main branch, not
+yet shipped), **prod** (shipped with a release). A board that ships on merge can
+list only two stages. Pull requests based on another branch, and ones closed
+without merging, are counted separately rather than forced into a stage. The tab
+offers two views of the same data — a table (number, title, stage, status and
+date, cards, branch, acceptance progress; sortable, searchable, released ones
+folded by version) and a timeline (one bar per pull request from opened to
+merged, release tags as vertical lines). The data comes from
+`release-manifest.json`, written by:
+
+```
+node <plugin>/scripts/pr-sync.mjs [--dir <kanban>] [--dry-run]
+```
+
+which calls `gh` for the repository's pull requests and releases. The generator
+never does: it makes no network call and reads no clock — "today" and "this is
+stale" are computed in the browser. Run the script after opening or merging a
+pull request, and after tagging a release. Left unset, output is byte-identical
+to a board without the feature.
+
 ## License
 
 [MIT](LICENSE)

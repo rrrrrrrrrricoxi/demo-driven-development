@@ -39,6 +39,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs apply --dir <projectRoot> <同 plan 
 
 v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片第二行)与 `order`(阅读动线序号,点开计已读);顶层可选 `docSegments`(category→地基/流程/操作/存档 段名覆盖映射,缺省映射见 templates/kanban.config.json 的 $comment)。都可后补,缺省不渲染对应 UI。
 
+**卡片可选字段(v0.12.0)**:三类卡(进度 task / backlog / 决策)都可加 `pr` —— `230`(本仓,仓取 `instance.ghRepo`)、`[227, 230]`(一张卡跨几个 PR)、`"owner/repo#4"`(跨仓)。卡头长出一枚安静的 PR 芯片;有 `release-manifest.json` 时芯片带状态后缀(开着 / 草稿 / 已合 08-26 / 已发 v0.0.3 / 已关闭)。卡上没写这个字段 = 输出逐字节不变 —— `links[]` 里指向本仓 `/pull/N` 的链接**不会**自作主张长芯片(存量看板一升级就长满芯片,那是伤信任的),但它算进「PR ↔ 卡」的反查集合。
+
 **卡片可选字段(v0.11.4)**:决策卡与 backlog 卡可加 `shots`(现场截图,`["x.png"]` 或 `[{file,caption}]`;纯文件名默认取 `shots/` 下,文件名以卡号打头可与截图廊自动归组),backlog 卡可加 `repro`(复现流程,字符串或步骤数组)。两者都缺省 = 输出逐字节不变。
 
 **存续纪律(v0.11.3)**:init 之后,新写的 spec / 评审稿 / 实施 plan / 交接档 / 运维手册要在**落盘的同一次提交**里进 `config.docs[]` —— 与「demo 必挂卡」同源:产出必须可被发现。详见 ddd-workflow SKILL 第 1 步。
@@ -109,6 +111,48 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
 `prefers-color-scheme`,顶栏多一个 ☾/☀ 手动切换钮(记忆手选、盖过系统,三类页面共享偏好)。
 实现是每个色值烤成 CSS `light-dark(浅,深)`(连逐卡内联状态色也随主题变),深色是一套暖 pastel
 (暖炭底 #242220,强调色压饱和),需现代浏览器(2024+)。**字节冻结**:不配或 `false` 时输出逐字节不变。
+
+## 「验收」tab(acceptanceTab,v0.12.0:opt-in)
+
+`config.acceptanceTab` 缺省关;设 `true` 后看板多一个「验收」tab,清单源是看板目录的 `acceptance-manifest.json`
+(**开了这个键就必须有这个文件**,读不到 = 硬报错;缺省/`false` 时即使文件在场也不读,保字节冻结)。模板见 plugin 的
+`templates/manifests/acceptance-manifest.json`。
+
+- **一份清单对应一个或多个 PR**:`pr`(数字或数组)、`title`、`revision`(缺省 1)、`env{url,backend,branch,commit,accounts,notes[]}`、
+  `rounds[{id,label,date}]`、`groups[{id,title,tip}]`、`items[{id,group,pr?,round?,key?,title,do,data?[],exp,bad?,why?}]`、
+  `data{key:{title,rows}}`(rows 是二维数组,首行表头,页面渲染成表并可一键复制成 TSV)、`result?{checked[],at}`、`cards?[]`。
+- **`current`** = 正在验收的那个 PR 号(`null` = 没有,合法);它那份清单展开置顶,其余折叠进「排队中 / 已验收」。
+- **勾选存这台浏览器**(`localStorage`,键含 PR 串与 `revision`)。清单正文改了就把 `revision` 加一 —— 旧勾选当场作废,
+  这是「上一轮的勾不算数」的诚实写法。「复制勾选结果」按钮产出 `{"checked":[…],"at":"…"}`,人贴回清单的 `result` 才进 git;
+  gen 读 `result` 烤成预勾选初值。
+- **条目正文**只认 `**粗体**` 与换行,其余一律转义 —— 清单是人写的正文,不是可信 HTML。
+- **守卫**会为四种坏数据各出一条非阻断 notice:`current` 没有清单覆盖、同一 PR 落进两份清单、条目 id 重复、`cards` 引用不存在的卡号。
+- **字节冻结**:不配或 `false` 时输出逐字节不变。
+
+## 「发布进度」tab(releaseTab + pr-sync,v0.12.0:opt-in)
+
+`config.releaseTab` 缺省关;设 `true` 后看板多一个「发布进度」tab,数据源是 `release-manifest.json`(同样**开了就必须在场**)。
+模板见 `templates/manifests/release-manifest.json`。
+
+- **三段语义固定**:`dev`(开着的 PR)/ `test`(已合主线,未随版本发出)/ `prod`(已随 release 发出)。宿主只改 `label` / `hint`,
+  **可以只列两段**(缺 `test` = 合了即发,merged 未归版直接算 prod 且不带版本号);**不能省掉 `dev`**(硬报错)。
+  `base` 不是 `instance.branch` 的 PR 标「非主线」、关掉未合的标「已关闭」,两者都不入三段,计进「其它」。
+- **归版按打 tag 的精确时刻**:一个 merged 的 PR 归进 `at ≥ mergedAt` 的最早那个 release —— 同一天但在 tag 之后才合的,
+  算「未随版本发出」。`releases[].prs` 写了就以显式为准(人的裁量优先于区间推算)。
+- **两个视图切换**:表格(号 / 标题 / 段 / 状态·日期 / 关联卡 / 分支 / 验收进度;表头可按日期与号排序,搜索,已发按版本折叠、
+  最新版展开)与时间线(横轴日期,一条横杠 = 开 PR → 合并,开着的延到今天并画成虚线,release 是竖线)。默认表格,选择记在浏览器里。
+  每行有 `id="pr-<号>"` 锚,`#pr-230` 深链直达。
+- **数据由脚本写,不由 gen 取**:
+
+  ```
+  node <plugin>/scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run]
+  ```
+
+  它调 `gh pr list` / `gh release list`,全量重写 `prs[]`(号降序,`cards` 反查三份 manifest)、追加新 tag(已有条目的 `note` 与
+  人手写的 `prs` 一律不覆盖)、写 `syncedAt`。gh 缺席 / 未登录 / 网络不通 → 一条文案 + exit 1,**文件一个字节都不动**。
+  开/合 PR 之后、发版打完 tag 之后各跑一次。**gen 永远不联网、不读时钟** —— 页面上的「今天」与「可能过时」都在浏览器里算。
+- **卡头芯片的状态后缀**只要 `release-manifest.json` 在场就生效,不需要开这个 tab。
+- **字节冻结**:不配或 `false` 时输出逐字节不变;两份 manifest 都不在场时同样不变。
 
 ## init 段 token 硬规则(命令式,不是建议)
 

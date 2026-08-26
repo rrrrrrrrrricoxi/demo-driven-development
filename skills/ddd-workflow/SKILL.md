@@ -32,7 +32,12 @@ description: Demo-driven development workflow for a project that has the demo-dr
 2. **★评审**:人审设计 + demo,拍板后才动代码。别默默替用户拍板。
 3. **代码**:实现落地;改 manifest 后跑 `node app/kanban/gen.mjs` 重生成看板。
 4. **验证**:定义成功标准并跑到验证(测试 / 构建 / 手工 smoke);"写完了"≠"验证过了"。
+   **要人实测的,清单写进 `acceptance-manifest.json`,不再手搭 HTML 页**(v0.12.0,板上开了 `acceptanceTab` 时):一份清单挂一个或多个 PR,`current` 指向正在测的那个;条目写「做什么 / 预期 / 不对的样子 / 为什么」,数据块用 `rows` 二维数组。人在页面上勾,勾完点「复制勾选结果」,把那段 JSON 贴回清单的 `result` —— 勾选结果这才进 git,而不是留在某一台浏览器里。清单正文改了就把 `revision` 加一(旧勾选当场作废)。
 5. **PR**:开 PR 合入;PR 后推进相关卡状态(gh-pr 提醒 hook 会提示)。
+   **开 PR 的同时在卡上写 `pr` 字段**(`230` / `[227, 230]` / `"owner/repo#4"`)—— 卡与实现它的那段工作从此是数据关系,不是散文。
+   **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。
+
+**发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。
 
 ## 日常段 token 硬规则(命令式,不是建议)
 
