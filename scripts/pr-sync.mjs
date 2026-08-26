@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
+import { cmpAt } from './relstage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KANBAN = resolveKanbanDir()
@@ -69,8 +70,8 @@ for (const r of ghRels) {
   out.releases.push({ tag: String(r.tagName), at: String(r.publishedAt || ''), note: '' })
   added++
 }
-// at 升序(区间归属靠它;gh 给的顺序不保证)
-out.releases.sort((a, b) => (String((a || {}).at) < String((b || {}).at) ? -1 : 1))
+// at 升序(区间归属靠它;gh 给的顺序不保证)。比时刻不比字面:人手写的 at 常带 +08:00,gh 给的是 Z。
+out.releases.sort((a, b) => cmpAt((a || {}).at, (b || {}).at))
 
 // ---- prs:全量重写(gh 是真源)----
 const MAIN = inst('branch')
@@ -106,7 +107,7 @@ for (const r of out.releases) {
   const at = String(r.at || '')
   if (!Array.isArray(r.prs)) {
     r.prs = out.prs
-      .filter((p) => p.state === 'merged' && p.mergedAt && p.mergedAt <= at && p.mergedAt > prev && (!MAIN || !p.base || p.base === MAIN))
+      .filter((p) => p.state === 'merged' && p.mergedAt && cmpAt(p.mergedAt, at) <= 0 && cmpAt(p.mergedAt, prev) > 0 && (!MAIN || !p.base || p.base === MAIN))
       .map((p) => p.number)
       .sort((a, b) => a - b)
   }

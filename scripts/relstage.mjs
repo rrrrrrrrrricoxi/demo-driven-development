@@ -10,16 +10,28 @@
 // 归版规则(与 gen 的芯片后缀同源):releases[].prs 显式写了就以显式为准;否则找 at ≥ mergedAt
 // 的最早 release —— at 是打 tag 的精确时刻,同一天在 tag 之后才合的算「未随版本发出」。
 
+/**
+ * at / mergedAt 比时刻,不比字面。pr-sync 落的是 gh 给的 UTC(`Z`),而 releases[].at 是人手写的,
+ * 常带 +08:00 —— 两种混在一起按字符串比就没意义:10:00+08:00(=02:00Z)会被当成比 05:00Z 晚。
+ * 有一边解析不出来(空串 / 写错)才退回字面比较,至少还是个稳定次序。
+ */
+export function cmpAt(x, y) {
+  const a = Date.parse(String(x)), b = Date.parse(String(y))
+  if (Number.isFinite(a) && Number.isFinite(b)) return a < b ? -1 : a > b ? 1 : 0
+  const sx = String(x), sy = String(y)
+  return sx < sy ? -1 : sx > sy ? 1 : 0
+}
+
 /** releases[] → 归版索引(sorted 按 at 升序;tagOfPr = 人手写在 releases[].prs 里的归属) */
 export function relIndex(releases) {
-  const sorted = (releases || []).filter((r) => r && r.at).slice().sort((x, y) => (String(x.at) < String(y.at) ? -1 : 1))
+  const sorted = (releases || []).filter((r) => r && r.at).slice().sort((x, y) => cmpAt(x.at, y.at))
   const tagOfPr = new Map()
   for (const r of releases || []) for (const n of (r && r.prs) || []) if (!tagOfPr.has(Number(n))) tagOfPr.set(Number(n), r.tag)
   const tagFor = (pr) => {
     const explicit = tagOfPr.get(Number(pr.number))
     if (explicit) return explicit
     if (!pr.mergedAt) return ''
-    const hit = sorted.find((rel) => String(rel.at) >= String(pr.mergedAt))
+    const hit = sorted.find((rel) => cmpAt(rel.at, pr.mergedAt) >= 0)
     return hit ? hit.tag : ''
   }
   return { sorted, tagOfPr, tagFor }
