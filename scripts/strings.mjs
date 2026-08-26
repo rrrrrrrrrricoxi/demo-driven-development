@@ -32,7 +32,16 @@ const zh = {
   accUnknownCard: (list, id) =>
     `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
   ghprRemind:
-    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成)。与看板无关则忽略。',
+    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成);顺手在卡上写 `pr` 字段(如 "pr": 230),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
+  prSync: {
+    noRepo: () => 'pr-sync:三份 manifest 的 instance.ghRepo 都是空的,不知道该同步哪个仓 —— 先在 manifest.json 的 instance.ghRepo 填 "owner/repo"。',
+    ghMissing: () => 'pr-sync:找不到 gh 命令。装 GitHub CLI(https://cli.github.com)并 `gh auth login` 之后重跑;本次一个字节都没写。',
+    ghFailed: (what, err) => `pr-sync:${what} 失败(gh 未登录 / 无权访问该仓 / 网络不通都会这样):${err}\n本次一个字节都没写,修好后重跑。`,
+    ghBadJson: (what, err) => `pr-sync:${what} 的输出不是合法 JSON(gh 版本太旧?需要支持 --json 的 gh 2.x):${err}\n本次一个字节都没写。`,
+    manifestBad: (err) => `pr-sync:release-manifest.json 存在但不是合法 JSON,拒绝覆盖(人手写的 note/prs 可能就在里面):${err}`,
+    done: (prs, rels, added, file) => `pr-sync:${prs} 个 PR · ${rels} 个版本(新增 ${added})→ ${file}`,
+    dry: (prs, rels, added) => `pr-sync --dry-run:将写入 ${prs} 个 PR · ${rels} 个版本(新增 ${added});未写文件。`,
+  },
   init: {
     portCaveat: zhPortCaveat,
     scenario: {
@@ -196,7 +205,16 @@ const en = {
   accUnknownCard: (list, id) =>
     `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
   ghprRemind:
-    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically). Ignore if unrelated to the board.',
+    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically), and put the `pr` field on the card (e.g. "pr": 230); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
+  prSync: {
+    noRepo: () => 'pr-sync: instance.ghRepo is empty in all three manifests, so there is no repository to sync — set it to "owner/repo" in manifest.json first.',
+    ghMissing: () => 'pr-sync: the gh command was not found. Install the GitHub CLI (https://cli.github.com), run `gh auth login`, then try again; nothing was written.',
+    ghFailed: (what, err) => `pr-sync: ${what} failed (not logged in, no access to the repository, or no network all look like this): ${err}\nNothing was written; fix it and re-run.`,
+    ghBadJson: (what, err) => `pr-sync: the output of ${what} is not valid JSON (a gh old enough to lack --json?; gh 2.x is required): ${err}\nNothing was written.`,
+    manifestBad: (err) => `pr-sync: release-manifest.json exists but is not valid JSON, refusing to overwrite it (hand-written notes and prs may be in there): ${err}`,
+    done: (prs, rels, added, file) => `pr-sync: ${prs} pull request(s) · ${rels} release(s) (${added} new) → ${file}`,
+    dry: (prs, rels, added) => `pr-sync --dry-run: would write ${prs} pull request(s) · ${rels} release(s) (${added} new); nothing written.`,
+  },
   init: {
     portCaveat: enPortCaveat,
     scenario: {
@@ -382,6 +400,8 @@ const genZh = {
   unknownRefToken: (n) => `未知 refs 主题令牌 ${n}`,
   lanesInvalid: (v) => `kanban.config.json lanes 非法:${v};合法值:null 或对象 { "ids": [...], ... }(见 kanban-init SKILL)`,
   accManifestMissing: (err) => `kanban.config.json 开了 acceptanceTab,但看板目录的 acceptance-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/acceptance-manifest.json;不想开就把 acceptanceTab 去掉)`,
+  relManifestMissing: (err) => `kanban.config.json 开了 releaseTab,但看板目录的 release-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/release-manifest.json,内容由 scripts/pr-sync.mjs 填;不想开就把 releaseTab 去掉)`,
+  relStagesNoDev: () => 'release-manifest.json 的 stages 里没有 id 为 "dev" 的段:dev(开着的 PR)是必备段,宿主可以只列两段但不能省掉 dev(缺 test = 合了即发,是允许的)',
 }
 const genEn = {
   cfgMissingBrand: () => 'kanban.config.json is missing "brand"',
@@ -410,5 +430,7 @@ const genEn = {
   unknownRefToken: (n) => `unknown refs theme token ${n}`,
   lanesInvalid: (v) => `kanban.config.json lanes is invalid: ${v}; valid values: null, or an object { "ids": [...], ... } (see the kanban-init skill)`,
   accManifestMissing: (err) => `kanban.config.json enables acceptanceTab, but the board's acceptance-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/acceptance-manifest.json; drop acceptanceTab to turn the tab off)`,
+  relManifestMissing: (err) => `kanban.config.json enables releaseTab, but the board's release-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/release-manifest.json, filled in by scripts/pr-sync.mjs; drop releaseTab to turn the tab off)`,
+  relStagesNoDev: () => 'release-manifest.json has no stage with id "dev": dev (open pull requests) is required. A board may list only two stages, but not drop dev (dropping test — "merged means shipped" — is fine)',
 }
 export function genStrings(lang) { return lang === 'en' ? genEn : genZh }

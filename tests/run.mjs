@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。166 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。230 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
-// byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫等。
+// byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
+// 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -730,6 +731,29 @@ const ACC_LIST = {
     for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
     ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
   }
+  { // 条目 id 里带引号:HTML 侧 esc 过了,运行期也不许再拿 id 拼选择器(拼出来非法 → 抛 → 同一块脚本里的发布进度跟着死)
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [{ ...ACC_LIST, revision: 3, result: undefined, items: [{ id: 'A"1', group: 'K', pr: 230, title: '带引号的 id', do: 'x', exp: 'y' }] }] }))
+    const rq = runGen(NEW_SCRIPTS, fx28.kb)
+    const q = readFileSync(idxP, 'utf8')
+    ok(rq.status === 0 && q.includes('data-accid="A&quot;1"'), '带引号的条目 id:gen 不炸,属性值照样 esc', rq.stderr.slice(0, 120))
+    ok(!q.includes('[data-accid="\' +'), '运行期不拿 id 拼选择器(改成按 id 索引行)')
+    const sc = q.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, '带引号的条目 id:壳内联 JS 仍可编译')
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [ACC_LIST] }))
+    runGen(NEW_SCRIPTS, fx28.kb)
+  }
+  { // 懒加载 + 验收同开:pane 是 fetch 之后才到的,show() 那次同步跑在注入之前 —— 注入完必须再补一次
+    cfg.lazyTabs = true
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx28.kb)
+    const inj = (readFileSync(idxP, 'utf8').match(/function onPaneInjected\(name\) \{[\s\S]*?\n {2}\}/) || [''])[0]
+    ok(/accSync\(\)/.test(inj), 'lazyTabs + acceptanceTab 同开:onPaneInjected 里补一次 accSync(否则注入的卡头芯片停在 0/N)', inj.slice(-160))
+    delete cfg.lazyTabs
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx28.kb)
+  }
   cfg.acceptanceTab = false
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, fx28.kb)
@@ -764,6 +788,248 @@ console.log('T29 验收守卫')
   touch(join(fx29.kb, 'index.html'))
   const r2 = runStop(NEW_SCRIPTS, fx29.root)
   ok(r2.status === 0 && r2.stdout.includes('无法解析'), '清单 JSON 坏 → 一条解析失败 notice,不崩不拦', `${r2.status} ${r2.stdout.slice(0, 200)}`)
+}
+
+
+// ============ T30 段判定 stageOf(纯函数穷举:三段 / 两段宿主 / 非主线 / draft / closed / 显式归版)============
+console.log('T30 段判定 stageOf')
+{
+  const { relIndex, stageOf } = await import(join(NEW_SCRIPTS, 'relstage.mjs'))
+  const RELS = [{ tag: 'v1', at: '2026-07-14T06:00:00Z' }, { tag: 'v2', at: '2026-07-20T09:00:00Z' }]
+  const THREE = ['dev', 'test', 'prod'], TWO = ['dev', 'prod'] // 两段宿主 = 合了即发
+  const idx = relIndex(RELS)
+  const st = (pr, ids = THREE, main = 'main') => stageOf(pr, idx, main, ids)
+  ok(st({ number: 1, state: 'open', base: 'main' }).id === 'dev', 'open + 主线 → dev')
+  ok(st({ number: 2, state: 'open', draft: true, base: 'main' }).id === 'dev', 'draft 仍是 dev(草稿是显示标记,不是第四段)')
+  ok(st({ number: 3, state: 'closed', base: 'main' }).id === 'closed', 'closed → 不入三段')
+  ok(st({ number: 4, state: 'open', base: 'feature/x' }).id === 'offline', 'base 非主线 → offline')
+  ok(st({ number: 5, state: 'merged', base: 'feature/x', mergedAt: '2026-07-15T00:00:00Z' }).id === 'offline',
+    '非主线优先于归版:合进别人分支不算进主线')
+  ok(st({ number: 4, state: 'open', base: 'feature/x' }, THREE, '').id === 'dev', '宿主没声明主线分支 → 不猜「非主线」')
+  const p6 = st({ number: 6, state: 'merged', base: 'main', mergedAt: '2026-07-10T00:00:00Z' })
+  ok(p6.id === 'prod' && p6.tag === 'v1', 'merged 落进 at ≥ mergedAt 的最早 release')
+  const p7 = st({ number: 7, state: 'merged', base: 'main', mergedAt: '2026-07-20T09:00:00Z' })
+  ok(p7.id === 'prod' && p7.tag === 'v2', '刚好等于打 tag 时刻 → 算进这一版(边界取等)')
+  const p8 = st({ number: 8, state: 'merged', base: 'main', mergedAt: '2026-07-20T09:00:01Z' })
+  ok(p8.id === 'test' && p8.tag === '', '打完 tag 一秒后才合 → test(不是同一天就算发出去了)')
+  const p8b = st({ number: 8, state: 'merged', base: 'main', mergedAt: '2026-07-20T09:00:01Z' }, TWO)
+  ok(p8b.id === 'prod' && p8b.tag === '', '两段宿主(无 test):merged 未归版直接算 prod 且不带版本号')
+  const idx2 = relIndex([RELS[0], { ...RELS[1], prs: [8] }])
+  const p8c = stageOf({ number: 8, state: 'merged', base: 'main', mergedAt: '2026-07-20T09:00:01Z' }, idx2, 'main', THREE)
+  ok(p8c.id === 'prod' && p8c.tag === 'v2', '显式 releases[].prs 覆盖区间判定')
+  ok(st({ number: 9, state: 'merged', base: 'main', mergedAt: null }).id === 'test', 'merged 但没 mergedAt → 不编造归版')
+  { // 人手写的 at 常带 +08:00,gh 给的 mergedAt 是 Z —— 混在一起按字面比就把 tag 之后合的算成已发
+    const tz = relIndex([{ tag: 'v9', at: '2026-08-26T10:00:00+08:00' }]) // = 02:00Z
+    const late = stageOf({ number: 20, state: 'merged', base: 'main', mergedAt: '2026-08-26T05:00:00Z' }, tz, 'main', THREE)
+    ok(late.id === 'test' && late.tag === '', 'at 与 mergedAt 比时刻不比字面:tag 之后三小时才合 → test', JSON.stringify(late))
+    const early = stageOf({ number: 21, state: 'merged', base: 'main', mergedAt: '2026-08-26T01:00:00Z' }, tz, 'main', THREE)
+    ok(early.id === 'prod' && early.tag === 'v9', '同一个带偏移的 at:tag 之前合的仍归这一版', JSON.stringify(early))
+  }
+}
+
+// ============ T31 发布进度 tab(opt-in;未配/false = 字节冻结,开 = 表格烤入 + 分组折叠)============
+console.log('T31 发布进度 tab')
+const REL_MANIFEST = {
+  stages: [
+    { id: 'dev', label: 'dev', hint: '开着的 PR' },
+    { id: 'test', label: 'test', hint: '已合主线,未随版本发出' },
+    { id: 'prod', label: 'prod', hint: '已随版本发出' },
+  ],
+  releases: [{ tag: 'v0.0.1', at: '2026-08-20T09:00:00Z', note: '首版' }],
+  prs: [
+    { number: 232, title: '开着的乙', state: 'open', draft: false, base: 'main', branch: 'feat/b', url: 'https://github.com/o/r/pull/232', createdAt: '2026-08-24T01:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+    { number: 230, title: '开着的甲', state: 'open', draft: false, base: 'main', branch: 'feat/a', url: 'https://github.com/o/r/pull/230', createdAt: '2026-08-23T01:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+    { number: 228, title: '草稿丙', state: 'open', draft: true, base: 'main', branch: 'feat/c', url: 'https://github.com/o/r/pull/228', createdAt: '2026-08-22T01:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+    { number: 227, title: '已发的丁', state: 'merged', draft: false, base: 'main', branch: 'feat/d', url: 'https://github.com/o/r/pull/227', createdAt: '2026-08-18T01:00:00Z', mergedAt: '2026-08-19T01:00:00Z', closedAt: '2026-08-19T01:00:00Z', cards: [] },
+    { number: 226, title: '已合未发的戊', state: 'merged', draft: false, base: 'main', branch: 'feat/e', url: 'https://github.com/o/r/pull/226', createdAt: '2026-08-21T01:00:00Z', mergedAt: '2026-08-22T01:00:00Z', closedAt: '2026-08-22T01:00:00Z', cards: [] },
+    { number: 225, title: '关掉未合的己', state: 'closed', draft: false, base: 'main', branch: 'feat/f', url: 'https://github.com/o/r/pull/225', createdAt: '2026-08-10T01:00:00Z', mergedAt: null, closedAt: '2026-08-11T01:00:00Z', cards: [] },
+    { number: 224, title: '叠在别人分支上的庚', state: 'open', draft: false, base: 'feat/a', branch: 'feat/g', url: 'https://github.com/o/r/pull/224', createdAt: '2026-08-23T02:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+  ],
+  syncedAt: '2026-08-26T02:00:00Z',
+}
+{
+  const fx31 = mkFixture('fx31', { 's.html': demoHtml('s') })
+  const cfgP = join(fx31.kb, 'kanban.config.json'), idxP = join(fx31.kb, 'index.html')
+  const relP = join(fx31.kb, 'release-manifest.json'), accP = join(fx31.kb, 'acceptance-manifest.json')
+  const mP = join(fx31.kb, 'manifest.json'), decP = join(fx31.kb, 'decisions-manifest.json'), blP = join(fx31.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  // 只挂 links 里的 /pull/230,不写 pr 字段 —— 表格的「关联卡」列要靠反查认它
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: '待办甲', problem: 'p', approach: 'a', area: 'x', source: 's', links: [{ title: 'PR', href: 'https://github.com/o/r/pull/230' }] }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx31.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('pane-release') && !off.includes('class="relr"'), '未配 releaseTab:无 tab / 无 pane')
+  const offSha = sha(idxP)
+  const cfg = rd(cfgP)
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  wr(relP, REL_MANIFEST) // false 时文件在场也不进 tab(芯片后缀另说,见 T33)
+  runGen(NEW_SCRIPTS, fx31.kb)
+  ok(sha(idxP) === offSha, 'releaseTab:false 与未配逐字节相同(文件在场也不渲染 pane)')
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  rmSync(relP)
+  const rMiss = runGen(NEW_SCRIPTS, fx31.kb)
+  ok(rMiss.status !== 0 && rMiss.stderr.includes('releaseTab') && rMiss.stderr.includes('release-manifest.json'), '开了 tab 却没文件 → 硬报错点名两者', rMiss.stderr.slice(0, 120))
+  wr(relP, { ...REL_MANIFEST, stages: [{ id: 'test', label: 'test' }, { id: 'prod', label: 'prod' }] })
+  const rNoDev = runGen(NEW_SCRIPTS, fx31.kb)
+  ok(rNoDev.status !== 0 && rNoDev.stderr.includes('dev'), 'stages 缺 dev → 硬报错(可以只列两段,但不能省掉 dev)', rNoDev.stderr.slice(0, 120))
+  wr(relP, REL_MANIFEST)
+  const r = runGen(NEW_SCRIPTS, fx31.kb)
+  ok(r.status === 0, 'releaseTab:true + release-manifest gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('data-pane="release">发布进度 · 3') && on.includes('id="pane-release"'), 'tab 按钮(徽章 = dev 段计数 230/232/228)与 pane 都在',
+    (on.match(/data-pane="release">[^<]*/) || [])[0])
+  ok([232, 230, 228, 227, 226, 225, 224].every((n) => on.includes(`id="pr-${n}"`)), '每行一个 id="pr-N" 锚(深链在静态 HTML 里就找得到)')
+  ok(on.includes('<span class="relsg s-dev">dev</span>') && on.includes('<span class="relsg s-test">test</span>')
+    && on.includes('<span class="relsg s-prod">prod v0.0.1</span>') && on.includes('<span class="relsg s-closed">已关闭</span>')
+    && on.includes('<span class="relsg s-offline">非主线</span>'), '五种段芯片各就各位(prod 带版本号,非主线/已关闭不入三段)')
+  ok(on.includes('开着 · 08-23') && on.includes('草稿 · 08-22') && on.includes('已合 · 08-22') && on.includes('已发 v0.0.1 · 08-19') && on.includes('已关闭 · 08-11'),
+    '状态 · 日期五种写法齐全')
+  ok(on.includes('<tr class="relgh" data-relgh="v0.0.1" data-relopen="1">'), '已发按版本分组,最新版默认展开')
+  { // 默认序 = 段优先:开着的三条在最上面,已发那块整个沉在下面(227 的 mergedAt 比 226 早也不许上浮)
+    const seq = [...on.matchAll(/class="relgh" data-relgh="([^"]+)"|class="relr" id="pr-(\d+)"/g)]
+      .map((x) => x[1] ? `[${x[1]}]` : x[2]).join(' ')
+    ok(seq === '232 230 228 226 [v0.0.1] 227 224 225', '默认序:dev → test → prod 版本块 → 其它,段内日期降序', seq)
+  }
+  { // 人手追加一版、只写 prs 忘了写 at(pr-sync 见过这个 tag 就不再补):分组头只能出一次,同版的行还得连着
+    wr(relP, { ...REL_MANIFEST, releases: [...REL_MANIFEST.releases, { tag: 'v0.0.2', prs: [226, 227], note: '手写' }] })
+    const rNoAt = runGen(NEW_SCRIPTS, fx31.kb)
+    const noAt = readFileSync(idxP, 'utf8')
+    ok(rNoAt.status === 0 && rNoAt.stderr.includes('没写 at'), 'releases[] 缺 at → gen 出声提醒(不阻断)', rNoAt.stderr.slice(0, 160))
+    ok(count(noAt, 'data-relgh="v0.0.2"') === 1, `缺 at 的版本也只出一个分组头(实际 ${count(noAt, 'data-relgh="v0.0.2"')} 个)`)
+    const seq = (noAt.match(/data-relgh="v0\.0\.2"|id="pr-22[67]"/g) || []).join('|')
+    ok(seq === 'data-relgh="v0.0.2"|id="pr-226"|id="pr-227"', '同版的行紧跟在那一个分组头之后(缺 at 不让它散开)', seq)
+    wr(relP, REL_MANIFEST)
+    runGen(NEW_SCRIPTS, fx31.kb)
+  }
+  ok(on.includes('data-relsync="2026-08-26T02:00:00Z"') && !/new Date\(\)/.test(on.split('<script>')[0]), 'syncedAt 烤成 ISO 原文(换算成本地时间是浏览器的事)')
+  ok(on.includes('<a class="relcard" href="#BL-1"'), 'links 兼容反查命中:只挂了 /pull/230 链接的卡进了关联卡列')
+  ok(on.includes('<span class="relnil">—</span>'), '没有关联卡 / 没有验收清单的格子是一条破折号,不是空白')
+  // 两个 tab 同开:验收列长出 n/N 与「验收中」标
+  cfg.acceptanceTab = true
+  wr(cfgP, cfg)
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: [ACC_LIST] }))
+  const r2 = runGen(NEW_SCRIPTS, fx31.kb)
+  ok(r2.status === 0, '两个 tab 同开 gen exit 0', r2.stderr)
+  const both = readFileSync(idxP, 'utf8')
+  ok(both.includes('<a class="acclink" href="#acc-230"><span data-acc="230">0/4</span></a>'), '验收列 = n/N 链到清单锚(分母烤入,分子运行期)')
+  ok(/id="pr-230"[\s\S]{0,400}?<span class="relnow">验收中<\/span>/.test(both), 'current 那行打「验收中」标')
+  { // 整壳 <script> 编译级断言:发布进度运行时与验收运行时在同一块里
+    const sc = both.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  delete cfg.acceptanceTab
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  rmSync(accP); rmSync(relP)
+  runGen(NEW_SCRIPTS, fx31.kb)
+  ok(sha(idxP) === offSha, '两个 tab 关回 + 撤掉两份 manifest 后与冻结基线逐字节相同')
+}
+
+// ============ T33 卡头 PR 芯片的状态后缀(release-manifest 在场即生效,与 releaseTab 无关)============
+console.log('T33 芯片状态后缀')
+{
+  const fx33 = mkFixture('fx33', { 's.html': demoHtml('s') })
+  const idxP = join(fx33.kb, 'index.html'), relP = join(fx33.kb, 'release-manifest.json')
+  const decP = join(fx33.kb, 'decisions-manifest.json'), mP = join(fx33.kb, 'manifest.json'), blP = join(fx33.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  dec.entries = [230, 228, 227, 226, 225, 223].map((n, i) => ({ id: `D${i + 1}`, code: `D${i + 1}`, status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: `决策 ${n}`, pr: n }))
+  // 223 = 叠在别人分支上、又合进去了的 PR:mergedAt 落在 v0.0.1 之前,按区间本会被算成「已发 v0.0.1」
+  const stacked = { number: 223, title: '叠 PR', state: 'merged', draft: false, base: 'feat/a', branch: 'feat/g2', url: 'https://github.com/o/r/pull/223', createdAt: '2026-08-17T01:00:00Z', mergedAt: '2026-08-19T02:00:00Z', closedAt: '2026-08-19T02:00:00Z', cards: [] }
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx33.kb)
+  const noFile = readFileSync(idxP, 'utf8')
+  const baseSha = sha(idxP)
+  ok(noFile.includes('class="prchip"') && !noFile.includes('class="prst"'), '没有 release-manifest:有芯片、无后缀(PR-A 留的口在此闭合)')
+  wr(relP, { ...REL_MANIFEST, prs: [...REL_MANIFEST.prs, stacked] }) // releaseTab 没开,芯片后缀照样有 —— 状态是数据,不是 tab 的附属品
+  const r = runGen(NEW_SCRIPTS, fx33.kb)
+  ok(r.status === 0, 'release-manifest 在场 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('<span class="prst">开着</span>'), '芯片后缀「开着」')
+  ok(on.includes('<span class="prst">草稿</span>'), '芯片后缀「草稿」')
+  ok(on.includes('<span class="prst">已发 v0.0.1</span>'), '芯片后缀「已发 v0.0.1」')
+  ok(on.includes('<span class="prst">已合 08-22</span>'), '芯片后缀「已合 MM-DD」')
+  ok(on.includes('<span class="prst">已关闭</span>'), '芯片后缀「已关闭」')
+  ok(/pull\/223[\s\S]{0,140}?<span class="prst">非主线<\/span>/.test(on),
+    '芯片后缀「非主线」:叠 PR 合了也不说「已发」,与发布进度表格同一个口径', (on.match(/pull\/223[\s\S]{0,140}/) || [''])[0].slice(0, 160))
+  rmSync(relP)
+  runGen(NEW_SCRIPTS, fx33.kb)
+  ok(sha(idxP) === baseSha, '撤掉 release-manifest 后与无文件基线逐字节相同')
+}
+
+// ============ T32 pr-sync(PATH 里放假 gh 跑通;拿掉假 gh 则 exit 1 且文件一字不动)============
+console.log('T32 pr-sync')
+{
+  const fx32 = mkFixture('fx32', { 's.html': demoHtml('s') })
+  const relP = join(fx32.kb, 'release-manifest.json')
+  const mP = join(fx32.kb, 'manifest.json'), decP = join(fx32.kb, 'decisions-manifest.json'), blP = join(fx32.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: '待办甲', problem: 'p', approach: 'a', area: 'x', source: 's', links: [{ title: 'PR', href: 'https://github.com/o/r/pull/12' }] }]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲', pr: 11 }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  // 人手写在先:v0.0.1 的 note 与 prs 都不该被机器抹掉;v0.0.1-hot 的 at 是人手写的 +08:00(= 00:00Z)
+  wr(relP, {
+    stages: REL_MANIFEST.stages,
+    releases: [
+      { tag: 'v0.0.1', at: '2026-07-14T06:00:00Z', note: '首版', prs: [999] },
+      { tag: 'v0.0.1-hot', at: '2026-07-19T08:00:00+08:00', note: '本地打的补丁版' },
+    ],
+    prs: [], syncedAt: null,
+  })
+  // 假 gh:两个子命令各吐一份固定 JSON(PR 故意不按号排,验证脚本自己排)
+  const ghDir = join(WORK, 'fakegh'), noGhDir = join(WORK, 'nogh')
+  mkdirSync(ghDir, { recursive: true }); mkdirSync(noGhDir, { recursive: true })
+  // echo 是 shell 内建:PATH 里只放这一个目录也跑得动,测试全程够不着机器上真的 gh
+  writeFileSync(join(ghDir, 'gh'), `#!/bin/sh
+case "$1 $2" in
+"pr list") echo '[{"number":10,"title":"丙","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/c","url":"https://github.com/o/r/pull/10","createdAt":"2026-07-10T01:00:00Z","mergedAt":"2026-07-12T01:00:00Z","closedAt":"2026-07-12T01:00:00Z"},
+ {"number":12,"title":"甲","state":"OPEN","isDraft":false,"baseRefName":"main","headRefName":"feat/a","url":"https://github.com/o/r/pull/12","createdAt":"2026-08-20T01:00:00Z","mergedAt":null,"closedAt":null},
+ {"number":9,"title":"丁","state":"CLOSED","isDraft":true,"baseRefName":"main","headRefName":"feat/d","url":"https://github.com/o/r/pull/9","createdAt":"2026-07-05T01:00:00Z","mergedAt":null,"closedAt":"2026-07-06T01:00:00Z"},
+ {"number":11,"title":"乙","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/b","url":"https://github.com/o/r/pull/11","createdAt":"2026-07-18T01:00:00Z","mergedAt":"2026-07-19T01:00:00Z","closedAt":"2026-07-19T01:00:00Z"}]' ;;
+"release list") echo '[{"tagName":"v0.0.2","publishedAt":"2026-07-20T09:00:00Z"},{"tagName":"v0.0.1","publishedAt":"2026-07-14T06:00:00Z"}]' ;;
+esac
+`)
+  chmodSync(join(ghDir, 'gh'), 0o755)
+  // PATH 只给这一个目录(不拼 process.env.PATH):否则「没有 gh」那一跑会摸到机器/CI 上真的 gh,
+  // 走的就成了「gh 报错」分支,还顺手发一个网络请求 —— 测试床对 gh / 网络零依赖是硬要求。
+  const runSync = (dir, extra = []) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', fx32.kb, ...extra],
+    { encoding: 'utf8', env: { ...process.env, PATH: dir } })
+  const beforeDry = sha(relP)
+  const rDry = runSync(ghDir, ['--dry-run'])
+  ok(rDry.status === 0 && sha(relP) === beforeDry && /4/.test(rDry.stdout), '--dry-run 打摘要不写文件', `${rDry.status} ${rDry.stdout}${rDry.stderr}`)
+  const rs = runSync(ghDir)
+  ok(rs.status === 0, 'pr-sync exit 0', `${rs.stdout}${rs.stderr}`)
+  const out = rd(relP)
+  ok(out.prs.map((p) => p.number).join(',') === '12,11,10,9', 'prs 按号降序重写(gh 给的顺序不作数)', out.prs.map((p) => p.number).join(','))
+  ok(out.prs.every((p) => ['open', 'merged', 'closed'].includes(p.state)) && out.prs[0].state === 'open',
+    'gh 的 OPEN/MERGED/CLOSED 落成小写', JSON.stringify(out.prs.map((p) => p.state)))
+  ok(out.prs[3].draft === true && out.prs[3].branch === 'feat/d' && out.prs[3].base === 'main', 'draft / 分支 / base 三个字段都落了')
+  ok(out.releases.map((r) => r.tag).join(',') === 'v0.0.1,v0.0.1-hot,v0.0.2', '新 tag 追加,按 at 升序', JSON.stringify(out.releases.map((r) => r.tag)))
+  ok(out.releases[0].note === '首版' && JSON.stringify(out.releases[0].prs) === '[999]', '已有条目的 note 与人手写的 prs 一律不覆盖')
+  ok(JSON.stringify(out.releases[2].prs) === '[11]', '新版本的 prs 按 at 区间自动填(上一版之后、本版当刻之前合的)', JSON.stringify(out.releases[2].prs))
+  ok(JSON.stringify(out.releases[1].prs) === '[]', '人手写的 +08:00 at 按时刻算区间:00:00Z 打的 tag,01:00Z 才合的 #11 不算进来', JSON.stringify(out.releases[1].prs))
+  ok(JSON.stringify(out.prs[0].cards) === '["BL-1"]', 'cards 反查含 links 兼容(卡只挂了 /pull/12 链接)', JSON.stringify(out.prs[0].cards))
+  ok(JSON.stringify(out.prs[1].cards) === '["D1"]', 'cards 反查认显式 pr 字段')
+  ok(typeof out.syncedAt === 'string' && !isNaN(Date.parse(out.syncedAt)), 'syncedAt 是合法 ISO(脚本可以用时间,gen 不行)')
+  ok(JSON.stringify(out.stages) === JSON.stringify(REL_MANIFEST.stages) && readFileSync(relP, 'utf8').endsWith('}\n'), 'stages 原样不动;2 空格缩进 + 末尾换行')
+  const afterSha = sha(relP)
+  const rNo = runSync(noGhDir)
+  ok(rNo.status === 1 && sha(relP) === afterSha, 'PATH 里没有 gh → exit 1 且文件一个字节都没动', `${rNo.status} ${rNo.stderr.slice(0, 120)}`)
+  ok(/找不到 gh 命令|gh command was not found/.test(rNo.stderr), 'stderr 是「找不到 gh」那条(不是 gh 跑起来又失败那条)', rNo.stderr.slice(0, 120))
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
