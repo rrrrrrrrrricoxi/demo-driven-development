@@ -11,6 +11,24 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-08-20
+
+### Added
+- Two optional card fields for keeping the scene with the card, so a card still
+  makes sense months later:
+  - `shots` on decision and backlog cards — `["x.png"]` or
+    `[{"file":"x.png","caption":"…"}]`. A bare filename resolves under the
+    board's `shots/` directory (naming the file after the card id also groups
+    it in the screenshot gallery and links back to the card); a path is used
+    as-is. Thumbnails render inside the card body and open the full image.
+    When a screenshot arrives with the request that creates a card, it now has
+    a place to live — a line of prose rarely brings back what an image does.
+  - `repro` on backlog cards — a string, or an array of steps rendered as a
+    numbered list. Bug cards carry their own reproduction path.
+- Both rules are written into the `ddd-workflow` skill (card-creation step) and
+  `kanban-init`. Neither field adds CSS — the existing thumbnail styling is
+  reused — and cards without them render byte-identically to 0.11.3.
+
 ## [0.11.3] - 2026-08-20
 
 ### Added

@@ -39,6 +39,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs apply --dir <projectRoot> <同 plan 
 
 v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片第二行)与 `order`(阅读动线序号,点开计已读);顶层可选 `docSegments`(category→地基/流程/操作/存档 段名覆盖映射,缺省映射见 templates/kanban.config.json 的 $comment)。都可后补,缺省不渲染对应 UI。
 
+**卡片可选字段(v0.11.4)**:决策卡与 backlog 卡可加 `shots`(现场截图,`["x.png"]` 或 `[{file,caption}]`;纯文件名默认取 `shots/` 下,文件名以卡号打头可与截图廊自动归组),backlog 卡可加 `repro`(复现流程,字符串或步骤数组)。两者都缺省 = 输出逐字节不变。
+
 **存续纪律(v0.11.3)**:init 之后,新写的 spec / 评审稿 / 实施 plan / 交接档 / 运维手册要在**落盘的同一次提交**里进 `config.docs[]` —— 与「demo 必挂卡」同源:产出必须可被发现。详见 ddd-workflow SKILL 第 1 步。
 
 ## 项目换装(v0.4.0)

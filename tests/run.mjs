@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。126 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。135 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -461,6 +461,51 @@ console.log('T21 darkMode opt-in')
     ok(on.indexOf(BOOT) > -1 && on.indexOf(BOOT) < on.indexOf('<style>'), 'index 主题引导脚本前置于样式')
     ok(shots.indexOf(BOOT) > -1 && shots.indexOf(BOOT) < shots.indexOf('<style>'), 'shots 主题引导脚本前置于样式')
   }
+}
+
+// ============ T26 卡片现场截图 + bug 复现流程(可选字段;缺省逐字节冻结)============
+console.log('T26 shots / repro 字段')
+{
+  const fx26 = mkFixture('fx26', { 's.html': demoHtml('s') })
+  const decP = join(fx26.kb, 'decisions-manifest.json'), blP = join(fx26.kb, 'backlog-manifest.json')
+  const dec = JSON.parse(readFileSync(decP, 'utf8'))
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 't' }]
+  writeFileSync(decP, JSON.stringify(dec))
+  const bl = JSON.parse(readFileSync(blP, 'utf8'))
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: 'bug 卡', problem: 'p', approach: 'a', area: 'x', source: 's' }]
+  writeFileSync(blP, JSON.stringify(bl))
+  runGen(NEW_SCRIPTS, fx26.kb)
+  const idxP = join(fx26.kb, 'index.html')
+  const baseSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('<dt>复现</dt>') && !off.includes('<dt>现场</dt>'), '未配 shots/repro:两块都不渲染')
+  // 开:决策卡挂字符串式截图,backlog 卡挂对象式截图 + 步骤数组复现
+  dec.entries[0].shots = ['d1-before.png']
+  writeFileSync(decP, JSON.stringify(dec))
+  bl.items[0].shots = [{ file: 'bl-1-jump.png', caption: '点 chip 后整页横移' }]
+  bl.items[0].repro = ['打开看板', '点任一 chip', '整页横向弹动(不应弹)']
+  writeFileSync(blP, JSON.stringify(bl))
+  const r = runGen(NEW_SCRIPTS, fx26.kb)
+  ok(r.status === 0, '配了 shots/repro gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('href="shots/d1-before.png"') && on.includes('href="shots/bl-1-jump.png"'), '纯文件名自动落 shots/ 下,两种卡都渲染')
+  ok(on.includes('点 chip 后整页横移'), '对象式 caption 渲染进 alt/说明')
+  ok(on.includes('class="wtshots"'), '复用既有缩略图样式(零新增 CSS)')
+  ok(on.includes('<dt>复现</dt>') && on.includes('1. 打开看板<br>2. 点任一 chip<br>3. 整页横向弹动(不应弹)'), '复现步骤数组渲染成编号行')
+  // 带路径的截图原样用;字符串式 repro 单行渲染
+  bl.items[0].shots = ['demos/inline.png']
+  bl.items[0].repro = '打开 X 点 Y 就复现'
+  writeFileSync(blP, JSON.stringify(bl))
+  runGen(NEW_SCRIPTS, fx26.kb)
+  const on2 = readFileSync(idxP, 'utf8')
+  ok(on2.includes('href="demos/inline.png"') && !on2.includes('shots/demos/'), '带路径的截图原样用,不再加 shots/ 前缀')
+  ok(on2.includes('<dd class="x">打开 X 点 Y 就复现</dd>'), '字符串式 repro 单行渲染')
+  // 撤回字段 → 回到冻结基线
+  delete dec.entries[0].shots; writeFileSync(decP, JSON.stringify(dec))
+  delete bl.items[0].shots; delete bl.items[0].repro; writeFileSync(blP, JSON.stringify(bl))
+  runGen(NEW_SCRIPTS, fx26.kb)
+  ok(sha(idxP) === baseSha, '撤回字段后与冻结基线逐字节相同')
 }
 
 // ============ T25 文稿必挂文档库(纪律入 SKILL,字面可查)============
