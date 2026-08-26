@@ -31,6 +31,9 @@ const zh = {
     `⚠ 看板守卫:验收清单 ${list} 里条目 id「${id}」重复 —— 勾选状态按 id 存,重复即互相顶掉,请改成唯一 id。`,
   accUnknownCard: (list, id) =>
     `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
+  richLongText: (hits, total) =>
+    `⚠ 看板守卫:${total} 张卡的正文字段超过 800 字,却没有 detail 字段 —— 卡正文留结论(problem ≤ 2 句、approach 结论先行、note 只记时间线),逐文件证据与灰盒记录移进 detail:\n` +
+    hits.map((h) => `  - ${h.id} 的 ${h.key} 有 ${h.n} 字`).join('\n'),
   ghprRemind:
     '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成);顺手在卡上写 `pr` 字段(如 "pr": 230),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
   prSync: {
@@ -204,6 +207,9 @@ const en = {
     `⚠ Kanban guard: acceptance checklist ${list} has a duplicate item id "${id}" — tick state is stored by id, so duplicates overwrite each other. Make the ids unique.`,
   accUnknownCard: (list, id) =>
     `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
+  richLongText: (hits, total) =>
+    `⚠ Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail field — keep the card body to conclusions (problem ≤ 2 sentences, approach conclusion-first, note a dated timeline) and move file-by-file evidence into detail:\n` +
+    hits.map((h) => `  - ${h.id}: ${h.key} is ${h.n} characters`).join('\n'),
   ghprRemind:
     '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically), and put the `pr` field on the card (e.g. "pr": 230); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
   prSync: {

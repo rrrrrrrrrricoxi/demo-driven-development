@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。233 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。274 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
-// 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap 等。
+// 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
+// 卡正文轻 markdown(lite 规则逐条 + XSS + 折叠预览 + detail 字段 + 正文长度守卫)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -1044,6 +1045,135 @@ esac
   const rNo = runSync(noGhDir)
   ok(rNo.status === 1 && sha(relP) === afterSha, 'PATH 里没有 gh → exit 1 且文件一个字节都没动', `${rNo.status} ${rNo.stderr.slice(0, 120)}`)
   ok(/找不到 gh 命令|gh command was not found/.test(rNo.stderr), 'stderr 是「找不到 gh」那条(不是 gh 跑起来又失败那条)', rNo.stderr.slice(0, 120))
+}
+
+// ============ T35 richText 卡正文轻 markdown + 折叠 + detail(opt-in;关档逐字节冻结)============
+console.log('T35 richText 轻 markdown / 折叠 / detail')
+{
+  const Z = String.fromCharCode(0)
+  const { lite, litePreview } = await import(join(NEW_SCRIPTS, 'lite.mjs'))
+
+  // ---- 规则逐条(定稿 §3.1;与 C 档 demo 的内联自测同题)----
+  ok(lite('**要紧**') === '<p><b>要紧</b></p>', '**粗体** → <b>')
+  ok(lite('看 `models.py:37` 这行') === '<p>看 <code>models.py:37</code> 这行</p>', '反引号 → <code>')
+  ok(lite('甲\n乙') === '<p>甲<br>乙</p>', '单换行 → <br>')
+  ok(lite('甲\n\n乙') === '<p>甲</p><p>乙</p>', '空行 → 段落')
+  ok(lite('- 甲\n* 乙') === '<ul><li>甲</li><li>乙</li></ul>', '行首 - / * → 无序列表')
+  ok(lite('3. 甲\n4) 乙') === '<ol><li value="3">甲</li><li value="4">乙</li></ol>', '行首数字 → 有序列表(保原编号)')
+  ok(lite('① 机制\n② 链路') === '<ol class="circ"><li><span class="mk">①</span>机制</li><li><span class="mk">②</span>链路</li></ol>',
+    '行首 ①…⑩ → ol.circ,圈号留作标号')
+  ok(lite('【2026-08-26 定稿】按 C 档来') === '<div class="tsec"><p>【2026-08-26 定稿】按 C 档来</p></div>',
+    '【…】开头的段包进 .tsec(段前一条细线)')
+  ok(lite('`**不是粗体**`') === '<p><code>**不是粗体**</code></p>', '反引号里的 ** 不当粗体(代码优先)')
+  ok(lite('# 标题') === '<p># 标题</p>' && lite('[名](url)') === '<p>[名](url)</p>' && lite('| 甲 | 乙 |') === '<p>| 甲 | 乙 |</p>',
+    '标题 / 链接 / 表格一律不认(定稿:只认列出的那几条)')
+  ok(lite('') === '' && lite(null) === '' && lite(undefined) === '' && lite('   \n\n  ') === '', '空 / null / undefined / 纯空白 → 空串')
+
+  // ---- XSS:先 esc 再认标记,三个方向都堵死 ----
+  ok(lite('**<img src=x onerror=alert(1)>**') === '<p><b>&lt;img src=x onerror=alert(1)&gt;</b></p>', 'XSS:粗体里的 <img> 只剩转义文本')
+  const xs = lite('`</' + 'script><script>alert(1)</' + 'script>`')
+  ok(!/<\/?script/i.test(xs) && xs.includes('&lt;/script&gt;'), 'XSS:代码片段里的 </script> 逃不出 <script> 壳', xs)
+  ok(lite('【<b>注入</b>】正文').includes('&lt;b&gt;注入&lt;/b&gt;'), 'XSS:小节标题里的 HTML 不认')
+  ok(lite('**$&$\'$`**') === '<p><b>$&amp;$\'$`</b></p>', '$& / $\' / $` 不被 replace 的替换模式二次展开')
+  ok(lite('看 ' + Z + '0' + Z + ' 与 `真代码`') === '<p>看 0 与 <code>真代码</code></p>', '正文里伪造的 NUL 占位符先被剔掉,顶不掉真代码片段')
+
+  // ---- 折叠预览:按段落边界截 ----
+  const pv = litePreview('a'.repeat(100) + '\n\n' + 'b'.repeat(500), 400)
+  ok(pv.head === 'a'.repeat(100) && pv.rest === 502, '预览按段落边界截:只取第一段;rest = 原文字符数 − 预览字符数', JSON.stringify(pv))
+  ok(litePreview('c'.repeat(3000), 400).rest === 0, '单段巨长文没有段落边界可切 → 不拆,留给高度折叠')
+  ok(litePreview('短', 400).rest === 0 && litePreview('', 400).rest === 0, '短文本 / 空文本不折叠')
+
+  // ---- gen 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  const fx35 = mkFixture('fx35', { 's.html': demoHtml('s') })
+  const cfgP = join(fx35.kb, 'kanban.config.json'), idxP = join(fx35.kb, 'index.html')
+  const blP = join(fx35.kb, 'backlog-manifest.json'), decP = join(fx35.kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const LONG = '① 机制 **要紧**:看 `models.py:37`\n② 链路\n\n' + '正文'.repeat(200) + '\n\n【2026-08-26 更新】收口'
+  const dec = rd(decP)
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 't', question: 'q', decision: '就这么定', source: '用户 **口述**' }]
+  wr(decP, dec)
+  const bl = rd(blP)
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: 'c',
+    problem: 'p', approach: LONG, note: '【2026-01-01】一行', area: 'x', source: 's' }]
+  wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(off.includes('<dd class="x">① 机制 **要紧**') && !off.includes('class="lite"'), '未配 richText:正文原样 esc,零 lite 标记')
+  ok(off.includes('<p class="notes">') && !off.includes('class="detail"') && !off.includes('class="lsrc"'), '未配 richText:notes 仍是 <p>,无 detail / source 块')
+  const cfg = rd(cfgP)
+  cfg.richText = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  ok(sha(idxP) === offSha, 'richText:false 与未配逐字节相同(冻结)')
+
+  cfg.richText = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx35.kb)
+  ok(r.status === 0, 'richText:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('<ol class="circ"><li><span class="mk">①</span>'), '圈号段渲染成 ol.circ')
+  ok(on.includes('<b>要紧</b>') && on.includes('<code>models.py:37</code>'), '粗体与行内代码进了卡')
+  ok(on.includes('<div class="tsec"><p>【2026-01-01】一行</p></div>'), '【日期】段包进 .tsec')
+  ok(on.includes('<div class="lite lpre">') && on.includes('<div class="lite lfull" hidden>') &&
+    /class="litemore" data-rest="\d+">展开 · 还有 \d+ 字</.test(on), '超 400 字的字段烤成预览 + 全文两份 + 展开钮')
+  ok(on.includes('<div class="notes">') && !on.includes('<p class="notes">'), 'notes 容器换成 <div>(<p> 里塞不进 <p>/<ul>,解析器会当场闭合)')
+  ok(on.includes('dd.demonote, div.notes') && on.includes("if (el.querySelector('.lfull'))"), 'clampScan 认 div.notes,并给拆过两份的字段让路(两套折叠不叠加)')
+  ok(on.includes('<dd class="lsrc"><span class="bbadge src"><p>用户 <b>口述</b></p></span></dd>'), '决策卡 source 补渲染成同款小徽章(0.12.0 前是死数据)')
+  ok(on.includes('<dd class="decided"><div class="lite"><p>✓ 就这么定</p></div></dd>'), '结论行的 ✓ 落进第一段,不自成一行')
+  ok(on.includes('<span class="bbadge src">s</span>'), 'backlog 自己的 source 芯片仍是纯 esc(它是一枚短标签,不是正文)')
+  ok(on.includes('.lite ol.circ') && on.includes('.litemore {') && on.includes('.detail > summary'), 'CSS 片段挂上尾链')
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  const richSha = sha(idxP)
+
+  // ---- detail 字段:加 → 撤回,回 richText:true 的基线(T26 模式)----
+  bl.items[0].detail = '逐文件证据:`a.py:1`\n\n【2026-01-02】补'
+  wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  const withD = readFileSync(idxP, 'utf8')
+  ok(/<details class="detail"><summary>查证细节<span class="n"> · \d+ 字<\/span><\/summary>/.test(withD), 'detail 渲染成默认折叠块,标题带字数')
+  ok(withD.includes('<div class="dbody lite"><p>逐文件证据:<code>a.py:1</code></p>'), 'detail 正文也走 lite')
+  delete bl.items[0].detail
+  wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  ok(sha(idxP) === richSha, '撤回 detail 字段后回到 richText:true 的基线')
+
+  // ---- 守卫:>800 字且无 detail → 非阻断点名;有 detail / 关档都不吵 ----
+  bl.items[0].approach = '正'.repeat(900)
+  wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  touch(idxP)
+  const g1 = runStop(NEW_SCRIPTS, fx35.root)
+  ok(g1.status === 0 && /BL-1 的 approach 有 900 字/.test(g1.stdout), '超 800 字且无 detail → 一条非阻断 notice,点名到字段', `${g1.status} ${g1.stdout.slice(0, 260)}`)
+  bl.items[0].detail = '证据都在这儿'
+  wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  touch(idxP)
+  const g2 = runStop(NEW_SCRIPTS, fx35.root)
+  ok(g2.status === 0 && !/approach 有 900 字/.test(g2.stdout), '卡上有了 detail 就不再点名')
+  delete bl.items[0].detail
+  wr(blP, bl)
+  cfg.richText = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  touch(idxP)
+  const g3 = runStop(NEW_SCRIPTS, fx35.root)
+  ok(g3.status === 0 && !/approach 有 900 字/.test(g3.stdout), 'richText 关着时不做正文长度审计(detail 本就不渲染,催也白催)')
+
+  // ---- 关回 + 撤字段:逐字节回到冻结基线 ----
+  bl.items[0].approach = LONG
+  wr(blP, bl)
+  delete cfg.richText
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  ok(sha(idxP) === offSha, 'richText 关回后与冻结基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

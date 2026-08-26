@@ -24,6 +24,7 @@ import { genStrings } from './strings.mjs'
 import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
+import { lite, litePreview } from './lite.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -642,6 +643,35 @@ const bold = (s) => Array.isArray(s)
   ? s.map((x) => bold(x)).join('<br>')
   : esc(String(s ?? '')).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>')
 
+// ———— 卡正文轻 markdown(v0.13.0,config.richText:布尔,默认关)————
+// 关 = 三种卡的长文本字段照旧只 esc()、换行被 white-space 折叠,输出逐字节冻结。
+// 开 = 走 lite.mjs:**粗体** / `代码` / 段落 / <br> / 列表 / ①…⑩ / 【…】小节(见 lite.mjs 头注)。
+// 超 RICH_N 字的字段烤两份(预览 + 全文,按段落边界切),运行期点钮换 hidden —— 折叠不记忆;
+// 没超的照旧交给 clampScan 按高度折(两套折叠不叠加,clampScan 见 .lfull 即让路)。
+// detail 字段(查证细节)同受本开关门控:没开 richText 的板一律零差异。
+const RICH = cfg.richText === true
+const RICH_N = 400 // 预览段长(定稿 §6.1-2)
+const NOTES_TAG = RICH ? 'div' : 'p' // <p> 里塞不进 <p>/<ul>(HTML 解析器会当场闭合 p,正文整段逃出容器)
+// 一个长文本字段的正文;三种卡共用。关档时与 esc(x) 逐字节相同。
+const rt = (text) => {
+  const s = String(text ?? '')
+  if (!RICH) return esc(s)
+  const { head, rest } = litePreview(s, RICH_N)
+  if (rest <= 0) return `<div class="lite">${lite(s)}</div>`
+  return `<div class="lite lpre">${lite(head)}</div><div class="lite lfull" hidden>${lite(s)}</div><button type="button" class="litemore" data-rest="${rest}">展开 · 还有 ${rest} 字</button>`
+}
+// detail:摘要与细节分家(定稿 §3.3)——渲染在卡内所有字段之后,默认折叠。无字段零差异。
+const detailBlock = (card) => {
+  const s = String((card && card.detail) || '')
+  return !RICH || !s ? '' : `
+      <details class="detail"><summary>查证细节<span class="n"> · ${s.length} 字</span></summary><div class="dbody lite">${lite(s)}</div></details>`
+}
+// 决策卡的 source:0.12.0 前有数据没渲染(死数据)。补成与 backlog 同款小徽章,门控在 richText 下
+// (否则存量板一开 gen 就多出一行,破冻结);正文走 lite,徽章 inline-block 才容得下段落。
+const decSrcRow = (e) =>
+  !RICH || !e.source ? '' : `<dt>来源</dt><dd class="lsrc"><span class="bbadge src">${lite(String(e.source))}</span></dd>
+        `
+
 // ---- demo 返回栏(幂等注入 demos/*.html 顶部;回看板「决策/Demo」tab)----
 // 版本号 bump 时:旧版本块整块剥离后重注入,文案/样式跟着 gen 演进(否则幂等守卫会让旧文案永远留在已注入的 demo 里)
 // 元素/marker 用中性 ddd-backnav,ctx 文案随 config.brand。
@@ -1246,8 +1276,8 @@ const card = (t) => `
     ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t), line: taskLine(t) })}
     <div class="rbody">
       <dl>
-        ${t.problem ? `<dt>问题</dt><dd class="x">${esc(t.problem)}</dd>` : ''}
-        <dt>方案</dt><dd class="x">${esc(t.approach)}</dd>
+        ${t.problem ? `<dt>问题</dt><dd class="x">${rt(t.problem)}</dd>` : ''}
+        <dt>方案</dt><dd class="x">${rt(t.approach)}</dd>
       </dl>
       ${
         t.commits?.length
@@ -1257,7 +1287,7 @@ const card = (t) => `
           : ''
       }
       ${t.links?.length ? `<div class="row links">${t.links.map(linkA).join('')}</div>` : ''}
-      ${t.notes ? `<p class="notes">${esc(t.notes)}</p>` : ''}
+      ${t.notes ? `<${NOTES_TAG} class="notes">${rt(t.notes)}</${NOTES_TAG}>` : ''}${detailBlock(t)}
     </div>
   </article>`
 
@@ -1480,12 +1510,12 @@ const blCard = (it) => `
       </div>
       ${it.blockedOn ? `<p class="blockedon">⛔ 卡在:${esc(it.blockedOn)}</p>` : ''}
       <dl>
-        <dt>背景</dt><dd class="x">${esc(it.problem)}</dd>${reproBlock(it.repro)}${shotsBlock(it.shots, '现场')}
-        <dt>解法</dt><dd class="x">${esc(it.approach)}</dd>
+        <dt>背景</dt><dd class="x">${rt(it.problem)}</dd>${reproBlock(it.repro)}${shotsBlock(it.shots, '现场')}
+        <dt>解法</dt><dd class="x">${rt(it.approach)}</dd>
       </dl>
-      ${it.note ? `<p class="notes">${esc(it.note)}</p>` : ''}
+      ${it.note ? `<${NOTES_TAG} class="notes">${rt(it.note)}</${NOTES_TAG}>` : ''}
       ${wtBlock(it.walkthroughs)}
-      ${it.links?.length ? `<div class="row links">${it.links.map(linkA).join('')}</div>` : ''}
+      ${it.links?.length ? `<div class="row links">${it.links.map(linkA).join('')}</div>` : ''}${detailBlock(it)}
     </div>
   </article>`
 
@@ -1568,9 +1598,9 @@ const decCard = (e) => {
     })}
     <div class="rbody">
       <dl>
-        <dt>问题</dt><dd class="x">${esc(e.question)}</dd>
-        ${e.decision ? `<dt>结论</dt><dd class="decided">✓ ${esc(e.decision)}</dd>` : `<dd class="pending">⏳ 待决——看 demo 后在此记结论,升 D 码</dd>`}
-        ${e.demoNote ? `<dt>demo</dt><dd class="demonote">${esc(e.demoNote)}</dd>` : ''}${shotsBlock(e.shots, '现场')}
+        ${decSrcRow(e)}<dt>问题</dt><dd class="x">${rt(e.question)}</dd>
+        ${e.decision ? `<dt>结论</dt><dd class="decided">${RICH ? rt('✓ ' + e.decision) : `✓ ${esc(e.decision)}`}</dd>` : `<dd class="pending">⏳ 待决——看 demo 后在此记结论,升 D 码</dd>`}
+        ${e.demoNote ? `<dt>demo</dt><dd class="demonote">${rt(e.demoNote)}</dd>` : ''}${shotsBlock(e.shots, '现场')}
       </dl>
       ${hasMeta ? `<div class="pathmeta">
         ${secs ? `<span class="pm-lbl">设计</span>${secs}` : ''}
@@ -1583,7 +1613,7 @@ const decCard = (e) => {
         ${e.designDoc ? linkA({ title: '设计文档', href: e.designDoc }) : ''}
         ${e.route && e.routeLive ? `<a href="${esc(liveUrl(e.route))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
         ${(e.links || []).map(linkA).join('')}
-      </div>
+      </div>${detailBlock(e)}
     </div>
   </article>`
 }
@@ -2756,6 +2786,56 @@ const REL_JS = !REL ? '' : `
     relRoute()
   })();`
 
+// ———— 卡正文轻 markdown:门控注入片(RICH 关时全为空串)————
+// 颜色一律走既有 :root 变量,不引新 hex —— darkStyle 只包 <style> 里的色值,变量天然跟着主题走。
+const RICH_CSS = !RICH ? '' : `
+  /* ============ 卡正文轻 markdown(v0.13.0,config.richText)============ */
+  .lite { max-width: 72ch; line-height: 1.6; }
+  .lite p { margin: 0 0 .6em; }
+  .lite p:last-child { margin-bottom: 0; }
+  .lite b { color: var(--ink); font-weight: 600; }
+  .lite code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; font-size: .92em; }
+  .lite ul, .lite ol { margin: 0 0 .6em; padding-left: 1.5em; }
+  .lite li { margin: .15em 0; }
+  /* 圈号自带标号,列表标记关掉,标号悬挂在正文外 —— 多行条目的续行才对得齐 */
+  .lite ol.circ { list-style: none; padding-left: 1.7em; }
+  .lite ol.circ > li { position: relative; }
+  .lite ol.circ > li > .mk { position: absolute; left: -1.7em; width: 1.5em; color: var(--brand); }
+  /* 【日期】小节:段前一条细线;首段不画(否则字段一开头就顶着一条线) */
+  .lite .tsec { border-top: 1px solid var(--line); padding-top: .55em; margin-top: .35em; }
+  .lite .tsec:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .litemore { appearance: none; border: 0; background: none; padding: 0; margin-top: 6px; font: inherit;
+     font-size: 11.5px; color: var(--faint); cursor: pointer; }
+  .litemore:hover { color: var(--accent); }
+  .lsrc .bbadge { display: inline-block; max-width: 72ch; line-height: 1.6; font-weight: 500; }
+  .detail { margin-top: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
+  .detail > summary { cursor: pointer; padding: 7px 11px; font-size: 12px; color: var(--mut); list-style: none; }
+  .detail > summary::-webkit-details-marker { display: none; }
+  .detail > summary::before { content: "▸ "; color: var(--faint); font-size: 11px; }
+  .detail[open] > summary::before { content: "▾ "; }
+  .detail > summary .n { color: var(--faint); }
+  .detail .dbody { padding: 2px 11px 11px; }`
+// clampScan 的让路:烤了预览/全文两份的字段,折叠已经由 400 字预览负责,再叠一层高度截断
+// 就成了「点开还是两行」。打上 data-cl 直接出局(幂等,与量过的字段同一个出口)。
+const RICH_CLAMP_SKIP = !RICH ? '' : `if (el.querySelector('.lfull')) { el.dataset.cl = '1'; return }
+      `
+const RICH_JS = !RICH ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    // 长文预览 ↔ 全文:两份都烤在 DOM 里(gen 按 ${RICH_N} 字的段落边界切),点钮只换 hidden。
+    // 折叠状态不记忆(定稿 §6.1-2);卡头展开与本钮互不干扰 —— 上面那个全局 handler 见 button 就让路。
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('.litemore')
+      if (!btn) return
+      var box = btn.parentElement
+      var pre = box.querySelector('.lpre'), full = box.querySelector('.lfull')
+      if (!pre || !full) return
+      var open = full.hidden
+      full.hidden = !open
+      pre.hidden = open
+      btn.textContent = open ? '收起' : '展开 · 还有 ' + btn.getAttribute('data-rest') + ' 字'
+    })
+  })()`
+
 
 // ============================================================================
 //  组装 index.html
@@ -3374,7 +3454,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -3410,9 +3490,9 @@ const html = `<!doctype html>
   // 长文折叠:pane 可见时才量高(display:none 下 scrollHeight=0 会误判);量过的打 data-cl 不重复
   function clampScan(pane) {
     if (!pane) return
-    pane.querySelectorAll('dd.x, dd.decided, dd.demonote, p.notes').forEach(function (el) {
+    pane.querySelectorAll('dd.x, dd.decided, dd.demonote, ${NOTES_TAG}.notes').forEach(function (el) {
       if (el.dataset.cl || el.offsetParent === null) return
-      const lh = parseFloat(getComputedStyle(el).lineHeight) || 21
+      ${RICH_CLAMP_SKIP}const lh = parseFloat(getComputedStyle(el).lineHeight) || 21
       el.dataset.cl = '1'
       if (el.scrollHeight > lh * 3.3) el.classList.add('clamp')
     })
@@ -3794,7 +3874,7 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}
 </script>
 `
 
