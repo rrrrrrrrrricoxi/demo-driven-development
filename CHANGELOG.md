@@ -9,6 +9,39 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Added
+- Optional **rich text for card prose** (`"richText": true` in
+  `kanban.config.json`). Card bodies are written by one session for the next
+  one to read, and until now they arrived as one wall of text: the newlines
+  were collapsed by `white-space`, and `**` and backticks showed up raw. With
+  the switch on, the long fields of all three card kinds (background / approach
+  / note, question / conclusion / demo note, problem / plan / notes) go through
+  a small renderer that understands `**bold**`, `` `code` ``, blank-line
+  paragraphs, single newlines, `-` and `1.` lists, `①`–`⑩` lists (the circled
+  number stays as the marker), and a `【…】` opening as a dated section with a
+  hairline above it. It deliberately does not understand headings, tables, link
+  syntax or HTML — escaping happens first, so a card can carry a `<script>` in
+  a code span and it stays text. With the switch off (the default), output is
+  byte-identical to 0.12.0.
+- A 400-character preview for long fields, under the same switch. A field over
+  that length is baked twice — a first-paragraph preview and the full text —
+  with a quiet "expand · M more characters" button between them. The existing
+  height-based fold stays for everything else and steps aside for fields that
+  were split, so the two never stack. Fold state is not remembered.
+- An optional `detail` card field for the long trail of evidence — file-by-file
+  findings, gray-box notes — rendered after every other field as a collapsed
+  "verification detail · N characters" block. Cards without the field render
+  byte-identically, and the field is only read when `richText` is on.
+- The `source` field of decision cards is now rendered (as the same quiet badge
+  backlog cards use). It has always been part of the data and was never shown.
+- A non-blocking guard notice when a prose field runs past 800 characters on a
+  card that has no `detail` field — it names up to five cards and the field to
+  move. It only runs when `richText` is on.
+- `scripts/lite.mjs` — the renderer as a pure module, so the rules and the
+  escaping are unit-testable on their own.
+
 ## [0.12.0] - 2026-08-26
 
 ### Added

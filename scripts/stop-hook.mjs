@@ -16,6 +16,8 @@
 //   3. 验收审计(v0.12.0,只在 config.acceptanceTab 开且 acceptance-manifest.json 在场时):
 //      current 指向的 PR 没清单 / 同一 PR 落进两份清单 / 条目 id 重复 / cards 引用不存在的卡号,
 //      各出一条非阻断 notice;清单 JSON 坏了也只报一条,不崩、不拦。
+//   4. 正文长度审计(v0.13.0,只在 config.richText 开时):某长文本字段 > 800 字且卡无 detail
+//      字段 → 一条非阻断 notice,最多点名 5 张(摘要与细节分家的写法规矩见 ddd-workflow)。
 //
 // plugin 化改造(设计 §6):
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
@@ -167,6 +169,38 @@ const orphans = demos.filter((f) => !covered.has(f))
         }
         for (const c of l.cards || []) if (!ids.has(String(c))) notices.push(S.accUnknownCard(l.key, c))
       }
+    }
+  }
+}
+
+// ---- ④ 正文长度审计(v0.13.0,只在 config.richText 开时跑):超长字段而无 detail 的卡点名 ----
+// detail 字段本身受 richText 门控,没开的板催也白催。全部非阻断 —— 正文长短是写法问题,不是错误。
+{
+  let richOn = false
+  try { richOn = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8')).richText === true } catch {}
+  if (richOn) {
+    const LONG = 800
+    const hits = []
+    for (const [f, k, fields] of [
+      ['manifest.json', 'tasks', ['problem', 'approach', 'notes']],
+      ['backlog-manifest.json', 'items', ['problem', 'approach', 'note']],
+      ['decisions-manifest.json', 'entries', ['question', 'decision', 'demoNote', 'source']],
+    ]) {
+      let list = []
+      try { list = JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))[k] || [] } catch {}
+      for (const c of list) {
+        if (!c || c.detail) continue
+        let worst = null // 一张卡只点一次,报最长的那个字段(点名是为了让人动手,不是为了铺满屏)
+        for (const key of fields) {
+          const n = typeof c[key] === 'string' ? c[key].length : 0
+          if (n > LONG && (!worst || n > worst.n)) worst = { key, n }
+        }
+        if (worst) hits.push({ id: String((c.id ?? '?')), key: worst.key, n: worst.n })
+      }
+    }
+    if (hits.length) {
+      hits.sort((a, b) => b.n - a.n)
+      notices.push(S.richLongText(hits.slice(0, 5), hits.length))
     }
   }
 }
