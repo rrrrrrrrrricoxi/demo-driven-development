@@ -41,6 +41,41 @@ downgrade would freeze every already-stamped board. See
   move. It only runs when `richText` is on.
 - `scripts/lite.mjs` — the renderer as a pure module, so the rules and the
   escaping are unit-testable on their own.
+- **Progress response** — pull request state now flows back onto the cards.
+  Whenever `release-manifest.json` is present (the file `pr-sync.mjs` writes),
+  a card whose pull requests are all merged while the card itself is still in a
+  non-final status gets an amber "merged · not settled" chip; a card already in
+  a final status that still has an open pull request gets the opposite one; a
+  card spanning several pull requests shows "2/3 merged". A board without the
+  file renders byte-identically.
+- Links to a pull request in this repository now carry the real state (open /
+  merged on a date / shipped in a release) wherever they appear in `links[]`,
+  and a hand-written state word in the link title that no longer matches
+  ("open", "to be merged", "merged") is struck through rather than edited —
+  the data stays as the author wrote it, the board just stops repeating it.
+- A quiet "dormant N days" note on backlog cards that are ready, dated more
+  than 30 days ago and carry no pull request. The day count is computed in the
+  browser; `gen` bakes only the date, as it neither reads the clock nor the
+  network.
+- An "unsettled" section at the top of the release progress tab, grouping those
+  cards under the pull request that merged them, and two non-blocking guard
+  notices at stop time naming up to five cards of each kind.
+- `scripts/pr-sync.mjs --settle` prints, after syncing, the cards whose pull
+  requests are all merged along with the status each one should move to
+  (`done`, or `live` for decision cards). It only prints; `--settle --write`
+  applies it — the status field, plus one dated line appended to the card's
+  timeline field where the card kind has one. It refuses to rewrite a manifest
+  that is not formatted the way `JSON.stringify(…, null, 2)` writes it, so a
+  settle run can never reflow bytes somebody else wrote by hand.
+- `scripts/settle.mjs` — the three judgements as a pure module shared by the
+  generator, the guard and `pr-sync`, so there is one definition of "settled"
+  rather than three.
+
+### Changed
+- The reminder injected after a `gh pr merge` now points at
+  `pr-sync.mjs --settle` (sync, then see which cards are waiting to be
+  settled) instead of the generic "check whether a card needs advancing". Every
+  other `gh pr` subcommand keeps the reminder it had.
 
 ## [0.12.0] - 2026-08-26
 

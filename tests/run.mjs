@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。274 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。343 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
-// 卡正文轻 markdown(lite 规则逐条 + XSS + 折叠预览 + detail 字段 + 正文长度守卫)等。
+// 卡正文轻 markdown(lite 规则逐条 + XSS + 折叠预览 + detail 字段 + 正文长度守卫)、
+// 进度响应(settle/reopen/stale-link/dormant 穷举 + 芯片 + 待收账段 + 守卫 + pr-sync --settle)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -882,9 +883,12 @@ const REL_MANIFEST = {
   const cfg = rd(cfgP)
   cfg.releaseTab = false
   wr(cfgP, cfg)
-  wr(relP, REL_MANIFEST) // false 时文件在场也不进 tab(芯片后缀另说,见 T33)
+  wr(relP, REL_MANIFEST) // false 时文件在场也不进 tab(芯片后缀 / 链接状态另说,见 T33 / T36)
   runGen(NEW_SCRIPTS, fx31.kb)
-  ok(sha(idxP) === offSha, 'releaseTab:false 与未配逐字节相同(文件在场也不渲染 pane)')
+  const relOff = readFileSync(idxP, 'utf8')
+  ok(!relOff.includes('pane-release') && !relOff.includes('class="relr"'), 'releaseTab:false 时文件在场也不渲染 pane')
+  ok(relOff.includes('<span class="prst">开着</span>'),
+    'PR 链接的状态后缀不随 tab 走:release-manifest 在场就生效(与卡头芯片后缀同一道门,见 T33)')
   cfg.releaseTab = true
   wr(cfgP, cfg)
   rmSync(relP)
@@ -1174,6 +1178,252 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, fx35.kb)
   ok(sha(idxP) === offSha, 'richText 关回后与冻结基线逐字节相同')
+}
+
+// ============ T36 进度响应判定(纯函数穷举:settleOf / staleLink / dormantDate)============
+console.log('T36 进度响应判定')
+{
+  const { KIND_TERMINAL, settleOf, staleLink, dormantDate } = await import(join(NEW_SCRIPTS, 'settle.mjs'))
+  const REPO = 'o/r'
+  const rel = new Map([
+    [10, { number: 10, state: 'merged', mergedAt: '2026-08-19T01:00:00Z' }],
+    [11, { number: 11, state: 'merged', mergedAt: '2026-08-22T01:00:00Z' }],
+    [12, { number: 12, state: 'open', draft: false }],
+    [13, { number: 13, state: 'open', draft: true }],
+    [14, { number: 14, state: 'closed' }],
+  ])
+  const refs = (...ns) => ns.map((n) => ({ repo: REPO, num: n }))
+  const kind = (status, ...ns) => settleOf({ status }, refs(...ns), rel, REPO)
+
+  ok(kind('ready', 10).kind === 'settle', 'settle:唯一的 PR 合了,卡还 ready')
+  ok(kind('ready', 10, 11).kind === 'settle', 'settle:两个 PR 都合了')
+  ok(kind('done', 10, 11).kind === null, '都合了且卡已 done = 一致,不出芯片')
+  ok(kind('live', 10).kind === null && kind('closed', 10).kind === null, '决策卡的终态 live / closed 同样算收过账')
+  const part = kind('ready', 10, 12)
+  ok(part.kind === null && part.merged === 1 && part.total === 2, '部分合并不算 settle(渲染层另出「1/2 已合」)', JSON.stringify(part))
+  ok(kind('ready', 14).kind === null, '关掉未合的 PR 不是「已合」,不催收账')
+  ok(kind('done', 12).kind === 'reopen', 'reopen:卡已 done,PR 还开着')
+  ok(kind('done', 13).kind === 'reopen', 'reopen:草稿也算开着')
+  ok(kind('live', 10, 12).kind === 'reopen', 'reopen:终态卡里只要有一个开着就算(哪怕别的合了)')
+  ok(kind('ready', 12).kind === null, 'ready + PR 开着 = 正常的验收中,不是不一致')
+  ok(kind('done', 14).kind === null, '终态 + 关掉未合 = 没什么可说的')
+  ok(kind('ready').kind === null && kind('ready', 99).kind === null,
+    '没挂 PR / 号没同步过 → 判不动就不判(缺数据不当「还开着」用)')
+  ok(settleOf({ status: 'ready' }, [{ repo: 'x/y', num: 10 }], rel, REPO).kind === null, '跨仓 PR 的状态不在本仓 manifest 里,不参与判定')
+  ok(KIND_TERMINAL.items === 'done' && KIND_TERMINAL.tasks === 'done' && KIND_TERMINAL.entries === 'live',
+    '收账目标:backlog / 进度卡 done,决策卡 live(不是 closed)')
+
+  // ---- stale-link:手写状态词 × 实际状态穷举 ----
+  const L = (title, n, repo = REPO) => ({ title, href: `https://github.com/${repo}/pull/${n}` })
+  ok(staleLink(L('PR#10(开而不合)', 10), rel, REPO).word === '开而不合', '「开而不合」遇上已合 → 过时')
+  ok(staleLink(L('PR#10(待合)', 10), rel, REPO).real === 'merged', '「待合」遇上已合 → 过时,real 报实际')
+  ok(staleLink(L('PR#12(已合并)', 12), rel, REPO).word === '已合并', '「已合并」遇上还开着 → 过时(长词先命中,不剩一个「并」字)')
+  ok(staleLink(L('PR#14(已合)', 14), rel, REPO).real === 'closed', '「已合」遇上关掉未合 → 过时')
+  ok(staleLink(L('PR#14(待合)', 14), rel, REPO) !== null, '「待合」遇上关掉未合 → 也过时(它再也合不了了)')
+  ok(staleLink(L('PR#10(已合并)', 10), rel, REPO) === null, '说得对的不划:「已合并」+ 已合')
+  ok(staleLink(L('PR#12(开而不合)', 12), rel, REPO) === null, '说得对的不划:「开而不合」+ 开着')
+  ok(staleLink(L('PR#13(待合)', 13), rel, REPO) === null, '草稿算开着,「待合」没说错')
+  ok(staleLink(L('PR#10 阶段二', 10), rel, REPO) === null, '标题里没有状态词 → 无所谓过不过时')
+  ok(staleLink(L('PR#10(开而不合)', 10, 'x/y'), rel, REPO) === null, '外仓链接一律不认(号会撞)')
+  ok(staleLink(L('PR#99(已合)', 99), rel, REPO) === null, '没同步过的号:不知道就不说')
+  ok(staleLink({ title: '设计文档(已合)', href: 'refs/design.html' }, rel, REPO) === null, '不是 PR 链接的一概不碰')
+
+  // ---- dormant:天数不在这儿算,只判「够不够格烤日期」 ----
+  ok(dormantDate({ status: 'ready', date: '2026-01-02' }) === '2026-01-02', 'ready + 正经日期 → 烤这个日期')
+  ok(dormantDate({ status: 'done', date: '2026-01-02' }) === '', '只有 ready 才谈沉睡')
+  ok(dormantDate({ status: 'ready' }) === '' && dormantDate({ status: 'ready', date: '2026-01' }) === '', '没日期 / 日期写残 → 不判')
+}
+
+// ============ T37 进度响应渲染(芯片 / 链接状态后缀 / 沉睡 / 待收账段 / 守卫;缺 manifest 零差异)============
+console.log('T37 进度响应渲染')
+{
+  const fx37 = mkFixture('fx37', { 's.html': demoHtml('s') })
+  const cfgP = join(fx37.kb, 'kanban.config.json'), idxP = join(fx37.kb, 'index.html')
+  const relP = join(fx37.kb, 'release-manifest.json')
+  const mP = join(fx37.kb, 'manifest.json'), decP = join(fx37.kb, 'decisions-manifest.json'), blP = join(fx37.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  const item = (o) => ({ status: 'ready', priority: 'high', tier: '1', title: 't', problem: 'p', approach: 'a', area: 'x', source: 's', ...o })
+  bl.items = [
+    item({ id: 'BL-S', pr: 227 }), // 合了,卡还 ready → 待收账
+    item({ id: 'BL-R', status: 'done', pr: 232 }), // 收了,PR 还开着 → 反向
+    item({ id: 'BL-P', pr: [227, 226, 232] }), // 3 个里合了 2 个 → 2/3
+    item({ id: 'BL-D', date: '2026-01-02' }), // ready、有日期、一个 PR 都没挂 → 烤沉睡日期
+    item({ id: 'BL-N', date: '2026-01-02', pr: 232 }), // 挂了 PR 就不算沉睡(有人在推)
+    item({ id: 'BL-L', pr: 999, links: [
+      { title: 'PR#227 阶段二(开而不合)', href: 'https://github.com/o/r/pull/227' },
+      { title: 'PR#226(已合并)', href: 'https://github.com/o/r/pull/226' },
+      { title: 'PR#232(待合)', href: 'https://github.com/o/r/pull/232' },
+      { title: '外仓 PR#227(开而不合)', href: 'https://github.com/x/y/pull/227' },
+    ] }),
+  ]
+  dec.entries = [
+    { id: 'D1', code: 'D1', status: 'decided', date: '2026-01-01', title: '决策甲', question: 'q', pr: 226 },
+    { id: 'D2', code: 'D2', status: 'live', date: '2026-01-01', title: '决策乙', question: 'q', pr: 230 },
+  ]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx37.kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('rspchip') && !off.includes('rspdorm') && !off.includes('class="stale"'), '没有 release-manifest:零芯片、零沉睡、零划线')
+
+  wr(relP, REL_MANIFEST)
+  const r = runGen(NEW_SCRIPTS, fx37.kb)
+  ok(r.status === 0, 'release-manifest 在场 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  const cardOf = (id) => { const i = on.indexOf(`id="${id}"`); return i < 0 ? '' : on.slice(i, on.indexOf('</article>', i)) }
+  ok(cardOf('BL-S').includes('<span class="rspchip rsp-settle"') && cardOf('BL-S').includes('PR 已合 · 待收账'), 'settle 卡挂琥珀芯片「PR 已合 · 待收账」')
+  ok(cardOf('BL-R').includes('<span class="rspchip rsp-reopen"') && cardOf('BL-R').includes('已收账但 PR 未合'), 'reopen 卡挂芯片「已收账但 PR 未合」')
+  ok(/<span class="rspchip rsp-part"[^>]*>2\/3 已合<\/span>/.test(cardOf('BL-P')), '部分合并:「2/3 已合」,不算 settle', cardOf('BL-P').slice(0, 200))
+  ok(!cardOf('BL-S').includes('rsp-part') && !cardOf('BL-R').includes('rsp-part'), 'settle / reopen 的卡不再叠一枚计数芯片')
+  ok(cardOf('D1').includes('rsp-settle'), '决策卡 decided + PR 已合 → 同样待收账')
+  ok(cardOf('D2').includes('rsp-reopen'), '决策卡 live + PR 开着 → 反向提示')
+  ok(cardOf('BL-D').includes('<span class="rspdorm" data-dorm="2026-01-02" hidden></span>'), '沉睡:gen 只烤日期,天数留给浏览器')
+  ok(!cardOf('BL-N').includes('rspdorm'), '挂了 PR 的 ready 卡不算沉睡')
+  ok(on.includes("Date.parse(el.getAttribute('data-dorm')") && on.includes('沉睡 ') && on.includes('d <= 30'),
+    '沉睡天数在浏览器算(阈值 30 天),gen 侧无 new Date()')
+  ok(!/new Date\(\)/.test(on.split('<script>')[0]), 'gen 零时间:静态部分不含 new Date()')
+  ok(cardOf('BL-L').includes('↗ PR#227 阶段二(<s class="stale">开而不合</s>)<span class="prst">已发 v0.0.1</span>'),
+    '过时的手写状态词划掉 + 补真实状态', (cardOf('BL-L').match(/↗ PR#227[^<]*(<[^>]*>[^<]*){0,3}/) || [''])[0])
+  ok(cardOf('BL-L').includes('↗ PR#226(已合并)<span class="prst">已合 08-22</span>')
+    && cardOf('BL-L').includes('↗ PR#232(待合)<span class="prst">开着</span>'), '说得对的手写词不划,状态后缀照补')
+  ok(cardOf('BL-L').includes('↗ 外仓 PR#227(开而不合)</a>'), '外仓链接原样不动(号会撞,不敢认)')
+
+  // ---- 发布进度 tab 的「待收账」段 ----
+  const cfg = rd(cfgP)
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  const r2 = runGen(NEW_SCRIPTS, fx37.kb)
+  ok(r2.status === 0, 'releaseTab + 进度响应 gen exit 0', r2.stderr)
+  const rel = readFileSync(idxP, 'utf8')
+  ok(rel.includes('<p class="rspsh">待收账 · 2 张卡'), '待收账段:按卡去重计数(BL-S 与 D1)', (rel.match(/class="rspsh">[^<]*/) || [])[0])
+  {
+    const seg = rel.slice(rel.indexOf('class="rspsettle"'), rel.indexOf('class="relview"'))
+    ok(seg.includes('>PR #227</a>') && seg.includes('href="#BL-S"'), '待收账按 PR 分组,组下挂卡')
+    ok(seg.includes('>PR #226</a>') && seg.includes('href="#D1"'), '决策卡也进这一段')
+    ok(!seg.includes('#BL-P') && !seg.includes('#BL-R'), '部分合并 / 反向的卡不进待收账')
+  }
+  { // 整壳编译:进度响应运行时与懒加载/暗夜/发布进度在同一块里
+    const sc = rel.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  { // 一张 settle 都没有 → 整段不渲染(空段比没有更吵)
+    const bl2 = rd(blP)
+    for (const it of bl2.items) if (it.status === 'ready') it.status = 'done'
+    wr(blP, bl2)
+    const dec2 = rd(decP)
+    dec2.entries[0].status = 'live'
+    wr(decP, dec2)
+    runGen(NEW_SCRIPTS, fx37.kb)
+    ok(!readFileSync(idxP, 'utf8').includes('<div class="rspsettle">'), '没有待收账的卡 → 整段不渲染(CSS 片段还在,那是门控注入片的常态)')
+    wr(blP, bl); wr(decP, dec)
+  }
+
+  // ---- 守卫:两条非阻断 notice ----
+  delete cfg.releaseTab
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx37.kb)
+  touch(idxP)
+  const g = runStop(NEW_SCRIPTS, fx37.root)
+  ok(g.status === 0 && /2 张卡的关联 PR 都已合并/.test(g.stdout) && /BL-S/.test(g.stdout) && /D1/.test(g.stdout),
+    '守卫:待收账的卡号 + 总数(非阻断)', `${g.status} ${g.stdout.slice(0, 300)}`)
+  ok(/2 张卡已收到终态,却还有关联 PR 开着/.test(g.stdout) && /BL-R/.test(g.stdout) && /D2/.test(g.stdout), '守卫:反向那条也点名')
+  ok(!/"decision":\s*"block"/.test(g.stdout), '两条都不阻断收工')
+
+  // ---- 撤掉 release-manifest:逐字节回到基线 ----
+  rmSync(relP)
+  runGen(NEW_SCRIPTS, fx37.kb)
+  ok(sha(idxP) === offSha, '撤掉 release-manifest 后与无文件基线逐字节相同')
+  touch(idxP)
+  const g2 = runStop(NEW_SCRIPTS, fx37.root)
+  ok(g2.status === 0 && !/待收账/.test(g2.stdout), '没有 release-manifest 时守卫这一段整个不跑')
+}
+
+// ============ T38 pr-sync --settle(假 gh;默认只打印,--write 只动两个字段)============
+console.log('T38 pr-sync --settle')
+{
+  const fx38 = mkFixture('fx38', { 's.html': demoHtml('s') })
+  const relP = join(fx38.kb, 'release-manifest.json')
+  const mP = join(fx38.kb, 'manifest.json'), decP = join(fx38.kb, 'decisions-manifest.json'), blP = join(fx38.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr2 = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n') // 人手写的形制:2 空格 + 末尾换行
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', problem: 'p', approach: 'a', area: 'x', source: 's', note: '【2026-07-01】立卡', pr: 11 },
+    { id: 'BL-2', status: 'done', priority: 'high', tier: '1', title: '乙', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 12 },
+    { id: 'BL-3', status: 'ready', priority: 'high', tier: '1', title: '丙', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 10 },
+  ]
+  dec.entries = [{ id: 'D1', code: 'D1', status: 'decided', date: '2026-01-01', title: '决策甲', question: 'q', pr: 10 }]
+  wr2(mP, mm); wr2(decP, dec); wr2(blP, bl)
+  wr2(relP, { stages: REL_MANIFEST.stages, releases: [], prs: [], syncedAt: null })
+  const ghDir = join(WORK, 'fakegh38')
+  mkdirSync(ghDir, { recursive: true })
+  writeFileSync(join(ghDir, 'gh'), `#!/bin/sh
+case "$1 $2" in
+"pr list") echo '[{"number":10,"title":"丙","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/c","url":"https://github.com/o/r/pull/10","createdAt":"2026-07-10T01:00:00Z","mergedAt":"2026-07-12T01:00:00Z","closedAt":"2026-07-12T01:00:00Z"},
+ {"number":11,"title":"甲","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/a","url":"https://github.com/o/r/pull/11","createdAt":"2026-07-18T01:00:00Z","mergedAt":"2026-07-19T01:00:00Z","closedAt":"2026-07-19T01:00:00Z"},
+ {"number":12,"title":"乙","state":"OPEN","isDraft":false,"baseRefName":"main","headRefName":"feat/b","url":"https://github.com/o/r/pull/12","createdAt":"2026-08-20T01:00:00Z","mergedAt":null,"closedAt":null}]' ;;
+"release list") echo '[]' ;;
+esac
+`)
+  chmodSync(join(ghDir, 'gh'), 0o755)
+  const runSync = (extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', fx38.kb, ...extra],
+    { encoding: 'utf8', env: { ...process.env, PATH: ghDir } })
+  const blBefore = sha(blP), decBefore = sha(decP), relBefore = sha(relP)
+
+  const rDry = runSync(['--settle', '--dry-run'])
+  ok(rDry.status === 0 && sha(blP) === blBefore && sha(decP) === decBefore && sha(relP) === relBefore,
+    '--settle --dry-run:一个文件都不写(连 release-manifest 也不写)', `${rDry.status} ${rDry.stderr.slice(0, 160)}`)
+  ok(/BL-1\s+ready → done\s+PR #11/.test(rDry.stdout) && /D1\s+decided → live\s+PR #10/.test(rDry.stdout),
+    '清单列出卡 → 建议 status(决策卡收到 live)', rDry.stdout)
+  ok(/BL-3\s+ready → done\s+PR #10/.test(rDry.stdout) && !/BL-2/.test(rDry.stdout),
+    '同一个 PR 可以带出几张卡;PR 还开着的卡不进清单')
+
+  const rList = runSync(['--settle'])
+  ok(rList.status === 0 && sha(blP) === blBefore && sha(decP) === decBefore && sha(relP) !== relBefore,
+    '--settle 不加 --write:同步照写 release-manifest,卡的 manifest 一字不动')
+  ok(/--write/.test(rList.stdout), '干跑输出里点明「加 --write 才收账」')
+  const rNoSettle = runSync(['--write'])
+  ok(rNoSettle.status === 0 && sha(blP) === blBefore && !/收账|settle/.test(rNoSettle.stdout),
+    '单给 --write 不作数(它是 --settle 的修饰)')
+
+  const blText = readFileSync(blP, 'utf8'), decText = readFileSync(decP, 'utf8')
+  const rW = runSync(['--settle', '--write'])
+  ok(rW.status === 0, '--settle --write exit 0', `${rW.stdout}${rW.stderr}`)
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const want = JSON.parse(blText)
+  want.items[0].status = 'done'
+  want.items[0].note = `【2026-07-01】立卡\n\n【${today} 收账】PR#11 已合(自动)`
+  want.items[2].status = 'done'
+  want.items[2].note = `【${today} 收账】PR#10 已合(自动)`
+  ok(readFileSync(blP, 'utf8') === JSON.stringify(want, null, 2) + '\n',
+    '--write 只改目标卡的 status 与 note 尾行,其它字节不动、末尾换行不变')
+  const decWant = JSON.parse(decText)
+  decWant.entries[0].status = 'live'
+  ok(readFileSync(decP, 'utf8') === JSON.stringify(decWant, null, 2) + '\n',
+    '决策卡只改 status:gen 不渲染决策卡的 note,不硬塞一个没人读的字段')
+  ok(rd(blP).items[1].status === 'done' && !rd(blP).items[1].note, 'PR 还开着的卡没被碰')
+  const rAgain = runSync(['--settle'])
+  ok(/没有待收账|nothing to settle/.test(rAgain.stdout), '收完账再跑:清单空了')
+
+  // ---- 排版不是标准 2 空格 → 整份跳过(重排会动到别人手写的字节)----
+  const odd = JSON.stringify(JSON.parse(readFileSync(blP, 'utf8')), null, 4) + '\n'
+  writeFileSync(blP, odd)
+  const b2 = rd(blP)
+  b2.items[0].status = 'ready'
+  writeFileSync(blP, JSON.stringify(b2, null, 4) + '\n')
+  const oddSha = sha(blP)
+  const rOdd = runSync(['--settle', '--write'])
+  ok(rOdd.status === 0 && sha(blP) === oddSha && /排版|formatted/.test(rOdd.stderr),
+    '非标准排版的 manifest 拒绝改写,原文一字不动', `${rOdd.status} ${rOdd.stderr.slice(0, 160)}`)
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

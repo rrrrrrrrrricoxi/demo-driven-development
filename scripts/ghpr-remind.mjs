@@ -23,9 +23,12 @@ if (!cmd.startsWith('gh pr ')) process.exit(0) // 先验命令,免得每条 Bash
 const KANBAN = detect()
 if (!KANBAN) process.exit(0)
 
+// 合 PR 是「阶段完成」最硬的信号:那一刻的提醒换成收账动作(v0.13.0 定稿 §2.4),
+// 别的 gh pr 子命令照旧走通用那条。
+const S = loadStrings(KANBAN)
 console.log(JSON.stringify({
   hookSpecificOutput: {
     hookEventName: 'PostToolUse',
-    additionalContext: loadStrings(KANBAN).ghprRemind,
+    additionalContext: /^gh pr merge\b/.test(cmd) ? S.ghprRemindMerge : S.ghprRemind,
   },
 }))
