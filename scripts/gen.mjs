@@ -1319,6 +1319,27 @@ const blDimOpts = [`<option value="all">全部优先级 (${blCount})</option>`]
 
 // 走查留痕(决策/backlog 通用):反复讨论期的测试证据 —— 截图存 kanban/shots/,
 // manifest 里挂 walkthroughs:[{date,title,note?,shots:[{file,caption}]}],缩略图点开原图
+// 卡片现场截图(v0.11.4):shots: ["x.png"] 或 [{file, caption}];纯文件名默认落在 shots/ 下
+// (与截图廊同源——文件名以卡号打头即可在廊里自动归组并跳回本卡)。复用 .wtshots 样式,零新增 CSS。
+const shotsBlock = (list, label) => {
+  if (!Array.isArray(list) || !list.length) return ''
+  const cells = list.map((s) => {
+    const file = typeof s === 'string' ? s : (s && s.file) || ''
+    if (!file) return ''
+    const href = file.includes('/') ? file : 'shots/' + file
+    const cap = typeof s === 'string' ? '' : (s && s.caption) || ''
+    return `<a href="${esc(href)}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(href)}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
+  }).join('')
+  return cells ? `\n        <dt>${esc(label)}</dt><dd><div class="wtshots">${cells}</div></dd>` : ''
+}
+// bug 卡的复现流程(v0.11.4):repro: "一句话" 或 ["步骤一","步骤二"];数组渲编号行,复用 dd.x 样式
+const reproBlock = (r) => {
+  if (!r) return ''
+  const body = Array.isArray(r)
+    ? r.filter(Boolean).map((step, i) => `${i + 1}. ${esc(String(step))}`).join('<br>')
+    : esc(String(r))
+  return body ? `\n        <dt>复现</dt><dd class="x">${body}</dd>` : ''
+}
 const wtBlock = (list) =>
   !list?.length
     ? ''
@@ -1355,7 +1376,7 @@ const blCard = (it) => `
       </div>
       ${it.blockedOn ? `<p class="blockedon">⛔ 卡在:${esc(it.blockedOn)}</p>` : ''}
       <dl>
-        <dt>背景</dt><dd class="x">${esc(it.problem)}</dd>
+        <dt>背景</dt><dd class="x">${esc(it.problem)}</dd>${reproBlock(it.repro)}${shotsBlock(it.shots, '现场')}
         <dt>解法</dt><dd class="x">${esc(it.approach)}</dd>
       </dl>
       ${it.note ? `<p class="notes">${esc(it.note)}</p>` : ''}
@@ -1445,7 +1466,7 @@ const decCard = (e) => {
       <dl>
         <dt>问题</dt><dd class="x">${esc(e.question)}</dd>
         ${e.decision ? `<dt>结论</dt><dd class="decided">✓ ${esc(e.decision)}</dd>` : `<dd class="pending">⏳ 待决——看 demo 后在此记结论,升 D 码</dd>`}
-        ${e.demoNote ? `<dt>demo</dt><dd class="demonote">${esc(e.demoNote)}</dd>` : ''}
+        ${e.demoNote ? `<dt>demo</dt><dd class="demonote">${esc(e.demoNote)}</dd>` : ''}${shotsBlock(e.shots, '现场')}
       </dl>
       ${hasMeta ? `<div class="pathmeta">
         ${secs ? `<span class="pm-lbl">设计</span>${secs}` : ''}
