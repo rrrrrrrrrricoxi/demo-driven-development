@@ -2193,10 +2193,14 @@ const ACC_JS = !ACC ? '' : `
     function syncList(l) {
       var sec = document.getElementById('acc-' + l.k)
       if (!sec) return
+      // 行按 id 索引一遍,不拿 id 去拼选择器:条目 id 是人写在清单里的,带个引号就拼出非法选择器,
+      // querySelector 当场抛 —— 验收与发布进度共用一个 <script>,一抛后面整块都不跑了。
+      var rowsById = new Map()
+      sec.querySelectorAll('[data-accid]').forEach(function (r) { rowsById.set(r.dataset.accid, r) })
       var mine = ck[l.k], vt = 0, vd = 0, gc = {}
       l.items.forEach(function (it) {
         var on = Boolean(mine[it.id]), shown = visible(l, it)
-        var row = sec.querySelector('[data-accid="' + it.id + '"]')
+        var row = rowsById.get(it.id)
         if (row) {
           row.style.display = shown ? '' : 'none'
           row.classList.toggle('done', on)
