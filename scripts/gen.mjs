@@ -1866,6 +1866,7 @@ const docsPane = (() => {
 const SESS_CSS = !SESSION_ON ? '' : `
   /* ———— session 权责标签(v0.5.0):卡上小章 + 工具条筛选 chips ———— */
   .cardsess { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 600; line-height: 1.55;
+    white-space: nowrap;
     border-radius: 6px; padding: 0 7px; color: color-mix(in srgb, var(--sc) 62%, ${tk('mix-ink')});
     background: color-mix(in srgb, var(--sc) 12%, ${tk('mix-paper')});
     border: 1px solid color-mix(in srgb, var(--sc) 26%, ${tk('mix-paper')}); }
@@ -3077,7 +3078,9 @@ const html = `<!doctype html>
   .blcard { border-left: 3px solid var(--c); }
   .card header, .blcard header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .tid { font-size: 11px; font-weight: 700; color: var(--mut); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+  /* nowrap + flex:none:药丸是原子件,行卡里只有 .rtitle 该被压(中文逐字可断,不钉住会竖成一条) */
   .badge { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 9px;
+           white-space: nowrap; flex: none;
            color: color-mix(in srgb, var(--c) 62%, ${tk('mix-ink')});
            background: color-mix(in srgb, var(--c) 13%, ${tk('mix-paper')});
            border: 1px solid color-mix(in srgb, var(--c) 26%, ${tk('mix-paper')}); }
