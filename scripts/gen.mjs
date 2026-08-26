@@ -2313,11 +2313,16 @@ const REL_COUNT = { dev: 0, test: 0, prod: 0, other: 0 }
 for (const r of REL_ROWS) REL_COUNT[r.sg.id in REL_COUNT ? r.sg.id : 'other']++
 
 const relDate = (r) => String(r.p.mergedAt || r.p.closedAt || r.p.createdAt || '')
-// 默认序 = 日期降序;但已归版的行拿「打 tag 时刻」当键 —— 同版共键才保证一版聚成连续一块,
-// 否则一个七月开着没合的 PR 会按自己的日期插进 v0.0.2 组中间,分组头就得重复出现。
+// 段优先:开着的 PR 是这张表要盯的正事,不能因为「最新版本的 tag 比它新」就被整块已发的压到底下
+// (那样状态·日期那一列读下来还是乱的:已发 08-19 在开着 08-26 上面)。段内才按日期降序。
+const relRank = (r) => r.sg.id === 'dev' ? 0 : r.sg.id === 'test' ? 1 : r.sg.id === 'prod' ? 2 : 3
+// 段内日期降序;但已归版的行拿「打 tag 时刻」当键 —— 同版共键才保证一版聚成连续一块,
+// 否则一个七月合的 PR 会按自己的日期插进 v0.0.2 组中间,分组头就得重复出现。
 // 没写 at 的版本退回拿 tag 本身当键(而不是行自己的日期)—— 键只要一版一个常量,同版就还是连续一块。
 const relSortKey = (r) => r.sg.tag ? (REL_AT.get(r.sg.tag) || r.sg.tag) : relDate(r)
 const relCmp = (a, b) => {
+  const ra = relRank(a), rb = relRank(b)
+  if (ra !== rb) return ra - rb
   const ka = relSortKey(a), kb = relSortKey(b)
   if (ka !== kb) return ka < kb ? 1 : -1
   if (a.sg.tag !== b.sg.tag) return a.sg.tag < b.sg.tag ? 1 : -1
@@ -2554,8 +2559,11 @@ const REL_JS = !REL ? '' : `
     }
     function picked() { var out = [], k; for (k = 0; k < D.length; k++) if (pass(D[k])) out.push(D[k]); return out }
     function keyOf(d) { return d.tag ? (ATOF[d.tag] || d.tag) : d.d } // 没写 at 的版本拿 tag 当键,同版仍共键
-    function cmp(a, b) { // 与 gen 烤入的默认序同一口径:已归版的行拿打 tag 时刻当键 → 一版一块
+    function rankOf(d) { return d.st === 'dev' ? 0 : d.st === 'test' ? 1 : d.st === 'prod' ? 2 : 3 }
+    function cmp(a, b) { // 与 gen 烤入的默认序同一口径:段优先,段内已归版的行拿打 tag 时刻当键 → 一版一块
       if (sortKey === 'n') return (a.n - b.n) * sortDir
+      var ra = rankOf(a), rb = rankOf(b)
+      if (ra !== rb) return ra - rb // 段是分组不是排序方向:点日期表头翻的是段内次序,dev 始终在最上面
       var ka = keyOf(a), kb = keyOf(b)
       if (ka !== kb) return (ka < kb ? -1 : 1) * sortDir
       if (a.tag !== b.tag) return (a.tag < b.tag ? -1 : 1) * sortDir
