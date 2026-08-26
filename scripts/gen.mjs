@@ -574,6 +574,10 @@ const prStatus = (p) => {
   if (p.repo !== PR_REPO) return '' // 跨仓 PR 的状态不在本仓 manifest 里
   const r = relPr.get(p.num)
   if (!r) return ''
+  // 非主线排在最前,与 relstage.mjs 的段判定同序:叠在别人分支上的 PR 合了也不代表进了主线,
+  // 芯片说「已发 v0.0.3」而表格说「非主线」就是两套口径。
+  // (不能直接调 stageOf:releaseTab 关着时 REL_STAGE_IDS 是空的,merged-未归版会被判成 prod。)
+  if (REL_MAIN && r.base && r.base !== REL_MAIN) return '非主线'
   if (r.state === 'closed') return '已关闭'
   if (r.state === 'open') return r.draft ? '草稿' : '开着'
   if (r.state !== 'merged') return ''

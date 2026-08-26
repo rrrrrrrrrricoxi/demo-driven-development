@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。223 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。224 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)等。
@@ -923,13 +923,15 @@ console.log('T33 芯片状态后缀')
   const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
   const mm = rd(mP), dec = rd(decP), bl = rd(blP)
   for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
-  dec.entries = [230, 228, 227, 226, 225].map((n, i) => ({ id: `D${i + 1}`, code: `D${i + 1}`, status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: `决策 ${n}`, pr: n }))
+  dec.entries = [230, 228, 227, 226, 225, 223].map((n, i) => ({ id: `D${i + 1}`, code: `D${i + 1}`, status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: `决策 ${n}`, pr: n }))
+  // 223 = 叠在别人分支上、又合进去了的 PR:mergedAt 落在 v0.0.1 之前,按区间本会被算成「已发 v0.0.1」
+  const stacked = { number: 223, title: '叠 PR', state: 'merged', draft: false, base: 'feat/a', branch: 'feat/g2', url: 'https://github.com/o/r/pull/223', createdAt: '2026-08-17T01:00:00Z', mergedAt: '2026-08-19T02:00:00Z', closedAt: '2026-08-19T02:00:00Z', cards: [] }
   wr(mP, mm); wr(decP, dec); wr(blP, bl)
   runGen(NEW_SCRIPTS, fx33.kb)
   const noFile = readFileSync(idxP, 'utf8')
   const baseSha = sha(idxP)
   ok(noFile.includes('class="prchip"') && !noFile.includes('class="prst"'), '没有 release-manifest:有芯片、无后缀(PR-A 留的口在此闭合)')
-  wr(relP, REL_MANIFEST) // releaseTab 没开,芯片后缀照样有 —— 状态是数据,不是 tab 的附属品
+  wr(relP, { ...REL_MANIFEST, prs: [...REL_MANIFEST.prs, stacked] }) // releaseTab 没开,芯片后缀照样有 —— 状态是数据,不是 tab 的附属品
   const r = runGen(NEW_SCRIPTS, fx33.kb)
   ok(r.status === 0, 'release-manifest 在场 gen exit 0', r.stderr)
   const on = readFileSync(idxP, 'utf8')
@@ -938,6 +940,8 @@ console.log('T33 芯片状态后缀')
   ok(on.includes('<span class="prst">已发 v0.0.1</span>'), '芯片后缀「已发 v0.0.1」')
   ok(on.includes('<span class="prst">已合 08-22</span>'), '芯片后缀「已合 MM-DD」')
   ok(on.includes('<span class="prst">已关闭</span>'), '芯片后缀「已关闭」')
+  ok(/pull\/223[\s\S]{0,140}?<span class="prst">非主线<\/span>/.test(on),
+    '芯片后缀「非主线」:叠 PR 合了也不说「已发」,与发布进度表格同一个口径', (on.match(/pull\/223[\s\S]{0,140}/) || [''])[0].slice(0, 160))
   rmSync(relP)
   runGen(NEW_SCRIPTS, fx33.kb)
   ok(sha(idxP) === baseSha, '撤掉 release-manifest 后与无文件基线逐字节相同')
