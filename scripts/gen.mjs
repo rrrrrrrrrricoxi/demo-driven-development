@@ -2028,9 +2028,11 @@ const acceptancePane = !ACC ? '' : `
 const ACC_TAB = !ACC ? '' : `\n    <button class="tab" data-pane="acceptance">验收${ACC_CUR ? ` · ${ACC_CUR.items.length}` : ''}</button>`
 const ACC_PANE_HTML = !ACC ? '' : `\n  <section class="pane" id="pane-acceptance">${acceptancePane}</section>`
 const ACC_PANE_ID = !ACC ? '' : `, 'acceptance'`
-// 切进验收要重算目录/进度;切去别的 pane 也顺手刷卡头分子 —— 懒加载的 pane 是后到的,
-// 卡头芯片那时才进 DOM,只在 'acceptance' 上同步会让它停在烤入的初值。
+// 切进验收要重算目录/进度;切去别的 pane 也顺手刷卡头分子(卡在别的 pane 里也照算)。
 const ACC_SHOW = !ACC ? '' : `\n    if (window.accSync) accSync()`
+// 懒加载的 pane 是后到的:show() 里那次同步跑在 fetch 落地之前,卡头芯片那会儿还没进 DOM,
+// 分子会一直停在烤入的 0/N,直到下一次切 tab。注入完当场再补一次(accSync 幂等)。
+const ACC_INJECTED = !ACC ? '' : `\n    if (window.accSync) accSync()`
 const PRCHIP_CSS = !HAS_PR ? '' : `
   /* 卡头 PR 芯片(v0.12.0,卡上 pr 字段):与 session 小章同排,安静不抢戏 */
   .prchip { display: inline-flex; align-items: baseline; gap: 4px; font-size: 10.5px; font-weight: 600; line-height: 17px;
@@ -2765,7 +2767,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
     if (name === 'backlog') initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })
     applySearch() // 幂等全文档补 search-hide 戳
     setTime(curTf) // 补 tf-hide 戳;内含 setLine 终算计数/组显隐/徽章/空态
-    clampScan(document.querySelector('.pane-active'))
+    clampScan(document.querySelector('.pane-active'))${ACC_INJECTED}
   }
   function ensurePane(name) {
     if (!(name in LAZY_BYTES) || lazyDone[name]) return Promise.resolve()

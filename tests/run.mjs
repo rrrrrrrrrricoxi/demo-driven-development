@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。218 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。219 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)等。
@@ -730,6 +730,16 @@ const ACC_LIST = {
     let compiled = true
     for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
     ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  { // 懒加载 + 验收同开:pane 是 fetch 之后才到的,show() 那次同步跑在注入之前 —— 注入完必须再补一次
+    cfg.lazyTabs = true
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx28.kb)
+    const inj = (readFileSync(idxP, 'utf8').match(/function onPaneInjected\(name\) \{[\s\S]*?\n {2}\}/) || [''])[0]
+    ok(/accSync\(\)/.test(inj), 'lazyTabs + acceptanceTab 同开:onPaneInjected 里补一次 accSync(否则注入的卡头芯片停在 0/N)', inj.slice(-160))
+    delete cfg.lazyTabs
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx28.kb)
   }
   cfg.acceptanceTab = false
   wr(cfgP, cfg)
