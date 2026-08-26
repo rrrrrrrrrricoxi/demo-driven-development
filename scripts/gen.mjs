@@ -21,6 +21,7 @@ import { execSync, execFileSync } from 'node:child_process'
 import { join, resolve, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { genStrings } from './strings.mjs'
+import { declaredPrs, prsOfCard } from './prlink.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 function resolveKanbanDir() {
@@ -537,6 +538,110 @@ const linkA = (l) => {
   const r = cardLink(l.href)
   return `<a href="${esc(r.href)}"${r.ext ? ' target="_blank" rel="noopener"' : ''}>↗ ${esc(l.title)}</a>`
 }
+
+// ============================================================================
+//  PR 关联 + 验收清单(v0.12.0)
+//  卡上可选 `pr` 字段 → 卡头芯片;acceptance-manifest.json(opt-in)→「验收」tab。
+//  两者都缺席时,以下全部片段求值成空串 —— 输出对 0.11.4 逐字节冻结。
+// ============================================================================
+const PR_REPO = (m.instance && m.instance.ghRepo) || ''
+const ALL_CARDS = [...m.tasks, ...b.items, ...dm.entries]
+// 芯片只认显式 pr 字段;links 兼容(prsOfCard)只用于「PR ↔ 卡」反查 —— 否则存量看板的
+// 旧 PR 链接会凭空长出芯片,冻结承诺当场破。
+const HAS_PR = ALL_CARDS.some((c) => c && c.pr !== undefined && c.pr !== null)
+const prUrl = (p) => `https://github.com/${p.repo}/pull/${p.num}`
+const prLabel = (p) => (p.repo === PR_REPO ? `PR #${p.num}` : `${p.repo.split('/').pop()}#${p.num}`)
+
+// ———— release-manifest.json(可选;由 pr-sync 写,gen 只读)————
+// 在场才读:给 PR 芯片配状态后缀。缺席 = 后缀恒空,不读、不渲染,零差异。
+let rlm = null
+if (existsSync(join(HERE, 'release-manifest.json'))) {
+  try { rlm = JSON.parse(readFileSync(join(HERE, 'release-manifest.json'), 'utf8')) }
+  catch (e) { console.warn(`[gen] ⚠ release-manifest.json 无法解析,PR 状态后缀不渲染:${e.message}`) }
+}
+const relPr = new Map() // PR 号 → pr 记录
+const relTagOfPr = new Map() // PR 号 → 人手写在 releases[].prs 里的版本
+if (rlm) {
+  for (const p of rlm.prs || []) if (p && p.number != null) relPr.set(Number(p.number), p)
+  for (const r of rlm.releases || []) for (const n of r.prs || []) if (!relTagOfPr.has(Number(n))) relTagOfPr.set(Number(n), r.tag)
+}
+// 归版:显式 releases[].prs 优先;否则找 at ≥ mergedAt 的最早 release(按打 tag 的精确时刻,
+// 同一天在 tag 之后才合的算「未随版本发出」)。
+const relSorted = (rlm ? rlm.releases || [] : []).filter((r) => r && r.at).slice().sort((x, y) => (String(x.at) < String(y.at) ? -1 : 1))
+const relTagFor = (r) => {
+  const explicit = relTagOfPr.get(Number(r.number))
+  if (explicit) return explicit
+  if (!r.mergedAt) return ''
+  const hit = relSorted.find((rel) => String(rel.at) >= String(r.mergedAt))
+  return hit ? hit.tag : ''
+}
+const prStatus = (p) => {
+  if (p.repo !== PR_REPO) return '' // 跨仓 PR 的状态不在本仓 manifest 里
+  const r = relPr.get(p.num)
+  if (!r) return ''
+  if (r.state === 'closed') return '已关闭'
+  if (r.state === 'open') return r.draft ? '草稿' : '开着'
+  if (r.state !== 'merged') return ''
+  const tag = relTagFor(r)
+  return tag ? `已发 ${tag}` : `已合 ${String(r.mergedAt || '').slice(5, 10)}`
+}
+
+// ———— acceptance-manifest.json(config.acceptanceTab === true 才读;缺省即使文件在也不读)————
+const ACC = cfg.acceptanceTab === true
+let acm = null
+if (ACC) {
+  try { acm = JSON.parse(readFileSync(join(HERE, 'acceptance-manifest.json'), 'utf8')) }
+  catch (e) { throw new Error(GS.accManifestMissing(e.message)) }
+}
+const accWarn = (msg) => console.warn(`[gen] ⚠ acceptance-manifest:${msg}`)
+// 清单规整:pr 串(锚与 localStorage 键)、revision(改动即作废旧勾选)、分组/条目/数据块。
+// 软校验一律 console.warn 不阻断 —— 清单是人写的正文,坏一条不该把整块板打死。
+const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
+  const nums = (Array.isArray(l.pr) ? l.pr : [l.pr]).map(Number).filter((n) => Number.isFinite(n) && n > 0)
+  const groups = (l.groups || []).length ? l.groups : [{ id: '_', title: l.title || '清单', tip: '' }]
+  const gids = new Set(groups.map((g) => String(g.id)))
+  const rounds = l.rounds || []
+  const rids = new Set(rounds.map((r) => String(r.id)))
+  const data = l.data || {}
+  const seen = new Set()
+  const items = (l.items || []).map((it) => {
+    const id = String(it.id ?? '')
+    if (seen.has(id)) accWarn(`清单 ${nums.join('/')} 条目 id 重复:${id}`)
+    seen.add(id)
+    const g = String(it.group ?? groups[0].id)
+    if (!gids.has(g)) accWarn(`清单 ${nums.join('/')} 条目 ${id} 的 group「${g}」不在 groups`)
+    if (it.round && !rids.has(String(it.round))) accWarn(`清单 ${nums.join('/')} 条目 ${id} 的 round「${it.round}」不在 rounds`)
+    for (const k of it.data || []) if (!data[k]) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的数据块「${k}」`)
+    return { ...it, id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
+  })
+  return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [] }
+})
+{ // 同一 PR 出现在两份清单 = 勾选进度会分家,提醒
+  const owner = new Map()
+  for (const l of ACC_LISTS) for (const n of l.nums) {
+    if (owner.has(n)) accWarn(`PR #${n} 同时出现在两份清单(${owner.get(n)} 与 ${l.key})`)
+    else owner.set(n, l.key)
+  }
+}
+const ACC_BY_PR = new Map()
+for (const l of ACC_LISTS) for (const n of l.nums) if (!ACC_BY_PR.has(n)) ACC_BY_PR.set(n, l)
+const ACC_CUR = ACC ? ACC_BY_PR.get(Number(acm.current)) || null : null
+// 「验收中」是派生的,不加新状态枚举:current 那份,或(有 release-manifest 时)PR 还开着的那份
+const accLive = (n) => Boolean(ACC_BY_PR.get(n)) && (Number(acm.current) === n || (relPr.get(n) || {}).state === 'open')
+
+// 卡头芯片:PR + 状态后缀 +(验收开时)清单链与运行期进度。无 pr 字段 → '' = 逐字节冻结。
+const prChips = (entry) => declaredPrs(entry, PR_REPO).map((p) => {
+  const st = prStatus(p)
+  const l = p.repo === PR_REPO ? ACC_BY_PR.get(p.num) : null
+  return `<a class="prchip" href="${esc(prUrl(p))}" target="_blank" rel="noopener">${esc(prLabel(p))}${st ? `<span class="prst">${esc(st)}</span>` : ''}</a>` +
+    (l ? `<a class="acclink" href="#acc-${p.num}">清单</a>` : '') +
+    (l && accLive(p.num) ? `<span class="accnow">验收中 · <span data-acc="${p.num}">0/${l.items.length}</span></span>` : '')
+}).join('')
+
+// 清单正文:esc 之后只认 **粗体**,换行留成 <br>(照卡片 repro 的做法);数组按段落
+const bold = (s) => Array.isArray(s)
+  ? s.map((x) => bold(x)).join('<br>')
+  : esc(String(s ?? '')).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>')
 
 // ---- demo 返回栏(幂等注入 demos/*.html 顶部;回看板「决策/Demo」tab)----
 // 版本号 bump 时:旧版本块整块剥离后重注入,文案/样式跟着 gen 演进(否则幂等守卫会让旧文案永远留在已注入的 demo 里)
@@ -1139,7 +1244,7 @@ const rowHead = ({ id, badge, title, tags = '', line = '', date = '' }) => `
 
 const card = (t) => `
   <article class="card lcard rcard card-${t.status}" id="${esc(t.id)}" data-line="${taskLine(t)}" style="--c:${escC(STATUS_COLOR[t.status])}">
-    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, line: taskLine(t) })}
+    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t), line: taskLine(t) })}
     <div class="rbody">
       <dl>
         ${t.problem ? `<dt>问题</dt><dd class="x">${esc(t.problem)}</dd>` : ''}
@@ -1363,7 +1468,7 @@ const blCard = (it) => `
       id: it.id,
       badge: `<span class="badge" style="--c:${escC(BL_STATUS_COLOR[it.status])}">${esc(b.statuses[it.status])}</span>`,
       title: it.title,
-      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}`,
+      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}`,
       line: blLine(it),
       date: it.date,
     })}
@@ -1451,7 +1556,7 @@ const decCard = (e) => {
   const iters = (e.iters || []).map((c) => `<a class="iterchip" href="#TC${esc(c.slice(1))}" title="迭代 ${esc(c)}">${esc(c)}</a>`).join('')
   const refines = (e.refines || []).map((r) => `<a class="refchip" href="#${esc(r.code)}" title="${esc(r.note)}">⤴ 修订 ${esc(r.code)}</a>`).join('')
   const hasMeta = secs || iters || refines
-  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e)
+  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e)
   return `
   <article class="deccard lcard rcard dec-${e.status}" id="${esc(e.id)}" data-line="${decLine(e)}" data-date="${esc(e.date || '')}" data-status="${esc(e.status)}" data-type="${esc(tbPrefix(e.id))}" data-search="${esc((e.id + ' ' + e.title).toLowerCase())}"${sessAttr(e)} style="--c:${escC(DEC_STATUS_COLOR[e.status])}">
     ${rowHead({
@@ -1793,6 +1898,396 @@ const SESS_METANOTE = !SESSION_ON ? '' : ` + (state.session !== 'all' ? ' · 未
 const SESS_CLEAR = !SESSION_ON ? '' : `\n      state.session = 'all'\n      try { localStorage.setItem(SESS_KEY, 'all') } catch (e) {}`
 const SESS_WIRE = !SESSION_ON ? '' : `\n    if (el('sesschips')) el('sesschips').querySelectorAll('.sesschip').forEach((sc) => sc.addEventListener('click', () => {\n      state.session = sc.dataset.sess\n      try { localStorage.setItem(SESS_KEY, state.session) } catch (e) {}\n      apply()\n    }))`
 const SESS_INIT = !SESSION_ON ? '' : `\n    try { const s = localStorage.getItem(SESS_KEY); if (s) state.session = s } catch (e) {}\n    if (state.session !== 'all') cards.forEach((c) => { if (!(c.dataset.session || '').split(' ').includes(state.session)) c.classList.add('flt-hide') })`
+
+// ============================================================================
+//  验收 pane(v0.12.0):当前 PR 面板 + 清单本体 + 已验收 + 没清单的 PR
+//  ACC 关时本节所有产物为空串/空表,index.html 逐字节冻结。
+// ============================================================================
+// 反查:哪些卡属于这份清单(prsOfCard = 显式 pr ∪ links 兼容;再并上清单自己写的 cards[])
+const ACC_CARD_INDEX = !ACC ? [] : [
+  ...m.tasks.map((t) => ({ e: t, id: t.id, title: t.title, st: m.statuses[t.status] || '' })),
+  ...b.items.map((it) => ({ e: it, id: it.id, title: it.title, st: b.statuses[it.status] || '' })),
+  ...dm.entries.map((e) => ({ e, id: e.id, title: e.title, st: dm.statuses[e.status] || '' })),
+]
+const accCardsOf = (l) => {
+  const nums = new Set(l.nums)
+  const hit = ACC_CARD_INDEX.filter((c) => prsOfCard(c.e, PR_REPO).some((p) => p.repo === PR_REPO && nums.has(p.num)))
+  for (const id of l.cards) {
+    const c = ACC_CARD_INDEX.find((x) => x.id === String(id))
+    if (!c) accWarn(`清单 ${l.key} 的 cards 引用了不存在的卡号「${id}」`)
+    else if (!hit.includes(c)) hit.push(c)
+  }
+  return hit
+}
+// 关联 demo / spec:从这些卡的 demo / designDoc / links 里挑 .html/.md,去重
+const accDocsOf = (cards) => {
+  const seen = new Set()
+  const out = []
+  const push = (title, href) => {
+    if (!href || !/\.(?:html?|md)(?:[?#]|$)/i.test(String(href))) return
+    const r = cardLink(String(href))
+    if (seen.has(r.href)) return
+    seen.add(r.href)
+    out.push({ title: title || String(href).split('/').pop(), href: r.href, ext: Boolean(r.ext) })
+  }
+  for (const c of cards) {
+    push(c.e.demo ? `demo · ${String(c.e.demo).split('/').pop()}` : '', c.e.demo)
+    push('设计文档', c.e.designDoc)
+    for (const l of c.e.links || []) push(l && l.title, l && l.href)
+  }
+  return out
+}
+const accPrChip = (n) => {
+  const st = prStatus({ repo: PR_REPO, num: n })
+  return `<a class="prchip" href="${esc(prUrl({ repo: PR_REPO, num: n }))}" target="_blank" rel="noopener">PR #${n}${st ? `<span class="prst">${esc(st)}</span>` : ''}</a>`
+}
+const accTsv = (l, k) => ((l.data[k] || {}).rows || []).map((r) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
+const accDataBlock = (l, k) => {
+  const d = l.data[k]
+  const rows = (d && d.rows) || []
+  if (!rows.length) return ''
+  return `
+              <div class="accdt"><div class="accdh"><b>${esc(d.title || k)}</b><span>表头 + ${rows.length - 1} 行 · 含制表符</span><button type="button" class="accbtn" data-acctsv="${esc(k)}">复制</button></div><div class="accsc"><table><thead><tr>${rows[0].map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`
+}
+const accItemHtml = (l, it) => {
+  const rd = l.rounds.find((r) => String(r.id) === it.round)
+  const tags = (it.key ? '<span class="acckey">核心</span>' : '') +
+    (rd ? `<span class="acctag">${esc(rd.label || rd.id)}</span>` : '') +
+    (l.nums.length > 1 ? `<span class="acctag">#${it.pr}</span>` : '')
+  return `
+            <div class="accitem" data-accid="${esc(it.id)}" data-accpr="${it.pr}" data-accround="${esc(it.round)}">
+              <input type="checkbox" data-accck="${esc(it.id)}" aria-label="${esc(it.id)} 已试">
+              <span class="accno">${esc(it.id)}</span>
+              <div class="accib">
+                <p class="accit">${esc(it.title)}${tags}</p>
+                ${it.do ? `<div class="accdo">${bold(it.do)}</div>` : ''}${(it.data || []).map((k) => accDataBlock(l, k)).join('')}
+                ${it.exp ? `<div class="accexp">${bold(it.exp)}</div>` : ''}
+                ${it.bad ? `<div class="accbad">${bold(it.bad)}</div>` : ''}
+                ${it.why ? `<div class="accwhy">${bold(it.why)}</div>` : ''}
+              </div>
+            </div>`
+}
+const accListHtml = (l) => {
+  const gs = l.groups.filter((g) => l.items.some((it) => it.group === String(g.id)))
+  const chips = [
+    l.rounds.length ? `<div class="accf" data-accf="round"><button type="button" class="on" data-v="all">全部轮次</button>${l.rounds.map((r) => `<button type="button" data-v="${esc(String(r.id))}">${esc(r.label || r.id)}${r.date ? ` · ${esc(String(r.date).slice(5))}` : ''}</button>`).join('')}</div>` : '',
+    l.nums.length > 1 ? `<div class="accf" data-accf="pr"><button type="button" class="on" data-v="all">全部 PR</button>${l.nums.map((n) => `<button type="button" data-v="${n}">#${n}</button>`).join('')}</div>` : '',
+  ].filter(Boolean).join('')
+  return `
+    <section class="acclist" id="acc-${esc(l.key)}" data-acck="${esc(l.key)}">${l.nums.filter((n) => String(n) !== l.key).map((n) => `<a class="accanchor" id="acc-${n}"></a>`).join('')}
+      <header class="acclh"><b>${esc(l.title || l.key)}</b>${l.nums.map(accPrChip).join('')}<span class="accmeta">${l.items.length} 条${l.rev > 1 ? ` · 第 ${l.rev} 版清单` : ''}</span></header>
+      <div class="accwrap">
+        <nav class="accnav"><p class="accnavh">分组</p>${gs.map((g) => `<a href="#accg-${esc(l.key)}-${esc(String(g.id))}" data-accgl="${esc(String(g.id))}">${esc(g.title || g.id)}<span class="accgc">0/${l.items.filter((it) => it.group === String(g.id)).length}</span></a>`).join('')}</nav>
+        <div class="accbody">${chips ? `\n          <div class="accfs">${chips}</div>` : ''}${gs.map((g) => `
+          <section class="accgrp" id="accg-${esc(l.key)}-${esc(String(g.id))}" data-accg="${esc(String(g.id))}">
+            <h3 class="accgh">${esc(g.title || g.id)}</h3>${g.tip ? `
+            <p class="accgt">${bold(g.tip)}</p>` : ''}${l.items.filter((it) => it.group === String(g.id)).map((it) => accItemHtml(l, it)).join('')}
+          </section>`).join('')}
+        </div>
+      </div>
+    </section>`
+}
+// 已验收 / 排队中的分档:有 release-manifest 时按 PR 真状态,没有时退回「清单有没有 result」
+const accDoneLists = !ACC ? [] : ACC_LISTS.filter((l) => l !== ACC_CUR && (rlm ? l.nums.some((n) => (relPr.get(n) || {}).state === 'merged') : Boolean(l.result)))
+const accQueueLists = !ACC ? [] : ACC_LISTS.filter((l) => l !== ACC_CUR && !accDoneLists.includes(l))
+const accNoListPrs = !ACC ? [] : (rlm
+  ? [...relPr.values()].filter((p) => p.state === 'open' && !ACC_BY_PR.has(Number(p.number))).map((p) => ({ n: Number(p.number), t: p.title || '', u: p.url || prUrl({ repo: PR_REPO, num: Number(p.number) }) }))
+  : [...new Set(ALL_CARDS.flatMap((c) => prsOfCard(c, PR_REPO).filter((p) => p.repo === PR_REPO && !ACC_BY_PR.has(p.num)).map((p) => p.num)))]
+      .sort((x, y) => y - x).map((n) => ({ n, t: '', u: prUrl({ repo: PR_REPO, num: n }) })))
+
+const accCurHtml = (() => {
+  if (!ACC) return ''
+  if (!ACC_CUR) return `
+  <p class="pane-empty" style="display:block">当前没有在验收的 PR —— 把 <code>acceptance-manifest.json</code> 的 <code>current</code> 指向正在测的 PR 号即可。</p>`
+  const l = ACC_CUR
+  const env = l.env
+  const cards = accCardsOf(l)
+  const docs = accDocsOf(cards)
+  const row = (lbl, html) => (html ? `\n      <div class="accer"><span class="acclbl">${esc(lbl)}</span>${html}</div>` : '')
+  return `
+  <section class="acccur">
+    <header class="acchd">${l.nums.map(accPrChip).join('')}<b>${esc(l.title || l.key)}</b></header>
+    <div class="accenv">${row('地址', env.url ? `<a href="${esc(env.url)}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
+    </div>
+    <div class="accprog" data-accprog="${esc(l.key)}">
+      <span class="acctxt">已试 <b class="accdone">0</b> / <span class="acctot">${l.items.length}</span></span>
+      <span class="accbar"><i></i></span>
+      <button type="button" class="accbtn" data-acccopy="${esc(l.key)}">复制勾选结果</button>
+    </div>${cards.length ? `
+    <div class="accrel"><span class="acclbl">关联卡</span>${cards.map((c) => `<a class="acccard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}${c.st ? ` · ${esc(c.st)}` : ''}</a>`).join('')}</div>` : ''}${docs.length ? `
+    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(d.href)}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
+    <p class="accqueue">排队中:${accQueueLists.map((q) => `<a href="#acc-${esc(q.key)}">${q.nums.map((n) => `#${n}`).join(' / ')} · ${esc(q.title || q.key)}(${q.items.length} 条)</a>`).join('')}</p>` : ''}
+  </section>`
+})()
+
+const acceptancePane = !ACC ? '' : `
+  <div class="topbar">
+    <h1>${esc(BRAND)} · 验收</h1>
+    <span class="sess">清单源 <code>acceptance-manifest.json</code> · 勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)</span>
+  </div>${accCurHtml}${ACC_CUR ? accListHtml(ACC_CUR) : ''}${accQueueLists.length ? `
+  <details class="accfold"><summary>排队中 <span class="mut">${accQueueLists.length} 份清单</span></summary>${accQueueLists.map(accListHtml).join('')}
+  </details>` : ''}${accDoneLists.length ? `
+  <details class="accfold"><summary>已验收 <span class="mut">${accDoneLists.length} 份清单${accDoneLists.some((l) => l.result && l.result.at) ? ` · 最近 ${esc(accDoneLists.map((l) => (l.result || {}).at || '').sort().pop())}` : ''}</span></summary>${accDoneLists.map(accListHtml).join('')}
+  </details>` : ''}${accNoListPrs.length ? `
+  <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(p.u)}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
+  </div>` : ''}
+  <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code> — 条目正文改完重跑生成;勾选进度只在这台浏览器,「复制勾选结果」产出的 JSON 贴回清单的 <code>result</code> 才进 git。</p>`
+
+// ———— 验收:门控注入片(ACC 关时全为空串)————
+const ACC_TAB = !ACC ? '' : `\n    <button class="tab" data-pane="acceptance">验收${ACC_CUR ? ` · ${ACC_CUR.items.length}` : ''}</button>`
+const ACC_PANE_HTML = !ACC ? '' : `\n  <section class="pane" id="pane-acceptance">${acceptancePane}</section>`
+const ACC_PANE_ID = !ACC ? '' : `, 'acceptance'`
+// 切进验收要重算目录/进度;切去别的 pane 也顺手刷卡头分子 —— 懒加载的 pane 是后到的,
+// 卡头芯片那时才进 DOM,只在 'acceptance' 上同步会让它停在烤入的初值。
+const ACC_SHOW = !ACC ? '' : `\n    if (window.accSync) accSync()`
+const PRCHIP_CSS = !HAS_PR ? '' : `
+  /* 卡头 PR 芯片(v0.12.0,卡上 pr 字段):与 session 小章同排,安静不抢戏 */
+  .prchip { display: inline-flex; align-items: baseline; gap: 4px; font-size: 10.5px; font-weight: 600; line-height: 17px;
+     padding: 0 7px; border-radius: 5px; text-decoration: none; color: var(--accent); background: var(--accent-soft);
+     white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .prchip:hover { color: var(--accent-deep); }
+  .prchip .prst { font-weight: 400; color: var(--mut); }`
+const ACC_CSS = !ACC ? '' : `
+  /* ============ 验收 tab(v0.12.0,config.acceptanceTab)============ */
+  .acclink { font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px;
+     text-decoration: none; color: var(--brand); background: var(--brand-soft); white-space: nowrap; }
+  .accnow { font-size: 10.5px; line-height: 17px; color: var(--mut); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .acccur { border: 1px solid var(--line-strong); border-left: 3px solid var(--brand); border-radius: 10px;
+     background: var(--card); padding: 13px 15px; margin-bottom: 18px; }
+  .acchd { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+  .accenv { margin-top: 9px; font-size: 12.5px; color: var(--mut); line-height: 1.75; }
+  .accer { display: flex; gap: 8px; align-items: baseline; }
+  .acclbl { flex: none; color: var(--faint); font-size: 11px; min-width: 30px; }
+  .accenv code { font-size: 11.5px; }
+  .accprog { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 11px; }
+  .acctxt { font-size: 12.5px; color: var(--mut); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .acctxt b { color: var(--ink); font-size: 15px; }
+  .accbar { flex: 1 1 180px; min-width: 110px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .accbar i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .18s; }
+  .accbtn { appearance: none; font: inherit; font-size: 11.5px; padding: 2px 10px; border-radius: 7px; cursor: pointer;
+     border: 1px solid var(--line-strong); background: var(--card); color: var(--mut); white-space: nowrap; }
+  .accbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .accbtn.ok { color: ${tk('ok-ink')}; border-color: ${tk('ok-ink')}; }
+  .accrel { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 9px; font-size: 11.5px; }
+  .acccard { font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 8px; border-radius: 99px; text-decoration: none;
+     color: var(--brand); background: var(--brand-soft); white-space: nowrap; }
+  .acccard.doc { color: var(--accent); background: var(--accent-soft); font-weight: 400; }
+  .accqueue { margin: 10px 0 0; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 11.5px; color: var(--faint);
+     display: flex; gap: 10px; flex-wrap: wrap; }
+  .accqueue a { color: var(--accent); text-decoration: none; }
+  .acclist { margin-bottom: 22px; scroll-margin-top: 58px; }
+  .accanchor { display: block; height: 0; scroll-margin-top: 58px; }
+  .acclh { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 7px;
+     border-bottom: 1px solid var(--line-strong); }
+  .acclh b { font-size: 14px; }
+  .accmeta { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .accwrap { display: grid; grid-template-columns: 168px 1fr; gap: 18px; margin-top: 14px; align-items: start; }
+  .accnav { position: sticky; top: calc(var(--hubh, 41px) + 12px); font-size: 12px; }
+  .accnavh { margin: 0 0 6px 8px; font-size: 10.5px; letter-spacing: .08em; color: var(--faint); }
+  .accnav a { display: block; padding: 5px 8px; margin-bottom: 2px; border-radius: 6px; line-height: 1.4;
+     color: var(--mut); text-decoration: none; }
+  .accnav a:hover { background: var(--bg); }
+  .accnav a.on { background: var(--brand-soft); color: var(--ink); }
+  .accnav a.done .accgc { color: ${tk('ok-ink')}; }
+  .accgc { float: right; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .accfs { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .accf { display: flex; gap: 6px; flex-wrap: wrap; }
+  .accf button { appearance: none; font: inherit; font-size: 11.5px; padding: 2px 11px; border-radius: 99px; cursor: pointer;
+     border: 1px solid var(--line-strong); background: var(--card); color: var(--mut); }
+  .accf button.on { background: var(--brand-soft); border-color: transparent; color: var(--ink); font-weight: 600; }
+  .accgrp { scroll-margin-top: 58px; }
+  .accgh { font-size: 13px; margin: 16px 0 6px; }
+  .accgrp:first-of-type .accgh { margin-top: 0; }
+  .accgt { margin: 0 0 10px; font-size: 12px; color: var(--faint); line-height: 1.7; }
+  .accitem { display: flex; gap: 9px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line);
+     border-radius: 9px; background: var(--card); }
+  .accitem.done { background: var(--bg); opacity: .66; }
+  .accitem input { flex: none; width: 15px; height: 15px; margin: 4px 0 0; accent-color: var(--brand); }
+  .accno { flex: none; width: 26px; padding-top: 2px; font-size: 11px; font-weight: 700; color: var(--faint);
+     font-variant-numeric: tabular-nums; }
+  .accib { flex: 1 1 auto; min-width: 0; }
+  .accit { margin: 0 0 5px; font-size: 13px; font-weight: 600; line-height: 1.5; }
+  .acckey, .acctag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 9.5px;
+     font-weight: 600; vertical-align: 1px; white-space: nowrap; }
+  .acckey { background: ${tk('gold-bg')}; color: ${tk('gold-ink')}; }
+  .acctag { background: ${tk('seg-bg')}; color: var(--mut); }
+  .accdo, .accexp, .accbad, .accwhy { margin: 4px 0 0; padding-left: 9px; font-size: 12.5px; line-height: 1.72;
+     color: var(--mut); border-left: 2px solid var(--line-strong); }
+  .accexp { border-left-color: ${tk('ok-ink')}; }
+  .accexp::before { content: "预期 "; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: ${tk('ok-ink')}; }
+  .accbad { border-left-color: #d44c47; }
+  .accbad::before { content: "不对 "; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #d44c47; }
+  .accwhy { border-left-color: var(--line); color: var(--faint); }
+  .accib b { color: var(--ink); }
+  .accdt { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: ${tk('faint-bg')}; }
+  .accdh { display: flex; align-items: center; gap: 8px; padding: 5px 9px; font-size: 11px; border-bottom: 1px solid var(--line); }
+  .accdh b { flex: 1 1 auto; min-width: 0; font-weight: 600; color: var(--mut); }
+  .accdh span { flex: none; color: var(--faint); white-space: nowrap; }
+  .accsc { overflow-x: auto; background: var(--card); }
+  .accsc table { border-collapse: collapse; font-size: 11.5px; min-width: 100%; }
+  .accsc th { padding: 5px 9px; text-align: left; font-weight: 500; color: var(--faint); white-space: nowrap;
+     border-bottom: 1px solid var(--line); }
+  .accsc td { padding: 5px 9px; white-space: nowrap; border-bottom: 1px solid var(--line);
+     font-variant-numeric: tabular-nums; }
+  .accsc tr:last-child td { border-bottom: 0; }
+  .accfold { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+  .accfold > summary { padding: 10px 14px; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
+     display: flex; align-items: center; gap: 8px; }
+  .accfold > summary::-webkit-details-marker { display: none; }
+  .accfold > summary::before { content: "▸"; font-size: 10px; color: var(--faint); }
+  .accfold[open] > summary::before { content: "▾"; }
+  .accfold > summary .mut { font-weight: 400; font-size: 11.5px; color: var(--faint); }
+  .accfold .acclist { padding: 0 14px; }
+  .accnolist { border: 1px solid var(--line-strong); border-radius: 10px; background: ${tk('warn-bg')}; padding: 11px 14px; }
+  .accnt { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: ${tk('warn-ink')}; }
+  .accnr { margin: 2px 0; font-size: 12px; color: var(--mut); }
+  .accnr a { font-weight: 600; color: var(--accent); text-decoration: none; font-variant-numeric: tabular-nums; }
+  @media (max-width: 820px) { .accwrap { grid-template-columns: 1fr; } .accnav { position: static; } }`
+// 运行期:勾选(localStorage)/ 筛选 / 进度 / 目录 / 复制 TSV / 复制勾选结果 / 卡头分子。
+// 数据烤入,分子全在浏览器算(gen 零时间);<  逃逸照 LAZY_PANE_OF 做法。
+const accJson = (x) => JSON.stringify(x).replace(/</g, '\\u003c')
+const ACC_JS = !ACC ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    var LISTS = ${accJson(ACC_LISTS.map((l) => ({
+      k: l.key, rev: l.rev, nums: l.nums,
+      items: l.items.map((it) => ({ id: it.id, g: it.group, pr: it.pr, rd: it.round })),
+      pre: ((l.result || {}).checked || []).map(String),
+    })))}
+    var TSV = ${accJson(Object.fromEntries(ACC_LISTS.map((l) => [l.key, Object.fromEntries(Object.keys(l.data).map((k) => [k, accTsv(l, k)]))])))}
+    var OF_PR = ${accJson(Object.fromEntries(ACC_LISTS.flatMap((l) => l.nums.map((n) => [String(n), l.key]))))}
+    var byKey = {}, ck = {}, view = {}
+    function lsKey(l) { return '${LS_PREFIX}_acc_' + l.k + '_r' + l.rev }
+    function load(l) {
+      var v = null
+      try { var raw = localStorage.getItem(lsKey(l)); if (raw) v = JSON.parse(raw) } catch (e) {}
+      if (!v || typeof v !== 'object') { // 首次进来:manifest 里的 result.checked 作初值(记录进 git 的那次验收)
+        v = {}
+        l.pre.forEach(function (id) { v[id] = true })
+        if (l.pre.length) save(l, v)
+      }
+      return v
+    }
+    function save(l, v) { try { localStorage.setItem(lsKey(l), JSON.stringify(v)) } catch (e) {} }
+    function visible(l, it) {
+      var w = view[l.k]
+      return (w.round === 'all' || it.rd === w.round) && (w.pr === 'all' || String(it.pr) === w.pr)
+    }
+    // http 内网页面多半不是安全上下文,navigator.clipboard 不存在 —— 退回 execCommand 老路
+    function copyText(t, btn, okmsg) {
+      var orig = btn.textContent
+      var done = function () {
+        btn.textContent = okmsg || '已复制'; btn.classList.add('ok')
+        setTimeout(function () { btn.textContent = orig; btn.classList.remove('ok') }, 2000)
+      }
+      var fallback = function () {
+        var ta = document.createElement('textarea')
+        ta.value = t; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '-9999px'
+        document.body.appendChild(ta); ta.select()
+        try { document.execCommand('copy'); done() } catch (e) { btn.textContent = '复制失败,手动选' }
+        document.body.removeChild(ta)
+      }
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(done, fallback)
+      else fallback()
+    }
+    function syncList(l) {
+      var sec = document.getElementById('acc-' + l.k)
+      if (!sec) return
+      var mine = ck[l.k], vt = 0, vd = 0, gc = {}
+      l.items.forEach(function (it) {
+        var on = Boolean(mine[it.id]), shown = visible(l, it)
+        var row = sec.querySelector('[data-accid="' + it.id + '"]')
+        if (row) {
+          row.style.display = shown ? '' : 'none'
+          row.classList.toggle('done', on)
+          var box = row.querySelector('input')
+          if (box) box.checked = on
+        }
+        if (shown) { vt++; if (on) vd++ }
+        gc[it.g] = gc[it.g] || { t: 0, d: 0, v: 0 }
+        gc[it.g].t++; if (on) gc[it.g].d++; if (shown) gc[it.g].v++
+      })
+      sec.querySelectorAll('.accgrp').forEach(function (g) { g.style.display = (gc[g.dataset.accg] || {}).v ? '' : 'none' })
+      sec.querySelectorAll('[data-accgl]').forEach(function (a) {
+        var c = gc[a.dataset.accgl] || { t: 0, d: 0, v: 0 }
+        var n = a.querySelector('.accgc'); if (n) n.textContent = c.d + '/' + c.t
+        a.classList.toggle('done', c.t > 0 && c.d === c.t)
+        a.style.display = c.v ? '' : 'none'
+      })
+      var p = document.querySelector('[data-accprog="' + l.k + '"]')
+      if (p) { // 进度 = 当前筛选可见条目里的已勾数(筛了轮次就只算那一轮)
+        p.querySelector('.accdone').textContent = vd
+        p.querySelector('.acctot').textContent = vt
+        p.querySelector('.accbar i').style.width = (vt ? vd / vt * 100 : 0) + '%'
+      }
+    }
+    function syncChips() { // 全板卡头的「验收中 · n/N」分子(卡在别的 pane 里也照算)
+      document.querySelectorAll('[data-acc]').forEach(function (s) {
+        var l = byKey[OF_PR[s.dataset.acc]]
+        if (!l) return
+        var mine = ck[l.k], d = 0
+        l.items.forEach(function (it) { if (mine[it.id]) d++ })
+        s.textContent = d + '/' + l.items.length
+      })
+    }
+    function spy() { // 分组目录跟随滚动;滚到底点亮末项(末组太短时永远轮不到它)
+      LISTS.forEach(function (l) {
+        var sec = document.getElementById('acc-' + l.k)
+        if (!sec || !sec.offsetParent) return
+        var gs = [].slice.call(sec.querySelectorAll('.accgrp')).filter(function (g) { return g.style.display !== 'none' })
+        if (!gs.length) return
+        var y = window.scrollY + 96, cur = gs[0]
+        for (var i = 0; i < gs.length; i++) { if (gs[i].getBoundingClientRect().top + window.scrollY <= y) cur = gs[i]; else break }
+        if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = gs[gs.length - 1]
+        sec.querySelectorAll('[data-accgl]').forEach(function (a) { a.classList.toggle('on', a.dataset.accgl === cur.dataset.accg) })
+      })
+    }
+    window.accSync = function () { LISTS.forEach(syncList); syncChips(); spy() }
+    var pane = document.getElementById('pane-acceptance')
+    if (pane) {
+      pane.addEventListener('click', function (ev) {
+        var f = ev.target.closest('.accf button')
+        if (f) {
+          var l = byKey[f.closest('.acclist').dataset.acck]
+          view[l.k][f.closest('.accf').dataset.accf] = f.dataset.v
+          f.parentElement.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === f) })
+          syncList(l); spy()
+          return
+        }
+        var t = ev.target.closest('[data-acctsv]')
+        if (t) { copyText(TSV[t.closest('.acclist').dataset.acck][t.dataset.acctsv], t); return }
+        var c = ev.target.closest('[data-acccopy]')
+        if (c) {
+          var cl = byKey[c.dataset.acccopy], mine = ck[cl.k]
+          var checked = cl.items.filter(function (it) { return mine[it.id] }).map(function (it) { return it.id })
+          var d = new Date()
+          var at = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+          copyText(JSON.stringify({ checked: checked, at: at }), c, '已复制 · 贴回清单的 result')
+        }
+      })
+      pane.addEventListener('change', function (ev) {
+        var box = ev.target.closest('[data-accck]')
+        if (!box) return
+        var l = byKey[box.closest('.acclist').dataset.acck]
+        if (box.checked) ck[l.k][box.dataset.accck] = true
+        else delete ck[l.k][box.dataset.accck]
+        save(l, ck[l.k]); syncList(l); syncChips()
+      })
+    }
+    function accRoute() { // #acc-230 深链:目标可能折在 <details> 里,先展开再滚
+      var id = decodeURIComponent(location.hash.slice(1))
+      if (id.indexOf('acc') !== 0) return
+      var el = document.getElementById(id)
+      if (!el) return
+      for (var p = el.parentElement; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true
+      window.accSync()
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    LISTS.forEach(function (l) { byKey[l.k] = l; ck[l.k] = load(l); view[l.k] = { round: 'all', pr: 'all' } })
+    window.addEventListener('scroll', spy, { passive: true })
+    window.addEventListener('hashchange', accRoute)
+    window.accSync()
+    accRoute()
+  })();`
 
 // ============================================================================
 //  组装 index.html
@@ -2409,7 +2904,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -2430,14 +2925,14 @@ const html = `<!doctype html>
     <button class="tab tab-active" data-pane="progress">进度看板</button>
     ${pm ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
     <button class="tab" data-pane="decisions" data-label="决策/Demo">决策/Demo · ${decCount}</button>
-    <button class="tab" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>
+    <button class="tab" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}
     <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>
     <a class="tab tab-shots" href="shots.html" title="验证截图存档(随 PR 入库)">截图 · ${SHOT_COUNT} ↗</a>
   </div>
   <section class="pane pane-active" id="pane-progress">${progressPane}</section>
   ${pm ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
   <section class="pane" id="pane-decisions"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : decisionsPane}</section>
-  <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>
+  <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>${ACC_PANE_HTML}
   <section class="pane" id="pane-docs">${docsPane}</section>
 </div>
 <script>
@@ -2456,10 +2951,10 @@ const html = `<!doctype html>
     tabs.forEach((t) => t.classList.toggle('tab-active', t.dataset.pane === name))
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('pane-active', p.id === 'pane-' + name))
     ${LAZY_SHOW}clampScan(document.getElementById('pane-' + name))
-    if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)
+    if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}
   }
   tabs.forEach((t) => t.addEventListener('click', () => { show(t.dataset.pane); history.replaceState(null, '', t.dataset.pane === 'progress' ? '#' : '#' + t.dataset.pane) }))
-  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'])
+  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'${ACC_PANE_ID}])
   function routeHash() {
     const id = decodeURIComponent(location.hash.slice(1))
     if (!id) return
@@ -2829,7 +3324,7 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}
 </script>
 `
 

@@ -11,6 +11,35 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+### Added
+- An optional `pr` card field on progress, backlog and decision cards — `230`,
+  `[227, 230]`, or `"owner/repo#4"` for another repository. It renders a quiet
+  chip in the card head next to the session seals, linking to the pull request.
+  This is the first structured link between a card and the work that implements
+  it; until now it lived in prose. Cards without the field render
+  byte-identically to 0.11.4.
+- An optional **acceptance tab** (`"acceptanceTab": true` in
+  `kanban.config.json`), fed by a new `acceptance-manifest.json` next to the
+  other manifests. One checklist per pull request (or per group of them):
+  environment notes, grouped items with what to do / what to expect / what is
+  wrong / why, data blocks rendered as tables and copyable as TSV, round and PR
+  filters, tick-off state in `localStorage` keyed by revision, a group index
+  with per-group progress, and a "copy result" button that produces the JSON to
+  paste back into the manifest so a finished round of acceptance lands in git
+  rather than in one browser. The card head of a pull request that has a
+  checklist gains a link to it and a live `n/N` counter.
+- Three non-blocking guard notices for the acceptance data: `current` pointing
+  at a pull request no checklist covers, one pull request claimed by two
+  checklists, duplicate item ids, and card ids that do not exist on the board.
+  A malformed manifest produces one notice instead of a crash.
+- `scripts/prlink.mjs` — the single definition of "which pull requests does this
+  card belong to" (the explicit field, plus `links[]` entries pointing at
+  `/pull/N` in the board's own repository). Chips render only from the explicit
+  field, so an existing board full of pull-request links does not sprout chips.
+- The generator also reads `release-manifest.json` when the file is present, to
+  suffix each chip with the pull request's state. That file arrives with the
+  release-progress tab; until then the suffix is simply empty.
+
 ## [0.11.4] - 2026-08-20
 
 ### Added

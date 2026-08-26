@@ -21,6 +21,16 @@ const zh = {
     `⚠ 看板守卫:仍有 ${n} 个 demo 未挂看板卡(本次放行):\n${list}`,
   orphanBlock: (n, list) =>
     `看板守卫:发现 ${n} 个 demo 未挂任何看板卡(违反「demo 必挂卡」审计规则):\n${list}\n请立即在 app/kanban/decisions-manifest.json 或 backlog-manifest.json 为其补卡(字段风格照现有卡);若确属无需挂卡,把文件名加入 app/kanban/demos/.no-card-ok(一行一个)。不必手动跑 gen.mjs,守卫会自动重生成。处理前先 grep 核实文件名是否已在 manifest——多会话并行存在补链竞态,报警可能已过时。`,
+  accParseFail: (err) =>
+    `⚠ 看板守卫:acceptance-manifest.json 无法解析,验收审计跳过(「验收」tab 也会跟着报错):${err}`,
+  accCurrentNoList: (cur) =>
+    `⚠ 看板守卫:acceptance-manifest.json 的 current = ${cur},但没有任何一份清单含这个 PR —— 「验收」tab 的当前面板会是空的;补一份清单,或把 current 改回 null。`,
+  accDupPr: (pr, a, c) =>
+    `⚠ 看板守卫:PR #${pr} 同时出现在两份验收清单(${a} 与 ${c})—— 勾选进度会分家,请合并成一份或改掉其中一处的 pr。`,
+  accDupItem: (list, id) =>
+    `⚠ 看板守卫:验收清单 ${list} 里条目 id「${id}」重复 —— 勾选状态按 id 存,重复即互相顶掉,请改成唯一 id。`,
+  accUnknownCard: (list, id) =>
+    `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
   ghprRemind:
     '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成)。与看板无关则忽略。',
   init: {
@@ -175,6 +185,16 @@ const en = {
     `⚠ Kanban guard: still ${n} demo(s) not linked to any board card (letting this stop through):\n${list}`,
   orphanBlock: (n, list) =>
     `Kanban guard: found ${n} demo(s) not linked to any board card (violates the "every demo links to a card" audit rule):\n${list}\nAdd a card for each in app/kanban/decisions-manifest.json or backlog-manifest.json right away (follow the field style of existing cards); if a demo genuinely needs no card, add its filename to app/kanban/demos/.no-card-ok (one per line). No need to run gen.mjs manually — the guard regenerates automatically. Before acting, grep to verify the filename is not already in a manifest — with parallel sessions there is a card-linking race window, so this alert may already be stale.`,
+  accParseFail: (err) =>
+    `⚠ Kanban guard: acceptance-manifest.json could not be parsed, so the acceptance audit was skipped (the "acceptance" tab will fail on it too): ${err}`,
+  accCurrentNoList: (cur) =>
+    `⚠ Kanban guard: acceptance-manifest.json has current = ${cur}, but no checklist covers that PR — the acceptance tab's current panel will be empty. Add a checklist, or set current back to null.`,
+  accDupPr: (pr, a, c) =>
+    `⚠ Kanban guard: PR #${pr} appears in two acceptance checklists (${a} and ${c}) — the tick-off progress would split in two. Merge them into one, or change one of the pr values.`,
+  accDupItem: (list, id) =>
+    `⚠ Kanban guard: acceptance checklist ${list} has a duplicate item id "${id}" — tick state is stored by id, so duplicates overwrite each other. Make the ids unique.`,
+  accUnknownCard: (list, id) =>
+    `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
   ghprRemind:
     '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically). Ignore if unrelated to the board.',
   init: {
@@ -361,6 +381,7 @@ const genZh = {
   unknownToken: (n) => `未知主题令牌 ${n}`,
   unknownRefToken: (n) => `未知 refs 主题令牌 ${n}`,
   lanesInvalid: (v) => `kanban.config.json lanes 非法:${v};合法值:null 或对象 { "ids": [...], ... }(见 kanban-init SKILL)`,
+  accManifestMissing: (err) => `kanban.config.json 开了 acceptanceTab,但看板目录的 acceptance-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/acceptance-manifest.json;不想开就把 acceptanceTab 去掉)`,
 }
 const genEn = {
   cfgMissingBrand: () => 'kanban.config.json is missing "brand"',
@@ -388,5 +409,6 @@ const genEn = {
   unknownToken: (n) => `unknown theme token ${n}`,
   unknownRefToken: (n) => `unknown refs theme token ${n}`,
   lanesInvalid: (v) => `kanban.config.json lanes is invalid: ${v}; valid values: null, or an object { "ids": [...], ... } (see the kanban-init skill)`,
+  accManifestMissing: (err) => `kanban.config.json enables acceptanceTab, but the board's acceptance-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/acceptance-manifest.json; drop acceptanceTab to turn the tab off)`,
 }
 export function genStrings(lang) { return lang === 'en' ? genEn : genZh }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。135 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。166 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
-// byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言等。
+// byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -609,6 +609,161 @@ console.log('T23 lazyTabs 拆页')
   runGen(NEW_SCRIPTS, fx23.kb)
   ok(!existsSync(join(fx23.kb, 'parts')), '关回后 parts/ 目录清除,index 复原单文件')
   ok(sha(idxP) === offSha, '关回后 index 与冻结基线逐字节相同')
+}
+
+// ============ T27 pr 字段(卡上显式 pr → 芯片;links 兼容只做反查不长芯片;缺省逐字节冻结)============
+console.log('T27 pr 字段')
+{
+  const fx27 = mkFixture('fx27', { 's.html': demoHtml('s') })
+  const idxP = join(fx27.kb, 'index.html')
+  const mP = join(fx27.kb, 'manifest.json'), decP = join(fx27.kb, 'decisions-manifest.json'), blP = join(fx27.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) x.instance.ghRepo = 'o/r' // 三份一致,免 gen 提醒
+  mm.iterations = [{ id: 'I1', title: '迭代甲', detail: '' }]
+  mm.tasks = [{ id: 'T1', iteration: 'I1', status: 'active', title: '任务甲', approach: 'a' }]
+  dec.entries = [
+    { id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲' },
+    { id: 'D2', code: 'D2', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策乙', links: [{ title: '实现 PR', href: 'https://github.com/o/r/pull/91' }] },
+    { id: 'D3', code: 'D3', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策丙', links: [{ title: '旧仓 PR', href: 'https://github.com/old/repo/pull/91' }] },
+  ]
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: '待办甲', problem: 'p', approach: 'a', area: 'x', source: 's' }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx27.kb)
+  const baseSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('prchip'), '未写 pr 字段:零芯片(links 里的 /pull/N 不自作主张长芯片)')
+  // 开:决策卡单号、backlog 卡数组、进度 task 跨仓
+  dec.entries[0].pr = 230
+  bl.items[0].pr = [227, 230]
+  mm.tasks[0].pr = 'owner2/repo2#4'
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  const r = runGen(NEW_SCRIPTS, fx27.kb)
+  ok(r.status === 0, '写了 pr 字段 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('<a class="prchip" href="https://github.com/o/r/pull/230" target="_blank" rel="noopener">PR #230</a>'), '本仓芯片 href/文案正确')
+  ok(count(on, 'href="https://github.com/o/r/pull/227"') === 1 && count(on, 'href="https://github.com/o/r/pull/230"') === 2, '数组 pr 出两枚芯片(决策 230 + backlog 227/230)')
+  ok(on.includes('<a class="prchip" href="https://github.com/owner2/repo2/pull/4" target="_blank" rel="noopener">repo2#4</a>'), '跨仓芯片走短仓名文案 repo2#4')
+  ok(/id="T1"[\s\S]{0,900}?prchip/.test(on), '进度 task 卡是第三处渲染点')
+  // links 里的 PR 链接照常渲染成普通卡片链接,但绝不长芯片 —— 芯片总数恰 4 枚(D1 一 + BL-1 两 + T1 一)
+  ok(count(on, 'class="prchip"') === 4 && !on.includes('prchip" href="https://github.com/o/r/pull/91"') && !on.includes('prchip" href="https://github.com/old/repo/pull/91"'),
+    'links 兼容不渲染芯片(旧仓链接更不该命中)', `prchip=${count(on, 'class="prchip"')}`)
+  // 撤回字段 → 回冻结基线
+  delete dec.entries[0].pr; delete bl.items[0].pr; delete mm.tasks[0].pr
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx27.kb)
+  ok(sha(idxP) === baseSha, '撤回 pr 字段后与冻结基线逐字节相同')
+}
+
+// ============ T28 验收 tab(opt-in;未配/false = 字节冻结,开 = 清单渲染 + 勾选运行期)============
+console.log('T28 验收 tab')
+const ACC_LIST = {
+  pr: [230, 232],
+  title: '两 PR 合用一份清单',
+  revision: 2,
+  env: { url: 'http://127.0.0.1:5175', backend: '8001', branch: 'feature/x', commit: 'abcdef1234', accounts: '录入用**试验员甲**', notes: ['dev 库随便造'] },
+  rounds: [{ id: 'r1', label: '第一轮', date: '2026-08-20' }, { id: 'r2', label: '第二轮', date: '2026-08-25' }],
+  groups: [{ id: 'K', title: 'K 组', tip: 'K 组说明' }, { id: 'L', title: 'L 组', tip: '' }],
+  items: [
+    { id: 'A1', group: 'K', pr: 230, round: 'r2', key: true, title: '条目甲', do: '粘下面这段', data: ['d1'], exp: '**一张表**', bad: '还是三段文字', why: '为什么' },
+    { id: 'A2', group: 'K', pr: 230, round: 'r1', title: '条目乙', do: '再点一次', exp: '行数不变' },
+    { id: 'A3', group: 'L', pr: 232, round: 'r2', title: '条目丙', do: '切管理员', exp: '菜单里有删除' },
+    { id: 'A4', group: 'L', pr: 232, round: 'r2', title: '条目丁', do: '点删除', exp: '列表里没它了' },
+  ],
+  data: { d1: { title: '两行同批号', rows: [['品名', '批号'], ['白尿素', 'CS-01']] } },
+  result: { checked: ['A1'], at: '2026-08-26' },
+  cards: [],
+}
+{
+  const fx28 = mkFixture('fx28', { 's.html': demoHtml('s') })
+  const cfgP = join(fx28.kb, 'kanban.config.json'), idxP = join(fx28.kb, 'index.html')
+  const accP = join(fx28.kb, 'acceptance-manifest.json')
+  const blP = join(fx28.kb, 'backlog-manifest.json'), decP = join(fx28.kb, 'decisions-manifest.json'), mP = join(fx28.kb, 'manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) x.instance.ghRepo = 'o/r'
+  bl.tiers = { 1: '核心' }
+  bl.items = [
+    // 只有 links 里的 /pull/230,没写 pr 字段 —— 反查(关联卡)要认它
+    { id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: '待办甲', problem: 'p', approach: 'a', area: 'x', source: 's', links: [{ title: 'PR', href: 'https://github.com/o/r/pull/230' }] },
+    // 写了 pr 但没清单 —— 该出现在「没有验收清单的 PR」里
+    { id: 'BL-2', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: '待办乙', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 999 },
+  ]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲', pr: 230 }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx28.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('pane-acceptance') && !off.includes('acclist'), '未配 acceptanceTab:无 tab / 无 pane')
+  const offSha = sha(idxP)
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = false
+  wr(cfgP, cfg)
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: [ACC_LIST] })) // false 时文件在也不读
+  runGen(NEW_SCRIPTS, fx28.kb)
+  ok(sha(idxP) === offSha, 'acceptanceTab:false 与未配逐字节相同(文件在场也不读)')
+  cfg.acceptanceTab = true
+  wr(cfgP, cfg)
+  rmSync(accP)
+  const rMiss = runGen(NEW_SCRIPTS, fx28.kb)
+  ok(rMiss.status !== 0 && rMiss.stderr.includes('acceptanceTab') && rMiss.stderr.includes('acceptance-manifest.json'), '开了 tab 却没清单文件 → 硬报错点名两者', rMiss.stderr.slice(0, 120))
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: [ACC_LIST] }))
+  const r = runGen(NEW_SCRIPTS, fx28.kb)
+  ok(r.status === 0, 'acceptanceTab:true + 清单 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('data-pane="acceptance">验收 · 4') && on.includes('id="pane-acceptance"'), 'tab 按钮(徽章=current 清单条目数)与 pane 都在')
+  ok(on.includes('id="acc-230-232"') && on.includes('id="acc-230"') && on.includes('id="acc-232"'), '清单锚 + 每个成员 PR 各一个空锚(#acc-230 深链找得到)')
+  ok(count(on, 'class="accitem"') === 4, `条目 4 条(实际 ${count(on, 'class="accitem"')})`)
+  ok(on.includes('"品名\\t批号\\n白尿素\\tCS-01"'), 'TSV 按 rows 拼好烤入(制表符 + 换行)')
+  ok(on.includes('"pre":["A1"]'), 'result.checked 烤成预勾选初值')
+  ok(on.includes('_acc_') && on.includes("'_r' + l.rev") && on.includes('"rev":2'), 'localStorage 键含 pr 串与 revision(改版即作废旧勾选)')
+  ok(count(on, 'data-accf="round"') === 1 && count(on, 'data-accf="pr"') === 1, '两个维度都在 → 轮次 + PR 两组筛选芯片')
+  ok(on.includes('<a class="acccard" href="#BL-1"'), 'links 兼容反查命中:只挂了 /pull/230 链接的卡进了关联卡')
+  ok(on.includes('accnolist') && on.includes('>#999</a>'), '「没有验收清单的 PR」列出 999(卡上写了 pr 却没清单)')
+  ok(on.includes('<a class="acclink" href="#acc-230">清单</a>') && on.includes('<span data-acc="230">0/4</span>'), '卡头长出「清单」链与「验收中 · n/N」(分母烤入,分子运行期)')
+  ok(on.includes('<div class="accexp"><b>一张表</b></div>') && !on.includes('**一张表**'), '正文 **粗体** 转 <b>,原文标记不残留(esc 先于 bold)')
+  { // 整壳 <script> 编译级断言:验收运行时也在同一块里,语法级回归当场现形
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  cfg.acceptanceTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx28.kb)
+  ok(sha(idxP) === offSha, '关回 false 后与冻结基线逐字节相同')
+}
+
+// ============ T29 验收守卫(三条 notice,全不阻断)============
+console.log('T29 验收守卫')
+{
+  const fx29 = mkFixture('fx29', { 's.html': demoHtml('s') })
+  const cfgP = join(fx29.kb, 'kanban.config.json'), accP = join(fx29.kb, 'acceptance-manifest.json')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.acceptanceTab = true
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  const bad = {
+    current: 999, // 没有任何清单含它
+    lists: [
+      { pr: [230, 232], title: '甲', items: [{ id: 'A1', title: 'x' }, { id: 'A1', title: 'y' }], cards: ['NOPE'] },
+      { pr: 230, title: '乙', items: [{ id: 'B1', title: 'z' }] }, // 230 撞进第二份清单
+    ],
+  }
+  writeFileSync(accP, JSON.stringify(bad))
+  const r = runStop(NEW_SCRIPTS, fx29.root)
+  ok(r.status === 0, '验收审计全非阻断(exit 0)', `${r.status} ${r.stderr.slice(0, 200)}`)
+  const out = r.stdout
+  ok(out.includes('current = 999'), 'current 指向的 PR 没清单 → 一条 notice')
+  ok(out.includes('PR #230 同时出现在两份验收清单'), '同一 PR 落进两份清单 → 一条 notice')
+  ok(out.includes('条目 id「A1」重复'), '条目 id 重复 → 一条 notice')
+  ok(out.includes('不存在的卡号「NOPE」'), 'cards 引用不存在的卡号 → 一条 notice')
+  // JSON 坏掉:产物已新鲜(gen 不重跑)时,守卫只报一条解析失败,不崩
+  writeFileSync(accP, '{ 坏掉的 JSON')
+  touch(join(fx29.kb, 'index.html'))
+  const r2 = runStop(NEW_SCRIPTS, fx29.root)
+  ok(r2.status === 0 && r2.stdout.includes('无法解析'), '清单 JSON 坏 → 一条解析失败 notice,不崩不拦', `${r2.status} ${r2.stdout.slice(0, 200)}`)
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

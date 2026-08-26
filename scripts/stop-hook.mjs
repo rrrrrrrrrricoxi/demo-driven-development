@@ -13,6 +13,9 @@
 //      v0.10.0 起认「合订引用」:被已豁免 demo 用 iframe(data-src/src)内嵌的同目录子页
 //      不算孤儿,逐层传递——合订页挂卡即可,子页不必挂占位链接(见 docs/demo-binding.md)。
 //      防死循环:同一次收工最多拦一次(stop_hook_active 时只警告并放行)。
+//   3. 验收审计(v0.12.0,只在 config.acceptanceTab 开且 acceptance-manifest.json 在场时):
+//      current 指向的 PR 没清单 / 同一 PR 落进两份清单 / 条目 id 重复 / cards 引用不存在的卡号,
+//      各出一条非阻断 notice;清单 JSON 坏了也只报一条,不崩、不拦。
 //
 // plugin 化改造(设计 §6):
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
@@ -127,6 +130,46 @@ for (let grew = true; grew;) {
   }
 }
 const orphans = demos.filter((f) => !covered.has(f))
+
+// ---- ③ 验收审计(v0.12.0):acceptanceTab 开 + 清单在场才跑,全部非阻断 notice ----
+// 清单是人写的正文,坏一条不该拦收工;这里只负责「让人看见」,gen 侧另有同款 console.warn。
+{
+  let accOn = false
+  try { accOn = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8')).acceptanceTab === true } catch {}
+  const accPath = join(KANBAN, 'acceptance-manifest.json')
+  if (accOn && existsSync(accPath)) {
+    let acm = null
+    try { acm = JSON.parse(readFileSync(accPath, 'utf8')) }
+    catch (e) { notices.push(S.accParseFail(e.message)) }
+    if (acm) {
+      const lists = (acm.lists || []).map((l) => {
+        const nums = (Array.isArray(l.pr) ? l.pr : [l.pr]).map(Number).filter((n) => Number.isFinite(n) && n > 0)
+        return { ...l, nums, key: nums.join('-') }
+      })
+      const cur = acm.current == null ? null : Number(acm.current)
+      if (cur !== null && !lists.some((l) => l.nums.includes(cur))) notices.push(S.accCurrentNoList(cur))
+      const owner = new Map()
+      for (const l of lists) for (const n of l.nums) {
+        if (owner.has(n)) notices.push(S.accDupPr(n, owner.get(n), l.key))
+        else owner.set(n, l.key)
+      }
+      // 卡号全集:三份 manifest 的 tasks / items / entries
+      const ids = new Set()
+      for (const [f, k] of [['manifest.json', 'tasks'], ['backlog-manifest.json', 'items'], ['decisions-manifest.json', 'entries']]) {
+        try { for (const c of JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))[k] || []) if (c && c.id) ids.add(String(c.id)) } catch {}
+      }
+      for (const l of lists) {
+        const seen = new Set()
+        for (const it of l.items || []) {
+          const id = String((it || {}).id ?? '')
+          if (seen.has(id)) notices.push(S.accDupItem(l.key, id))
+          seen.add(id)
+        }
+        for (const c of l.cards || []) if (!ids.has(String(c))) notices.push(S.accUnknownCard(l.key, c))
+      }
+    }
+  }
+}
 
 if (orphans.length === 0) {
   if (notices.length) console.log(JSON.stringify({ systemMessage: notices.join('\n') }))
