@@ -9,23 +9,6 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
-## [Unreleased]
-
-### Fixed
-- Status badges wrapped one character per line on cards with long titles,
-  stretching a 38px row to 88px and pushing the title down to a sliver. The row
-  head is a flex line whose children are all `flex: none` except the title and
-  the badge, so those two were the only shrinkable items — and flex distributes
-  shrinkage between them in proportion to their sizes rather than exhausting the
-  title first. The badge had no `white-space` declaration, and CJK text breaks
-  between any two characters, so its min-content width was a single character:
-  under pressure it collapsed into a vertical strip of stacked characters and
-  became the tallest thing in the row. `.badge` is now `white-space: nowrap` and
-  `flex: none`, leaving the title (`min-width: 0`, ellipsis) as the one item
-  that gives way. The session seal (`.cardsess`) gains `nowrap` for the same
-  reason — it was only spared because its container is `flex: none`. This
-  changes rendered output on every board, not only affected ones.
-
 ## [0.12.0] - 2026-08-26
 
 ### Added
@@ -89,6 +72,21 @@ downgrade would freeze every already-stamped board. See
   Existing boards are left alone — both tabs default to off, and a board with
   neither key set nor either manifest present generates byte-identical output to
   0.11.4.
+
+### Fixed
+- Status badges wrapped one character per line on cards with long titles,
+  stretching a 38px row to 88px and pushing the title down to a sliver. The row
+  head is a flex line whose children are all `flex: none` except the title and
+  the badge, so those two were the only shrinkable items — and flex distributes
+  shrinkage between them in proportion to their sizes rather than exhausting the
+  title first. The badge had no `white-space` declaration, and CJK text breaks
+  between any two characters, so its min-content width was a single character:
+  under pressure it collapsed into a vertical strip of stacked characters and
+  became the tallest thing in the row. `.badge` is now `white-space: nowrap` and
+  `flex: none`, leaving the title (`min-width: 0`, ellipsis) as the one item
+  that gives way. The session seal (`.cardsess`) gains `nowrap` for the same
+  reason — it was only spared because its container is `flex: none`. This
+  changes rendered output on every board, not only affected ones.
 
 ## [0.11.4] - 2026-08-20
 
