@@ -2265,12 +2265,24 @@ console.log('T50 写操作 CLI ddd.mjs')
       [['card', 'set', 'BL-C10', 'line', 'Z'], /lanes\.ids/],
       [['card', 'set', 'BL-C10', 'session', 'nobody'], /sessionTags/],
       [['card', 'set', 'BL-C10', 'order', '3'], /order/],
+      // id 改了 = 卡的身份没了:拆分后文件名与 id 对不上,gen 硬失败,CLI 也跟着拒跑
+      [['card', 'set', 'BL-C10', 'id', 'BL-C900'], /card new|新建|建新卡/],
+      [['card', 'set', 'BL-C10', 'id', 'BL-C9'], /card new|新建|建新卡/],
+      // 数组字段给标量:gen 会在 .map 上 TypeError
+      [['card', 'set', 'BL-C10', 'links', 'foo'], /--json/],
+      [['card', 'set', 'BL-C10', 'shots', 'a.png'], /--json/],
+      [['card', 'set', 'BL-C10', 'walkthroughs', 'x'], /--json/],
+      [['card', 'set', 'BL-C10', 'links', '--json', '"foo"'], /--json/],
     ]
     for (const [args, re] of bad) {
       const r = runCli(kb, args)
-      ok(r.status === 1 && re.test(r.stderr), `card set 拒绝:${args[3]} = ${args[4]}`)
+      ok(r.status === 1 && re.test(r.stderr), `card set 拒绝:${args[3]} = ${args.slice(4).join(' ')}`)
     }
-    ok(readFileSync(blP, 'utf8') === before, '六次拒绝之后 manifest 一个字节都没变')
+    ok(readFileSync(blP, 'utf8') === before, `${bad.length} 次拒绝之后 manifest 一个字节都没变`)
+    { // 数组给数组照收
+      const rok = runCli(kb, ['card', 'set', 'BL-C10', 'shots', '--json', '["a.png"]'])
+      ok(rok.status === 0 && Array.isArray(rd(blP).items.find((x) => x.id === 'BL-C10').shots), 'shots 给数组照收')
+    }
 
     const ru = runCli(kb, ['card', 'set', 'BL-C10', 'wombat', '42'])
     ok(ru.status === 0 && /wombat/.test(ru.stderr) && rd(blP).items.find((x) => x.id === 'BL-C10').wombat === '42',

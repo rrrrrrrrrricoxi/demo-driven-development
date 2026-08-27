@@ -110,7 +110,8 @@ const zh = {
   card set <id> <field> <value> [--json]
       改一个字段。--json:值按 JSON 解析(要写数组/对象用它,顺带把结果也打成 JSON)。
       校验:status ∈ 该类卡的 statuses、date 形如 YYYY-MM-DD、pr 形如 12 / "#12" / "owner/repo#12"、
-      line ∈ config.lanes.ids、session ∈ config.sessionTags;order 不许改;不认识的字段只警告不拒。
+      line ∈ config.lanes.ids、session ∈ config.sessionTags;links/shots 这类数组字段要 --json;
+      id 与 order 不许改;不认识的字段只警告不拒。
   card status <id> <status> [--no-note]
       改状态,并在时间线字段末尾追一行「【日期】status → …」(--no-note 关掉这一行)。
   card note <id> "<text>"           时间线末尾追一行「【日期】text」
@@ -138,6 +139,8 @@ const zh = {
     cardIdMismatch: (rel, id) => `ddd:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,本次一个字节都没写 —— 文件名就是卡号(一个真源)。`,
     cardNotFound: (id) => `ddd:板上没有卡号「${id}」。用 card list 核一遍(拆成一卡一文件之后,文件名就是卡号)。`,
     orderLocked: () => 'ddd:order 是拆分时记下的原数组下标(它就是显示顺序),不许用 CLI 改 —— 真要挪位置,直接编辑卡文件并说明理由。',
+    idLocked: () => 'ddd:id 是这张卡的身份 —— 一卡一文件时它就是文件名,改了之后 gen 立刻硬失败(文件名与 id 对不上),而 CLI 见到坏卡也拒跑,连改回来的那条命令都用不了。要换卡号:用 card new 建新卡把内容搬过去,或者停下 gen、手工把文件与 id 一起改。本次一个字节都没写。',
+    arrayField: (field) => `ddd:${field} 的形制是数组,给的是标量 —— gen 会在渲染它的时候 TypeError,整块板生成不出来。写法:--json '[…]',例如 card set <id> ${field} --json '[]'。本次一个字节都没写。`,
     statusBad: (v, list) => `ddd:status「${v}」不在这类卡的 statuses 里。可用:${list.join(' / ')}`,
     dateBad: (v) => `ddd:日期「${v}」形制不对,要 YYYY-MM-DD(板上按字符串比大小,补零不能省)。`,
     lineBad: (v, list) => `ddd:线别「${v}」不在 config.lanes.ids 里。可用:${list.join(' / ')}(多线共享写成空格分隔,如 "B C")`,
@@ -421,7 +424,8 @@ Cards:
       report comes back as JSON too).
       Checked: status is one of that card kind's statuses, date looks like YYYY-MM-DD, pr looks
       like 12 / "#12" / "owner/repo#12", line is in config.lanes.ids, session is in
-      config.sessionTags. "order" cannot be changed; an unrecognised field only warns.
+      config.sessionTags. Array fields such as links/shots need --json. "id" and "order" cannot
+      be changed; an unrecognised field only warns.
   card status <id> <status> [--no-note]
       Change the status and append one timeline line "【date】status → …" (--no-note skips it).
   card note <id> "<text>"           append one timeline line "【date】text"
@@ -451,6 +455,8 @@ kanban.config.json). This command never commits — git add the card files yours
     cardIdMismatch: (rel, id) => `ddd: card file ${rel} does not match the id "${id}" inside it; nothing was written — the filename is the card id (one source of truth).`,
     cardNotFound: (id) => `ddd: no card "${id}" on this board. Check with card list (with one file per card, the filename is the id).`,
     orderLocked: () => 'ddd: "order" is the original array index recorded by the split (it is the display order) and the CLI will not change it. To really move a card, edit its file and say why.',
+    idLocked: () => 'ddd: "id" is the card\'s identity — with one file per card it is the filename. Change it and the next gen fails hard (filename does not match the id), and the CLI refuses to run on a board with a bad card, so even the command that would change it back is locked out. To renumber a card: create a new one with card new and move the content, or stop gen and change the file and the id together by hand. Nothing was written.',
+    arrayField: (field) => `ddd: ${field} is an array field and a scalar was given — gen throws a TypeError while rendering it and the whole board fails to build. Write it as --json '[…]', e.g. card set <id> ${field} --json '[]'. Nothing was written.`,
     statusBad: (v, list) => `ddd: status "${v}" is not one of this card kind's statuses. Available: ${list.join(' / ')}`,
     dateBad: (v) => `ddd: the date "${v}" is malformed; it must be YYYY-MM-DD (the board compares them as strings, so the zero padding matters).`,
     lineBad: (v, list) => `ddd: lane "${v}" is not in config.lanes.ids. Available: ${list.join(' / ')} (a card on several lanes is space-separated, e.g. "B C")`,

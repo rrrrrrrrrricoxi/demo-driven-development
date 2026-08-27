@@ -203,10 +203,16 @@ const KNOWN_FIELDS = {
 }
 /** 时间线字段:backlog 的 note、决策的 notes(manifest.json 的 tasks 用 notes,同一族) */
 const NOTE_FIELD = { items: 'note', entries: 'notes' }
+/** 形制上就是数组的字段:塞个标量进去,gen 会在 .map 上当场 TypeError,整块板生成不出来 */
+const ARRAY_FIELDS = ['links', 'shots', 'walkthroughs', 'iters', 'refines']
 
 /** 一处校验,set / status / new 共用 —— 三条路写同一批字段,校验分三份迟早对不上 */
 function checkField(store, field, value) {
   if (field === 'order') die(S.orderLocked())
+  // id 是文件名(拆分模式)/ 全板唯一键(未拆),改它就是把卡的身份改掉:gen 下一跑就硬失败,
+  // 而 loadKind 见到坏卡即 die,连用来改回来的这条命令也一起锁死。所以这里一个字节都不写。
+  if (field === 'id') die(S.idLocked())
+  if (ARRAY_FIELDS.includes(field) && !Array.isArray(value)) die(S.arrayField(field))
   if (field === 'status') { const all = statusIds(store.head); if (!all.includes(String(value))) die(S.statusBad(String(value), all)) }
   if (field === 'date' && !DATE_RE.test(String(value))) die(S.dateBad(String(value)))
   if (field === 'line') checkTokens(value, laneIds(), S.lineBad)
