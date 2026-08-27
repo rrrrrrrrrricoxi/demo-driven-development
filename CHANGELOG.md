@@ -9,6 +9,28 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.14.1] - 2026-08-27
+
+### Added
+- **A left tab rail** (`config.tabRail`, opt-in). Scroll past the tab bar on a
+  long board and there is no way back to the other tabs without scrolling to
+  the top first. With this on, a narrow vertical copy of the tab bar fades into
+  the left margin once the bar leaves the top of the viewport: the same labels
+  and count badges, the current tab highlighted, one click to switch. Clicking
+  routes through the same `show()` the tab buttons use — deep links, lazily
+  loaded panes and the hash all behave exactly as before — and then scrolls
+  back to the top of the pane, because the content underneath has just been
+  replaced. The rail is *derived* from the tab bar at generation time rather
+  than written out a second time, so an added or removed tab (the optional
+  acceptance, release and archive ones included) appears in both places at
+  once, and the screenshot gallery's outbound link stays an outbound link. Its
+  badges are copied from the tab buttons whenever a filter recomputes them, so
+  the two can never disagree. It sits in the page margin, not the content
+  column, and so does not compete with the acceptance pane's section index or
+  the doc library's left navigation; below 1200px there is no margin to sit in
+  and it never appears; without `IntersectionObserver` it stays silent. Left
+  unset, output is byte-identical to a board without the feature.
+
 ## [0.14.0] - 2026-08-27
 
 ### Added

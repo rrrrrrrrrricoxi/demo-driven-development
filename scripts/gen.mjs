@@ -3332,6 +3332,75 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
   // 首屏立稳后空闲预取其余 pane:徽章口径差与搜索首键延迟随之消除;总字节与单文件持平,首屏赢面不变
   if ('requestIdleCallback' in window) requestIdleCallback(() => ensureAll(), { timeout: 4000 })`
 
+// ———— 左侧竖向 tab 导航(v0.14.1,config.tabRail:布尔,默认关)————
+// 滚过 tab 条之后,页面左侧留白里浮出一条竖排导航,直接切 tab;窄屏没有留白,永不浮出。
+// rail 清单不另立一份 —— 就地从下面那段 tabbar 标记解析出来:tab 增减只有一处要改,
+// 两边永远说不出不一样的话(截图那项在 rail 里同样是一项,照旧出站跳转)。
+// 关 = HTML / CSS / JS / 两处同步全为空串,产物逐字节冻结。
+const TABRAIL = cfg.tabRail === true
+const TABBAR_HTML = `<div class="tabbar">
+    <button class="tab tab-active" data-pane="progress">进度看板</button>
+    ${pm ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
+    <button class="tab" data-pane="decisions" data-label="决策/Demo">决策/Demo · ${decCount}</button>
+    <button class="tab${WIP_TAB_CLS}" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}${REL_TAB}
+    <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>${ARCH_TAB}
+    <a class="tab tab-shots" href="shots.html" title="验证截图存档(随 PR 入库)">截图 · ${SHOT_COUNT} ↗</a>
+  </div>`
+const TABRAIL_HTML = !TABRAIL ? '' : `\n<nav class="tabrail" hidden aria-label="tab 快捷导航">${
+  [...TABBAR_HTML.matchAll(/<(button|a) class="tab([^"]*)"([^>]*)>([\s\S]*?)<\/\1>/g)].map(([, , cls, attrs, text]) => {
+    const pane = (attrs.match(/ data-pane="([^"]*)"/) || [])[1]
+    if (!pane) return `\n  <a class="railitem" href="${(attrs.match(/ href="([^"]*)"/) || [])[1]}">${text}</a>`
+    return `\n  <button class="railitem${cls.includes('tab-active') ? ' on' : ''}" data-pane="${pane}">${text}</button>`
+  }).join('')}\n</nav>`
+// 只用既有变量与既有 --hubh(hubbar 实高,JS 量了写在根上)—— 不引新色值,暗档自然跟着 light-dark 走。
+const TABRAIL_CSS = !TABRAIL ? '' : `
+  /* ============ 左侧竖向 tab 导航(v0.14.1,config.tabRail)============ */
+  /* 只住页面左侧留白:够宽才成立,所以显示规则整个包在媒体查询里。
+     验收 pane 的分组目录、文档库的左导航都住在内容列里,这条住在列外,互不挡道。 */
+  .tabrail { display: none; }
+  @media (min-width: 1200px) {
+    .tabrail:not([hidden]) { position: fixed; left: 8px; top: calc(var(--hubh, 41px) + 8px); z-index: 55;
+      display: flex; flex-direction: column; gap: 1px; width: 120px; padding: 5px;
+      background: var(--bg); border: 1px solid var(--line-strong); border-radius: 10px; }
+  }
+  .railitem { appearance: none; border: 0; background: none; cursor: pointer; font: inherit; font-size: 11.5px;
+    font-weight: 600; line-height: 1.5; color: var(--mut); text-align: left; text-decoration: none;
+    padding: 4px 7px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .railitem:hover { color: var(--ink); background: var(--card); }
+  .railitem.on { color: var(--accent-deep); background: var(--accent-soft); }`
+const TABRAIL_SHOW = !TABRAIL ? '' : `
+    document.querySelectorAll('.railitem[data-pane]').forEach((r) => r.classList.toggle('on', r.dataset.pane === name))`
+// 徽章不重算一遍 —— 直接抄 tab 按钮的现值,口径永远同一份(幂等,setLine 每次重算后跟着跑)
+const TABRAIL_BADGE = !TABRAIL ? '' : `
+    document.querySelectorAll('.railitem[data-pane]').forEach((r) => {
+      const t = document.querySelector('.tab[data-pane="' + r.dataset.pane + '"]')
+      if (t) r.textContent = t.textContent
+    })`
+const TABRAIL_JS = !TABRAIL ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    var rail = document.querySelector('.tabrail')
+    var bar = document.querySelector('.tabbar')
+    if (!rail || !bar || typeof IntersectionObserver !== 'function') return // 没 IO 的旧浏览器:静默不出现
+    var wide = window.matchMedia('(min-width: 1200px)') // 窄屏没有左侧留白,rail 永不显示
+    var past = false
+    var apply = function () { rail.hidden = !(past && wide.matches) }
+    new IntersectionObserver(function (es) {
+      var e = es[es.length - 1]
+      past = !e.isIntersecting && e.boundingClientRect.top < 0 // 只认「向上滑出去」,别的方向离场不算
+      apply()
+    }).observe(bar)
+    if (wide.addEventListener) wide.addEventListener('change', apply)
+    rail.addEventListener('click', function (ev) {
+      var it = ev.target.closest('.railitem[data-pane]')
+      if (!it) return // 截图那项是出站链接,照旧交给浏览器
+      var name = it.dataset.pane
+      show(name)
+      history.replaceState(null, '', name === 'progress' ? '#' : '#' + name)
+      var pane = document.getElementById('pane-' + name) // 切了 tab 内容全变,回到该 pane 顶部
+      window.scrollTo({ top: pane ? Math.max(0, pane.getBoundingClientRect().top + window.scrollY - hubH - 8) : 0 })
+    })
+  })()`
+
 const html = `<!doctype html>
 <!-- ddd-gen v${GEN_VER} -->
 <html lang="${HTML_LANG}">
@@ -3872,7 +3941,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -3887,16 +3956,9 @@ const html = `<!doctype html>
     <button class="tf lf" data-days="7">近 7 天</button>
     <button class="tf lf" data-days="30">近 30 天</button>${DK_TOGGLE_BTN ? `\n    <span class="lf-lbl" style="margin-left:10px"></span>${DK_TOGGLE_BTN}` : ''}
   </div>
-</nav>${LAZY_BAR}
+</nav>${LAZY_BAR}${TABRAIL_HTML}
 <div class="wrap" data-line="all">${LANE.lineHintsHtml}
-  <div class="tabbar">
-    <button class="tab tab-active" data-pane="progress">进度看板</button>
-    ${pm ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
-    <button class="tab" data-pane="decisions" data-label="决策/Demo">决策/Demo · ${decCount}</button>
-    <button class="tab${WIP_TAB_CLS}" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}${REL_TAB}
-    <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>${ARCH_TAB}
-    <a class="tab tab-shots" href="shots.html" title="验证截图存档(随 PR 入库)">截图 · ${SHOT_COUNT} ↗</a>
-  </div>
+  ${TABBAR_HTML}
   <section class="pane pane-active" id="pane-progress">${progressPane}</section>
   ${pm ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
   <section class="pane" id="pane-decisions"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : decisionsPane}</section>
@@ -3916,7 +3978,7 @@ const html = `<!doctype html>
     })
   }
   const show = (name) => {
-    tabs.forEach((t) => t.classList.toggle('tab-active', t.dataset.pane === name))
+    tabs.forEach((t) => t.classList.toggle('tab-active', t.dataset.pane === name))${TABRAIL_SHOW}
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('pane-active', p.id === 'pane-' + name))
     ${LAZY_SHOW}clampScan(document.getElementById('pane-' + name))
     if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}${REL_SHOW}
@@ -4020,7 +4082,7 @@ const html = `<!doctype html>
     document.querySelectorAll('.tab[data-label]').forEach((t) => {
       const pane = document.getElementById('pane-' + t.dataset.pane)
       ${LAZY_BADGE}if (pane) t.textContent = t.dataset.label + ' · ' + nVis(pane, '.lcard')
-    })${WIP_SETLINE}
+    })${WIP_SETLINE}${TABRAIL_BADGE}
     // 汇总行(决策/Backlog 各一条):总数 + 分状态 chip 重算
     // 进度条按线路重算(与 gen 同口径:separate 不计;非全部档加线路前缀)
     const pbi = document.querySelector('#pane-progress .pbar i')
@@ -4301,7 +4363,7 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}${RESP_JS}
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}${RESP_JS}${TABRAIL_JS}
 </script>
 `
 

@@ -248,6 +248,21 @@ app/kanban/
 
 反悔用 `node <plugin>/scripts/cards-join.mjs --dir app/kanban`(同样自带 gen 比对与回滚)。
 
+## 左侧竖向 tab 导航(tabRail,v0.14.1:opt-in)
+
+`config.tabRail` 缺省关;设 `true` 后:板子往下滑、tab 条从视口顶端离开之后,页面左侧留白里浮出
+一条竖排 tab 导航(同样的文案与「· N」徽章、当前 tab 高亮、点一下就切)。
+
+- **清单不是第二份**:gen 直接从 tab 条那段标记解析出来 —— 加/减一个 tab(验收、发布进度、归档
+  这些可选的也算)两边一起变,不会各说各话;截图廊那项照旧是出站链接。
+- **徽章同源**:线别/时间/搜索重算 tab 徽章时,rail 文案直接抄 tab 按钮的现值,两边不可能对不上。
+- **点击 = 同一条路**:走 tab 按钮那个 `show()` + `history.replaceState`,深链、懒加载 pane 行为不变;
+  切完滚回该 pane 顶部(内容整个换了,停在原来的滚动位置没有意义)。
+- **三道显隐门**:tab 条向上离开视口才出现(`IntersectionObserver`);窗口窄于 1200px 没有左侧留白,
+  永不出现;浏览器没有 `IntersectionObserver` 就静默不出现。
+- **不跟人抢地方**:它住在内容列之外的留白里,验收 pane 的分组目录、文档库的左导航都在列内,互不遮挡。
+- **字节冻结**:不配或 `false` 时输出逐字节不变。
+
 ## 写操作 CLI(ddd.mjs,v0.14.0)
 
 `node <plugin>/scripts/ddd.mjs`,零依赖,`--dir` 与 gen 同一口径。两种形制都认:配了 `cardsDir` 就逐卡文件读写(一张卡一次原子写),没配就从头文件的数组读、整文件重写(竞态照旧,但校验与形制一致)。
