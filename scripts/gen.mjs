@@ -2481,6 +2481,50 @@ const relStatusText = (r) => {
   return relMd(p.createdAt)
 }
 
+// ———— 时间线的带(v0.13.1)————
+// 0.12.0 的时间线一 PR 一行:240 个 PR 铺成 2400px 高,横轴几乎空置。改成一版一带:
+// 纵向从「PR 数」变成「带数」,展开的带用泳道打包(高度封顶),横向按繁忙度加宽。
+// 锚点日 = 开着的按 createdAt、合了的按 mergedAt、关掉的按 closedAt,与表格「状态 · 日期」同口径;
+// 每天的锚点数既定轴宽,也定折叠态那一排小竖标的高度。
+const relAnchor = (p) => String((p.state === 'open' ? p.createdAt : p.mergedAt || p.closedAt || p.createdAt) || '').slice(0, 10)
+// 带 id:prod 按版本拆开,三段之外的(非主线 / 关掉未合)并进「其它」—— 与段芯片同一口径
+const relGid = (sg) => sg.id === 'prod' ? sg.tag || 'prod' : sg.id === 'dev' || sg.id === 'test' ? sg.id : 'other'
+const REL_GROUPS = !REL ? [] : (() => {
+  const rowsOf = new Map()
+  for (const r of REL_ROWS) {
+    const g = relGid(r.sg)
+    if (!rowsOf.has(g)) rowsOf.set(g, [])
+    rowsOf.get(g).push(r)
+  }
+  const out = []
+  let vi = 0
+  const take = (g, nm, sf, sg) => { // 空带不占一行:一条空带说不出话,而带数就是这个视图的全部预算
+    const rs = rowsOf.get(g)
+    if (!rs) return
+    rowsOf.delete(g)
+    const d = {}
+    let lo = '', hi = ''
+    for (const r of rs) {
+      const a = relAnchor(r.p)
+      if (!a) continue
+      d[a] = (d[a] || 0) + 1
+      if (!lo || a < lo) lo = a
+      if (!hi || a > hi) hi = a
+    }
+    // 版本带之间只差一档透明度(看板没有第二套强调色,也不该为这张图新造):最新版最实,越老越淡
+    out.push({ g, nm, sf, sg, n: rs.length, lo, hi, d, q: sg === 'prod' ? Math.max(1, 4 - vi++) : 4 })
+  }
+  for (const s of REL_STAGES) if (s.id === 'dev' || s.id === 'test') take(s.id, s.label, s.hint, s.id)
+  for (const r of relSorted.slice().reverse()) take(String(r.tag), String(r.tag), REL_NOTE.get(String(r.tag)) || '', 'prod')
+  // 兜底:没写 at 的版本(relSorted 不收它)与「缺 test 的宿主那条无版本 prod」,排在有 at 的版本之后
+  for (const g of [...rowsOf.keys()].filter((x) => x !== 'other').sort().reverse()) take(g, g === 'prod' ? REL_LABEL.get('prod') || 'prod' : g, '', 'prod')
+  take('other', '其它', '非主线 base 的 PR 与关掉未合的 PR', 'other')
+  return out
+})()
+// 几何(轴 / 刻度 / 泳道 / 带高)原样内联进页面:测试 import 的与页面跑的是同一份源码。
+const REL_GEOM_SRC = !REL ? '' : readFileSync(new URL('./relgeom.mjs', import.meta.url), 'utf8')
+  .replace(/^export /gm, '').replace(/^(?!$)/gm, '    ')
+
 const relRowHtml = (r) => {
   const p = r.p
   const cur = ACC && Number(acm.current) === r.n
@@ -2576,11 +2620,10 @@ const releasePane = !REL ? '' : `
     </table></div></div>
   </div>
   <div class="relview" data-relpane="timeline" hidden>
-    <div class="relf relwf" data-relf="win"><button type="button" class="on" data-relwin="60">近 60 天</button><button type="button" data-relwin="all">全部</button></div>
-    <div class="reltlw"><div class="reltlsc" id="reltl"></div></div>
-    <p class="rellg"><span class="relk s-dev"></span>dev<span class="relk s-test"></span>test<span class="relk s-prod"></span>prod<span class="relk s-closed"></span>已关闭 / 非主线<span class="relmore">横杠 = 开 PR → 合并;开着的延到今天并画成虚线;竖线 = 版本;横向可滚</span></p>
+    <div class="relwf"><div class="relf" data-relf="win"><button type="button" class="on" data-relwin="60">近 60 天</button><button type="button" data-relwin="all">全部</button></div><span class="reldrg"></span></div>
+    <div class="reltlw"><div class="reltlsc"><div class="reltli" id="reltl"></div></div></div>
+    <p class="rellg"><span class="rellk"></span><span class="relmore">横杠 = 开 PR → 合并,虚边 = 还开着;方块 = 当天开当天合,按号横排;竖线 = 版本 tag。轴按当天的繁忙度加宽,安静的日子挤在一起。点带头展开</span></p>
   </div>
-  <div class="reltip" id="reltip" hidden></div>
   <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>release-manifest.json</code> —— PR 状态与版本由 <code>pr-sync.mjs</code>(调 <code>gh</code>)写入,gen 本身不联网、不取时间;关联卡是每次生成时从三份 manifest 现查的。</p>`
 
 // ———— 发布进度:门控注入片(REL 关时全为空串)————
@@ -2598,7 +2641,6 @@ const REL_CSS = !REL ? '' : `
   .relf button.on { background: var(--brand-soft); border-color: transparent; color: var(--ink); font-weight: 600; }
   .relfn { font-variant-numeric: tabular-nums; color: var(--faint); }
   .relf button.on .relfn { color: var(--mut); }
-  .relwf { margin-bottom: 10px; }
   .relseg { display: inline-flex; margin-left: auto; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
   .relseg button { appearance: none; font: inherit; font-size: 11.5px; padding: 3px 12px; border: 0; cursor: pointer;
      background: var(--card); color: var(--mut); white-space: nowrap; }
@@ -2650,52 +2692,80 @@ const REL_CSS = !REL ? '' : `
      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .relnone > td, .relnone2 { padding: 22px; text-align: center; color: var(--faint); font-size: 12.5px; }
   .relnone2 { margin: 0; }
+  /* 时间线(v0.13.1 重做):一版一带,折叠只占带头,展开走泳道打包;轴按当天繁忙度加宽 */
+  .relwf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .reldrg { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .reltlw { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); overflow: hidden; }
-  .reltlsc { overflow-x: auto; }
-  .reltlsvg { display: block; }
-  .relgl { stroke: var(--line); }
-  .relvl { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .7; }
-  text.relax { font-size: 10px; fill: var(--faint); font-variant-numeric: tabular-nums; }
-  text.relvt { font-size: 9.5px; font-weight: 700; fill: var(--accent); }
-  text.rellb { font-size: 9.5px; fill: var(--faint); font-variant-numeric: tabular-nums; }
-  rect.relb { cursor: pointer; }
-  rect.relb.s-dev { fill: ${tk('warn-ink')}; }
-  rect.relb.s-test { fill: var(--accent); }
-  rect.relb.s-prod { fill: var(--brand); }
-  rect.relb.s-closed, rect.relb.s-offline { fill: var(--faint); opacity: .5; }
-  rect.relb.open { fill-opacity: .28; stroke: ${tk('warn-ink')}; stroke-dasharray: 4 3; }
+  .reltlsc { overflow-x: auto; overflow-y: hidden; }
+  .reltli { position: relative; }
+  .reltlax { position: relative; height: 26px; border-bottom: 1px solid var(--line); }
+  .reltlgl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+  .reltltk { position: absolute; top: 15px; height: 8px; width: 1px; background: var(--line-strong); }
+  .reltlx { position: absolute; top: 4px; font-size: 10.5px; color: var(--faint); white-space: nowrap;
+     font-variant-numeric: tabular-nums; padding-left: 3px; }
+  .reltag { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent); opacity: .55; }
+  /* tag 名落在轴下方第一条带上:与轴上的日期标签同处 top 会压字,给个卡底就压得住带里的小竖标 */
+  .reltagt { position: absolute; top: 28px; font-size: 10px; font-weight: 700; color: var(--accent); white-space: nowrap;
+     background: var(--card); border-radius: 3px; padding: 0 3px; }
+  .relbd { position: relative; border-bottom: 1px solid var(--line); }
+  .relbd:last-child { border-bottom: 0; }
+  /* 带头整条 sticky:横向滚到七月了,带名与「155 PR · 05-10→07-14」还在原地 */
+  .relgut { position: sticky; left: 0; z-index: 3; width: 200px; background: var(--card); border-right: 1px solid var(--line); }
+  .relbd.on .relgut { background: var(--brand-soft); }
+  .relbh { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 9px;
+     appearance: none; font: inherit; text-align: left; border: 0; background: none; cursor: pointer; color: var(--mut); }
+  .relbh:hover { color: var(--ink); }
+  .relbc { flex: none; width: 9px; font-size: 10px; color: var(--faint); }
+  .relbt { flex: 1 1 auto; min-width: 0; line-height: 1.15; }
+  /* 两行:带名一行、「N PR · 起→止」一行 —— 挤在一行里就是 0.13.0 那个被截成「155 PR · 05-10→…」的样子。
+     省略号只是宿主写了超长 label 时的兜底,正常数据在 200px 里放得下。 */
+  .relbn, .relbm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .relbn { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .relbm { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .relsub { position: absolute; left: 0; width: 200px; padding: 0 9px; font-size: 9.5px; line-height: 13px; color: var(--faint); }
+  .relrg { position: absolute; height: 3px; border-radius: 2px; }
+  .relsp { position: absolute; border-radius: 1px; }
+  .relpb { position: absolute; height: 11px; border-radius: 3px; display: block; text-decoration: none; overflow: hidden;
+     font-size: 9px; line-height: 11px; color: var(--card); padding: 0 2px; white-space: nowrap; }
+  /* 带色:三段沿用段芯片的颜色;版本带之间只差一档透明度,不为这张图新造强调色 */
+  .relc.s-dev { background: ${tk('warn-ink')}; }
+  .relc.s-test { background: var(--accent); }
+  .relc.s-prod { background: var(--brand); }
+  .relc.s-other { background: var(--faint); }
+  .relc.q3 { opacity: .78; }
+  .relc.q2 { opacity: .56; }
+  .relc.q1 { opacity: .4; }
+  .relpb.open { opacity: .5; border: 1px dashed var(--card); }
+  .relpb.dim { opacity: .16; }
+  .relpb:hover { outline: 1.5px solid var(--ink); z-index: 2; }
+  .relpb.hit { outline: 1.5px solid ${tk('gold-ink')}; z-index: 2; }
   .rellg { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 9px 0 0; font-size: 11.5px; color: var(--faint); }
-  .relk { display: inline-block; width: 16px; height: 6px; border-radius: 99px; margin-left: 9px; }
-  .rellg .relk:first-child { margin-left: 0; }
-  .relk.s-dev { background: ${tk('warn-ink')}; }
-  .relk.s-test { background: var(--accent); }
-  .relk.s-prod { background: var(--brand); }
-  .relk.s-closed { background: var(--faint); opacity: .5; }
-  .relmore { margin-left: auto; }
-  .reltip { position: fixed; z-index: 60; max-width: 320px; padding: 7px 10px; border-radius: 8px;
-     border: 1px solid var(--line-strong); background: var(--card); box-shadow: 0 6px 18px rgba(${SHADOW_INK},.16);
-     font-size: 11.5px; line-height: 1.6; color: var(--mut); pointer-events: none; }
-  .reltip b { display: block; font-size: 12px; color: var(--ink); }
-  .reltip span { display: block; }
+  .rellk { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .rellk i { display: inline-block; width: 13px; height: 7px; border-radius: 99px; margin: 0 3px 0 9px; }
+  .rellk i:first-child { margin-left: 0; }
+  .relmore { margin-left: auto; max-width: 62ch; }
   @media (max-width: 820px) { .relseg { margin-left: 0; } .relmore { margin-left: 0; } }`
 // 运行期:筛选 / 搜索 / 排序 / 版本折叠 / 视图切换 / 时间线绘制 / syncedAt 换算。
 // 两视图共用同一份 REL_D 与同一个 pass():筛选一次,表格与时间线看到的是同一批 PR。
 const REL_JS = !REL ? '' : `
   ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+${REL_GEOM_SRC}
+    // 一行 PR 的运行期数据。分支 / 状态词 / 段词都不烤第二份 —— 表格那一行的格子里已经有了,
+    // 搜索认的是拼好的 q;时间线只要号、标题、卡与三个日期。
     var D = ${accJson(REL_ROWS.map((r) => ({
-      n: r.n, t: r.p.title || '', s: String(r.p.state || ''), b: String(r.p.branch || ''),
+      n: r.n, t: r.p.title || '', s: String(r.p.state || ''),
       c: String(r.p.createdAt || ''), m: String(r.p.mergedAt || ''), x: String(r.p.closedAt || ''),
-      d: relDate(r), st: r.sg.id, tag: r.sg.tag, stx: relStatusText(r), sgx: relStageText(r),
-      k: r.cards.map((c) => c.id),
+      d: relDate(r), st: r.sg.id, tag: r.sg.tag, gp: relGid(r.sg), k: r.cards.map((c) => c.id),
       q: `${r.n} ${r.p.title || ''} ${r.p.branch || ''} ${r.cards.map((c) => c.id).join(' ')}`.toLowerCase(),
     })))}
+    var G = ${accJson(REL_GROUPS)}
     var RELS = ${accJson(relSorted.map((r) => ({ tag: String(r.tag), at: String(r.at) })))}
     var ATOF = ${accJson(Object.fromEntries(REL_AT))}
     var pane = document.getElementById('pane-release')
     if (!pane) return
     var tb = document.getElementById('reltb')
-    var tip = document.getElementById('reltip')
     var host = document.getElementById('reltl')
+    var dnr = pane.querySelector('.reldrg')
     var qbox = pane.querySelector('.relq')
     var none = tb.querySelector('.relnone')
     var rows = {}, ghs = {}, open = {}, byN = {}
@@ -2755,75 +2825,114 @@ const REL_JS = !REL ? '' : `
       }
     }
     function day(s) { return Date.parse(String(s).slice(0, 10) + 'T00:00:00Z') }
+    function iso(t) { return new Date(t).toISOString().slice(0, 10) }
+    function dstr(t) { return new Date(t).toISOString().slice(0, 10) }
+    function md(s) { return String(s).slice(5, 10) }
+    // 锚点日与 gen 烤日桶时同一条规则:开着看 createdAt,合了看 mergedAt,关掉看 closedAt
+    function anc(d) { return String(d.s === 'open' ? d.c : d.m || d.x || d.c).slice(0, 10) }
+    // 时间线的全部尺寸都在这一处:轴(lbl/base/slot/quiet)、泳道(lanes/row/min/gap)、带(head/sub/pad)
+    var TL = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48 }
+    var DAYC = {}, byG = {} // 全局日计数(轴宽只看它,展开/折叠/筛选都不让轴跳)与带 → PR
+    for (i = 0; i < G.length; i++) for (var gd in G[i].d) DAYC[gd] = (DAYC[gd] || 0) + G[i].d[gd]
+    for (i = 0; i < D.length; i++) { if (!byG[D[i].gp]) byG[D[i].gp] = []; byG[D[i].gp].push(D[i]) }
+    var bOpen = { dev: true }, bSnap = null // 默认只展开 dev:在做的那条
+    function hitsOf(g) { var out = [], k; for (k = 0; k < D.length; k++) if (D[k].gp === g.g && pass(D[k])) out.push(D[k]); return out }
+    function href(n) { var a = rows[n] && rows[n].querySelector('.rc-n a'); return a ? a.getAttribute('href') : '' }
+    function tlBar(bb, g, top, q, lbl) { // 条与泳道位共用 relPack 算好的那一份 x / w,不另算
+      var d = bb.item.d, cls = 'relpb relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '')
+      if (q) cls += pass(d) ? ' hit' : ' dim'
+      var txt = !lbl ? '' : bb.w >= 84 ? '#' + d.n + ' ' + d.t.slice(0, Math.floor((bb.w - 30) / 9)) : bb.w >= 26 ? '#' + d.n : ''
+      var ttl = '#' + d.n + ' ' + d.t + (d.k.length ? ' · 关联卡 ' + d.k.join(' / ') : '')
+      return '<a class="' + cls + '" href="' + xe(href(d.n)) + '" target="_blank" rel="noopener" title="' + xe(ttl) + '"'
+        + ' style="left:' + bb.x + 'px;top:' + (top + bb.lane * TL.row) + 'px;width:' + bb.w + 'px">' + xe(txt) + '</a>'
+    }
     function drawTl() {
-      var now = new Date(), today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
-      var pick = picked().sort(function (a, b) { return a.c < b.c ? -1 : a.c > b.c ? 1 : a.n - b.n })
-      var t0 = today - 59 * 864e5, k
-      if (win === 'all') for (k = 0; k < pick.length; k++) { var c0 = day(pick[k].c); if (c0 < t0) t0 = c0 }
-      var bars = []
-      for (k = 0; k < pick.length; k++) {
-        var d = pick[k], s = day(d.c), em = d.m || d.x, e = em ? day(em) : today
-        if (!(e >= t0)) continue // 整段落在窗口左边:这个窗口里没有它
-        if (s < t0) s = t0
-        if (e > today) e = today
-        if (e < s) e = s
-        bars.push({ d: d, s: s, e: e })
+      var now = new Date(), tms = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()), k, j, g
+      var t0 = tms - 59 * 864e5
+      // 窗口按全部带算,不跟着段筛选缩放 —— 筛一下就换一套刻度,横向就没得比了
+      if (win === 'all') for (k = 0; k < G.length; k++) { var lo = G[k].lo ? day(G[k].lo) : tms; if (lo < t0) t0 = lo }
+      if (t0 > tms) t0 = tms
+      var span = Math.round((tms - t0) / 864e5) + 1, today = dstr(tms), days = []
+      for (k = 0; k < span; k++) days.push(dstr(t0 + k * 864e5))
+      dnr.textContent = md(days[0]) + ' → ' + md(days[span - 1]) + ' · ' + span + ' 天'
+      var ax = relAxis(days, DAYC, TL)
+      var vis = []
+      for (k = 0; k < G.length; k++) if (sfil === 'all' || G[k].sg === sfil) vis.push(G[k])
+      if (!vis.length) { host.style.width = 'auto'; host.innerHTML = '<p class="relnone2">没有匹配的 PR</p>'; return }
+      // 刻度候选:每周一 + 每个 tag 日 + 每月 1 日(后两种优先)。轴是非线性的,等间隔取样必压字
+      var sp = {}
+      for (k = 0; k < days.length; k++) if (days[k].slice(8) === '01') sp[days[k]] = 'mo'
+      for (k = 0; k < RELS.length; k++) { var rd = String(RELS[k].at).slice(0, 10); if (ax.x[rd] !== undefined) sp[rd] = 'tag' }
+      var ticks = relTicks(days, ax, sp, TL.tick), out = ['<div class="reltlax" style="width:' + ax.W + 'px">']
+      for (k = 0; k < ticks.length; k++) {
+        if (!ticks[k].txt) { out.push('<div class="reltltk" style="left:' + ticks[k].x + 'px"></div>'); continue }
+        out.push('<div class="reltlgl" style="left:' + ticks[k].x + 'px"></div>')
+        out.push('<div class="reltlx" style="left:' + ticks[k].x + 'px">' + md(ticks[k].d) + '</div>')
       }
-      var span = Math.max(1, Math.round((today - t0) / 864e5))
-      var PPD = span <= 70 ? 16 : Math.max(3, 1120 / span), PAD = 12, RH = 13, AX = 24
-      var W = span * PPD, H = AX + bars.length * RH + 14
-      if (!bars.length) { host.innerHTML = '<p class="relnone2">这个窗口里没有 PR</p>'; return }
-      var svg = '<svg class="reltlsvg" width="' + Math.round(W + PAD * 2 + 62) + '" height="' + H + '">'
-      var step = span <= 75 ? 7 : span <= 200 ? 14 : 30 // 默认 60 天窗口下一周一格
-      for (k = 0; k <= span; k += step) {
-        var gx = Math.round(PAD + k * PPD)
-        svg += '<line class="relgl" x1="' + gx + '" y1="0" x2="' + gx + '" y2="' + H + '"/>'
-        svg += '<text class="relax" x="' + (gx + 3) + '" y="15">' + new Date(t0 + k * 864e5).toISOString().slice(5, 10) + '</text>'
+      out.push('</div>')
+      var q = (qbox.value || '').trim().length > 0
+      for (k = 0; k < vis.length; k++) {
+        g = vis[k]
+        var list = byG[g.g] || [], multi = [], byDay = {}, inwin = 0, hit = 0
+        for (j = 0; j < list.length; j++) {
+          var d = list[j], s0 = String(d.c).slice(0, 10), e0 = d.m || d.x ? String(d.m || d.x).slice(0, 10) : today
+          if (e0 > today) e0 = today // 合并时刻比这台机器的「今天」还新(时区 / 时钟):当天算
+          if (e0 < s0) e0 = s0
+          if (s0 === e0) { if (!byDay[s0]) byDay[s0] = []; byDay[s0].push({ n: d.n, s: s0, e: e0, d: d }) }
+          else multi.push({ n: d.n, s: s0, e: e0, d: d })
+          if (ax.x[anc(d)] !== undefined) inwin++
+          if (q && pass(d)) hit++
+        }
+        var op = !!bOpen[g.g]
+        var mp = op ? relPack(multi, ax, TL) : { used: 0, bars: [] }
+        var sg2 = op ? relGrid(byDay, ax, TL) : { used: 0, bars: [] }
+        var H = relBandH(mp.used, sg2.used, TL, op)
+        var body = [], gut = ['<div class="relgut" style="height:' + H + 'px">'
+          + '<button type="button" class="relbh" data-relbd="' + xe(g.g) + '" title="' + xe(g.sf || '') + '">'
+          + '<span class="relbc">' + (op ? '▾' : '▸') + '</span><span class="relbt">'
+          + '<b class="relbn">' + xe(g.nm) + '</b><span class="relbm">' + (q ? hit + ' / ' + g.n : g.n) + ' PR'
+          + (g.lo ? ' · ' + md(g.lo) + '→' + md(g.hi) : '')
+          // 窗口切掉一部分时说清楚,别让人以为「这条带就这些」
+          + (inwin < g.n ? ' · 窗口内 ' + inwin : '') + '</span></span></button>']
+        if (!op && g.lo) { // 折叠态:一条跨度条 + 每天一个小竖标(横向也用起来)
+          var rg = relBar(ax, g.lo < ax.t0 ? ax.t0 : g.lo, g.hi > ax.t1 ? ax.t1 : g.hi, 4)
+          if (rg) body.push('<div class="relrg relc s-' + g.sg + ' q' + g.q + '" style="left:' + rg.x0 + 'px;width:' + rg.w + 'px;top:24px"></div>')
+          for (var sd in g.d) {
+            if (ax.x[sd] === undefined) continue
+            var hh = Math.min(17, Math.round(3 + g.d[sd] * 0.55))
+            body.push('<div class="relsp relc s-' + g.sg + ' q' + g.q + '" style="left:' + ax.x[sd] + 'px;width:'
+              + Math.max(2, ax.w[sd] - 1) + 'px;top:' + (24 - hh) + 'px;height:' + hh + 'px"></div>')
+          }
+        }
+        if (op) {
+          var top = TL.head
+          if (mp.used) {
+            gut.push('<div class="relsub" style="top:' + (top + 1) + 'px">跨天 ' + mp.bars.length + ' 个 · ' + mp.used + ' 条泳道</div>')
+            top += TL.sub
+            for (j = 0; j < mp.bars.length; j++) body.push(tlBar(mp.bars[j], g, top, q, true))
+            top += mp.used * TL.row + 2
+          }
+          if (sg2.used) {
+            gut.push('<div class="relsub" style="top:' + (top + 1) + 'px">当天开当天合 ' + sg2.bars.length + ' 个 · 按号横排</div>')
+            top += TL.sub
+            for (j = 0; j < sg2.bars.length; j++) body.push(tlBar(sg2.bars[j], g, top, q, false))
+          }
+        }
+        gut.push('</div>')
+        out.push('<div class="relbd' + (op ? ' on' : '') + '" style="height:' + H + 'px;width:' + ax.W + 'px">'
+          + gut.join('') + body.join('') + '</div>')
       }
-      for (k = 0; k < RELS.length; k++) {
-        var rt = day(RELS[k].at)
-        if (rt < t0 || rt > today) continue
-        var rx = Math.round(PAD + (rt - t0) / 864e5 * PPD)
-        svg += '<line class="relvl" x1="' + rx + '" y1="' + AX + '" x2="' + rx + '" y2="' + H + '"/>'
-        svg += '<text class="relvt" x="' + (rx + 3) + '" y="' + (AX + 10) + '">' + xe(RELS[k].tag) + '</text>'
+      for (k = 0; k < RELS.length; k++) { // tag 竖线铺满整张画布(带的上下都要对得上)
+        var tx = ax.x[String(RELS[k].at).slice(0, 10)]
+        if (tx === undefined) continue
+        out.push('<div class="reltag" style="left:' + tx + 'px"></div><div class="reltagt" style="left:' + tx + 'px">' + xe(RELS[k].tag) + '</div>')
       }
-      for (k = 0; k < bars.length; k++) {
-        var b = bars[k]
-        var bx = Math.round(PAD + (b.s - t0) / 864e5 * PPD)
-        var bw = Math.max(4, Math.round((b.e - b.s) / 864e5 * PPD))
-        var by = AX + k * RH + 4
-        svg += '<rect class="relb s-' + b.d.st + (b.d.s === 'open' ? ' open' : '') + '" x="' + bx + '" y="' + by
-          + '" width="' + bw + '" height="6" rx="3" data-relnum="' + b.d.n + '"/>'
-        svg += '<text class="rellb" x="' + (bx + bw + 5) + '" y="' + (by + 6) + '">#' + b.d.n + '</text>'
-      }
-      host.innerHTML = svg + '</svg>'
+      host.style.width = ax.W + 'px'
+      host.innerHTML = out.join('')
+      var lg = pane.querySelector('.rellk'), lgh = []
+      for (k = 0; k < G.length; k++) lgh.push('<i class="relc s-' + G[k].sg + ' q' + G[k].q + '"></i>' + xe(G[k].nm))
+      lg.innerHTML = lgh.join('')
     }
-    function showTip(d, ev) {
-      tip.textContent = ''
-      var t = document.createElement('b'); t.textContent = '#' + d.n + ' ' + d.t; tip.appendChild(t)
-      var a = document.createElement('span'); a.textContent = d.stx + ' · ' + d.sgx + (d.b ? ' · ' + d.b : ''); tip.appendChild(a)
-      var c = document.createElement('span'); c.textContent = d.k.length ? '关联卡 ' + d.k.join(' / ') : '无关联卡'; tip.appendChild(c)
-      tip.hidden = false
-      place(ev)
-    }
-    function place(ev) {
-      var x = ev.clientX + 14, y = ev.clientY + 14
-      if (x + 330 > window.innerWidth) x = Math.max(8, ev.clientX - 334)
-      if (y + 110 > window.innerHeight) y = Math.max(8, ev.clientY - 114)
-      tip.style.left = x + 'px'; tip.style.top = y + 'px'
-    }
-    var pinned = false
-    host.addEventListener('mouseover', function (ev) {
-      var r = ev.target.closest ? ev.target.closest('rect.relb') : null
-      if (r && !pinned) showTip(byN[r.dataset.relnum], ev)
-    })
-    host.addEventListener('mousemove', function (ev) { if (!tip.hidden && !pinned) place(ev) })
-    host.addEventListener('mouseleave', function () { if (!pinned) tip.hidden = true })
-    host.addEventListener('click', function (ev) { // 触屏没有 hover:点一下钉住,再点别处收起
-      var r = ev.target.closest ? ev.target.closest('rect.relb') : null
-      if (r) { pinned = false; showTip(byN[r.dataset.relnum], ev); pinned = true }
-      else { pinned = false; tip.hidden = true }
-    })
     function setView(v, save) {
       view = v === 'timeline' ? 'timeline' : 'table'
       var vs = pane.querySelectorAll('[data-relpane]'), k
@@ -2831,7 +2940,6 @@ const REL_JS = !REL ? '' : `
       var bs = pane.querySelectorAll('[data-relf="view"] button')
       for (k = 0; k < bs.length; k++) bs[k].classList.toggle('on', bs[k].dataset.relv === view)
       if (save) { try { localStorage.setItem('${LS_PREFIX}_rel_view', view) } catch (e) {} }
-      pinned = false; tip.hidden = true
       if (view === 'timeline') drawTl()
     }
     function render() { renderTable(); if (view === 'timeline') drawTl() }
@@ -2870,6 +2978,8 @@ const REL_JS = !REL ? '' : `
         drawTl()
         return
       }
+      var bh = t.closest('.relbh') // 只认带头那颗钮:条本身是 <a>,点了要去 GitHub
+      if (bh) { var bid = bh.dataset.relbd; bOpen[bid] = !bOpen[bid]; drawTl(); return }
       var sh = t.closest('[data-relsort]')
       if (sh) {
         var kk = sh.dataset.relsort
@@ -2883,7 +2993,13 @@ const REL_JS = !REL ? '' : `
       var gb = t.closest('.relgb')
       if (gb) { var g = gb.closest('tr').dataset.relgh; open[g] = !open[g]; renderTable() }
     })
-    qbox.addEventListener('input', render)
+    qbox.addEventListener('input', function () { // 搜到了却折在带里看不见,比没搜到更伤:有命中的带自动展开
+      var v = (qbox.value || '').trim(), k
+      if (v && !bSnap) { bSnap = {}; for (k in bOpen) bSnap[k] = bOpen[k] } // 搜索前的展开状态先存一份
+      if (!v && bSnap) { bOpen = bSnap; bSnap = null } // 清空搜索就原样还回去
+      if (v) for (k = 0; k < G.length; k++) if (hitsOf(G[k]).length) bOpen[G[k].g] = true
+      render()
+    })
     function relRoute() { // #pr-230 深链:切回表格、展开它所在的版本组、再滚过去
       var id = decodeURIComponent(location.hash.slice(1))
       var hit = id.match(/^pr-(\\d+)$/)

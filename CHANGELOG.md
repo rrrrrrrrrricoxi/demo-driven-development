@@ -9,6 +9,43 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.13.1] - 2026-08-27
+
+### Changed
+- The **timeline view of the release progress tab was rebuilt** around version
+  bands and lane packing. The 0.12.0 timeline gave every pull request its own
+  row, which on a board with 240 of them was a 2400px column — and it spent
+  that height on a dimension that carries almost no information: 87% of those
+  pull requests were opened and merged on the same day, so their bars were all
+  the same minimum-width dot. What the height did not show was the one thing
+  the axis could: when the work actually happened. So the view now folds into
+  one band per version plus dev, test and the off-stage leftovers — six rows,
+  around 200px folded, instead of one row per pull request. Click a band and it
+  expands in place: pull requests that span days are greedily packed into
+  shared lanes, same-day ones are laid out by number across that day's cell,
+  and both are capped at six lanes, so an expanded band has a height ceiling
+  regardless of how many pull requests are in it. Bars link to GitHub and carry
+  number, title and cards as their hover title.
+- The axis is now **non-linear**: a quiet day gets 5px, a day with pull
+  requests at least 14px, and a busy day widens by `ceil(count / 6)` slots —
+  the day with 41 merges gets seven times the width of a quiet one instead of
+  stacking 41 dots on one pixel column. Widths come from the whole board's day
+  counts, so expanding, folding or filtering never makes the axis jump.
+- Date labels on that axis are placed rather than sampled. Candidates are each
+  Monday, each release day and each month start; they are laid out left to
+  right and a label is dropped to a bare tick when it would land within 48px of
+  the previous one. Release days and month starts may evict an ordinary label,
+  but never break the 48px rule — which is exactly how the old evenly-spaced
+  ticks ended up printing `06-2907-0207-05` on top of each other.
+- The band gutter is a fixed 200px and now sets the name on its own line above
+  `N PR · first→last`, so a band no longer reads `155 PR · 05-10→…`. When the
+  window hides part of a band, the second line says how many fall inside it.
+- New `scripts/relgeom.mjs`: the axis, the tick placement, the bar geometry,
+  the lane packing and the band height as pure functions with no DOM and no
+  clock. The generator inlines that file into the page verbatim, so the packing
+  and the drawing cannot drift apart (they did in the prototype), and the tests
+  exercise the same source the browser runs.
+
 ## [0.13.0] - 2026-08-27
 
 ### Added
