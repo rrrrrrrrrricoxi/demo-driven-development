@@ -24,8 +24,9 @@ downgrade would freeze every already-stamped board. See
   declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number,
   `#12` or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session
   tag in `config.sessionTags`. An unrecognised field is only warned about — the
-  board grows fields faster than this list does — but `order` cannot be touched
-  at all, because it *is* the display order. `card status` appends a dated
+  board grows fields faster than this list does — but `id` and `order` cannot be
+  touched at all: the first *is* the card's identity (and, with one file per
+  card, its filename), the second *is* the display order. `card status` appends a dated
   timeline line by default (`--no-note` to skip), `card link` dedupes by href
   and writes a link to this repository's pull request into the `pr` field as
   well. `card show` / `card list` / `card history` read; `export` merges
@@ -91,6 +92,72 @@ downgrade would freeze every already-stamped board. See
 - After `card new`, the CLI counts `ready` cards the way the guard does and
   prints the same warning when the pile is over `config.wip.hard` — better at
   the moment the card is created than at the end of the session.
+
+### Fixed
+- `gen` built the screenshot `git log` command by pasting a filename into a
+  shell string. A file named `a";touch X;".png` in `shots/` therefore ran an
+  arbitrary command as the user, silently — the surrounding `try/catch` ate the
+  non-zero exit — and the Stop guard runs `gen` at the end of every session, so
+  the file only had to arrive through a pull or a checkout. It is an argv call
+  now, and `execSync` is gone from the file.
+- Link hrefs are escaped but were never checked for a scheme, so a
+  `javascript:` url in a card link or a hand-written pull request url rendered
+  as a live link on the board's own origin, where the acceptance checklist keeps
+  its stored state. Only `http`, `https`, `mailto` and relative paths reach an
+  `href` now; anything else renders inert with a warning naming it. `ddd card
+  link` refuses such a value outright.
+- `cards-split` accepted `--cards-dir ../../X` and wrote the whole card store
+  outside the kanban directory, reporting a clean migration — its byte-identity
+  check passes, because `gen` follows the same escaped path — and persisted the
+  escape into the config, so the next `git add app/kanban` committed a board
+  whose cards were untracked. A card directory must now be a plain name, checked
+  both at the flag and when reading the config.
+- `cards-split` and `cards-join` recorded everything needed to undo a migration
+  but only used it when the verification `gen` failed. An I/O error during the
+  writes threw straight out, leaving the header files stripped, the cards half
+  moved and `gen` dying on `b.items is not iterable`. The write phase now rolls
+  back and says so.
+- The Stop guard's "a lazy board with a missing part is stale" rule never
+  learned about `parts/archive.html`, added in 0.13.0. With that one file gone
+  the guard exited cleanly and never regenerated it, so every deep link to an
+  archived card silently missed and the archive tab showed its fetch-failure
+  panel.
+- `ddd card set` accepted `id` and scalars for array fields, both of which make
+  the next `gen` fail hard; the second one only after `TypeError: it.links.map
+  is not a function`. Worse for `id`: the CLI refuses to run on a board with a
+  card whose filename and id disagree, so the command that would undo it was
+  locked out too. Both are refused now.
+- `ddd card new` wrote `line: ""` when `--line` was omitted, and on a board with
+  lanes such a card appears in no lane view at all. It now takes the configured
+  default lane. The exclusive id reservation also wrote a 0-byte file before
+  filling it, which `gen` reads as a broken card; the body is prepared first and
+  a failed write takes the reservation back.
+- `ddd card note` and `card status` wrote a timeline field onto decision cards,
+  which `gen` has never rendered — the command reported the note as recorded and
+  the board never showed it. The rule now lives in one place, shared with
+  `pr-sync`, which already had it right.
+- `pr-sync` replaced the whole `prs` array with whatever `gh` returned, so
+  anything past the limit was deleted from `release-manifest.json` without a
+  word. It merges by number now, keeps entries `gh` did not return, and warns
+  when the answer came back full. The limit is `--limit` (default 1000) with
+  `--release-limit` (default 200).
+- The 400-character preview took the first paragraph whole, so a field whose
+  first paragraph was longer produced a preview far past the limit — and,
+  because baking a preview suppresses the height clamp, that field also lost its
+  fallback and rendered in full while a same-length field with no blank line in
+  it folded to three lines. An over-length first paragraph now leaves the height
+  clamp to do the job, as a single-paragraph text already did.
+- The backlog banner counted only the cards visible under the current lane and
+  printed that one number, while the guard's notice used the whole-board count.
+  It now names both whenever a filter hides something.
+
+### Performance
+- `gen` forked `git` once per document and once per screenshot to date them. On
+  a repository with a thousand commits, 55 documents and 43 screenshots that was
+  98% of its running time — around 3.9s of a 3.9s run, paid at every session end
+  and twice by `cards-split`. Both are one batched `git log` now, the same shape
+  0.14.0 already used for per-card dates: the same run takes about 0.23s, and the
+  output is byte-identical.
 
 ## [0.13.1] - 2026-08-27
 

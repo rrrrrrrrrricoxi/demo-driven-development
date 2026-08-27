@@ -118,14 +118,61 @@ side, which is where the old one-row-per-pull-request timeline was spending
 `release-manifest.json`, written by:
 
 ```
-node <plugin>/scripts/pr-sync.mjs [--dir <kanban>] [--dry-run]
+node <plugin>/scripts/pr-sync.mjs [--dir <kanban>] [--dry-run] [--limit N]
 ```
 
-which calls `gh` for the repository's pull requests and releases. The generator
+which calls `gh` for the repository's pull requests and releases. `gh` has no
+"all" — it takes a count — so `--limit` (default 1000, and `--release-limit`,
+default 200, for tags) says how many to ask for, and the script says so on
+stderr when the answer came back full, which is the only sign that older ones
+exist. Pull requests it did not fetch this run keep the entry they already had
+rather than disappearing from the board. The generator
 itself makes no network call and reads no clock — "today" and "this may be
 stale" are computed in the browser. Run the script after opening or merging a
 pull request, and after tagging a release. Left unset, output is byte-identical
 to a board without the feature.
+
+## Settling cards against merged pull requests
+
+A `release-manifest.json` is what turns this on — there is no config switch, and
+a board without the file renders byte-identically.
+
+With it present, pull request state flows back onto the cards. A card whose pull
+requests have all merged while the card itself sits in a non-final status gets
+an amber "merged, not settled" chip; a card already in a final status with a
+pull request still open gets the opposite one; a card spanning several rounds
+shows "2/3 merged". Links to a pull request in this repository carry its real
+state wherever they appear, and a state word in the link title that no longer
+matches is struck through rather than rewritten — the data stays as its author
+left it, the board just stops repeating it. A backlog card that is ready, dated
+more than thirty days ago and carrying no pull request picks up a quiet
+"dormant N days" note. `gen` bakes only dates: the day counts are worked out in
+the browser, since it reads neither the clock nor the network.
+
+The release progress tab collects the unsettled cards into a section at the top,
+grouped under the pull request that merged them, and the Stop guard names up to
+five cards of each kind without blocking.
+
+To act on that list:
+
+```
+node <plugin>/scripts/pr-sync.mjs --settle [--write] [--only <id>[,<id>…]]
+```
+
+`--settle` syncs first, then prints each waiting card with the status it should
+move to — `done`, or `live` for a decision card. It only prints. `--write`
+applies it: the status field, plus one dated line appended to the card's
+timeline field where the card kind has one. `--only` narrows the write to the
+cards you name while still printing the whole list, so what you skipped stays
+visible; an id that is not on the list is refused outright and nothing at all is
+written, because a half-applied settle is worse to unpick than an error.
+
+A merged pull request is not the same thing as a finished card: a card routinely
+spans several rounds, and the one that just landed may have shipped half of it.
+Put a one-line reason in the card's `settleHold` field and the card drops out of
+the list, loses its chip, stops being named by the guard, and shows one grey
+chip with the reason in its tooltip. Nothing clears the field on its own; delete
+it when the card really is ready.
 
 ## Rich text in card bodies (optional)
 
@@ -194,8 +241,8 @@ had before, because array order *was* display order in several places. `gen`
 sorts by `order` then by `id` and deletes the field afterwards. Cards created by
 hand or by the CLI can leave it out; they sort last, by id. With the directory
 configured, each card header also shows the date its file was last committed
-(falling back to the file's mtime), and the dormancy chip measures from that
-instead of the card's creation date.
+(falling back to the file's mtime), and the "dormant N days" note counts from
+that date instead of the card's creation date.
 
 Migrate with:
 
@@ -232,10 +279,20 @@ overrides any of them.
 The write commands check what they write — the status has to be one the board
 declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number, `#12`
 or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session tag in
-`config.sessionTags`. An unrecognised field only warns, since boards grow fields;
-`order` cannot be changed at all, because it is the display order. `card status`
-appends a dated timeline line unless told not to, and `card link` dedupes by href
-and writes a link to this repository's pull request into the `pr` field too.
+`config.sessionTags`. Fields that hold arrays (`links`, `shots`, `walkthroughs`
+and friends) have to be given as arrays, through `--json`. An unrecognised field
+only warns, since boards grow fields; `id` and `order` cannot be changed at all,
+the first because it is the card's identity and with one file per card its
+filename too, the second because it is the display order. A link's scheme has to
+be `http`, `https`, `mailto` or a path relative to the repository — anything
+else would render as a live link on the board's own origin.
+
+`card status` appends a dated timeline line unless told not to, on the card kinds
+that have such a field; decision cards do not, so there only the status changes,
+and `card note` says so rather than writing somewhere the board never reads.
+`card link` dedupes by href and writes a link to this repository's pull request
+into the `pr` field too. A new card with no `--line` lands in the board's default
+lane, since a card with no lane is invisible in every lane view.
 
 Every write goes through a temp file and a rename, keeps the card's existing key
 order, slots only new keys into place, and ends with two-space indentation and a
