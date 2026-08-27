@@ -209,6 +209,44 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
 - **守卫**:收工时全线别 ready 总数超 `hard` → 一条非阻断 notice。它不改任何 manifest,只说一声。
 - **字节冻结**:不配时输出逐字节不变。
 
+## 一卡一文件(cardsDir,v0.14.0:opt-in)
+
+`config.cardsDir` 缺省无;**给一个目录名就算开**(惯例 `"cards"`,相对看板目录)。开着之后:
+
+```
+app/kanban/
+  backlog-manifest.json      # 只剩表头:$comment / instance / statuses / priorities / tiers / groups
+  decisions-manifest.json    # 同上(无 entries)
+  cards/backlog/BL-C87.json  # = 原 items[] 的一个元素
+  cards/decisions/D77.json   # = 原 entries[] 的一个元素
+```
+
+- **治的是并行写冲突**:几个 session 同时改一份 400KB 的 manifest,整文件重写会互相带走,git 连冲突都不报。
+  按卡写之后每张卡自己一个路径,冲突要么不发生、要么 git 拦得住。**一块板只有一个 session 在写,就不必开**。
+- **文件名 = 卡的 id**,大小写与卡里的 `id` 逐字相同;头文件里再留 `items`/`entries` 即硬报错(一个真源)。
+  同一个 id 在两个子目录里各出现一次也是硬报错(深链、截图廊、懒加载定位全按 id 走)。
+- **`order` 字段**:拆分时写入的原数组下标。数组顺序在 gen 里就是显示顺序(截图廊组序、深链表键序、
+  同日同号时的先后),所以得记下来;gen 按 `order` 再按 id 排,**排完就把它删掉**,卡对象与拆分前逐字段相同。
+  手工新建的卡不写 `order` 也行(排在最后,按 id)。
+- **每卡更新日期**:卡头多一枚灰字「更新 MM-DD」= 该卡文件的 git 最后提交日(一条 `git log` 批量取;
+  取不到退文件 mtime,再取不到就不渲染)。「沉睡」判定同时改用它 —— 比建卡 `date` 诚实。
+- **`manifest.json` 的 tasks 不拆**(34 条上下、迭代级摘要、改动少);`acceptance-manifest.json` /
+  `release-manifest.json` 也不拆(写它们的是单一条线)。
+- **字节冻结**:不配 `cardsDir` 时输出逐字节不变;配了之后,除了那枚「更新」灰字,产物一个字节都不变。
+
+**迁移顺序**(顺序是硬的,别跳):
+
+1. **所有会话先升到 0.14.0** —— 旧版 gen 读不到卡目录,只会生成一块空板(版本戳守卫挡得住覆盖,但别赌)。
+2. 主工作树 `git status` 干净;**通知各会话暂停写卡**(几分钟)。
+3. `node <plugin>/scripts/cards-split.mjs --dir app/kanban --dry-run` 先看文件数与 id 异常,再去掉 `--dry-run` 真跑。
+   它拆完会自动跑一遍 gen 与拆分前的产物逐字节比,**对不上就把改动前的文件原样写回并 exit 1**。
+   两份头 manifest 逐字节不变(只是少了数组);`kanban.config.json` 会被重写成标准 2 空格形制
+   (行内写的对象展开、补末尾换行)—— 那点排版差异一并进这个 commit,别单独较真。
+4. **一个 commit** 提交整批(message 写明是 rename 性质),再通知各会话恢复。
+5. 从此只写 `cards/<sub>/<id>.json` —— 「只 `git add` 具体文件」这条纪律自然成立。
+
+反悔用 `node <plugin>/scripts/cards-join.mjs --dir app/kanban`(同样自带 gen 比对与回滚)。
+
 ## init 段 token 硬规则(命令式,不是建议)
 
 - **盘点走 `init.mjs scan` 摘要,禁读 demo 正文**:几十个 demo 的正文是几十万 token,摘要只有几十行。脚本读正文不算成本,Claude 亲手读才算。

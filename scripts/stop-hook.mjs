@@ -21,6 +21,9 @@
 //   5. 进度响应审计(v0.13.0,只在 release-manifest.json 在场时):关联 PR 全合了却没收账的卡、
 //      已收账却还有 PR 开着的卡,各出一条非阻断 notice(各最多点名 5 张 + 总数)。收账动作在
 //      pr-sync.mjs --settle,守卫只提示 —— 静默改 manifest 会跟并行会话抢写。
+//   6. 卡文件审计(v0.14.0,只在 config.cardsDir 开时):文件名与卡里的 id 不符 / JSON 解析失败
+//      → 点名文件(各最多 5 个 + 总数)。这几种 gen 会硬失败,但一次只报得出第一个。
+//      同一个键还让新鲜度盯住 <cardsDir>/**/*.json(卡也是 gen 输入)、让孤儿语料纳入卡文件正文。
 //
 // plugin 化改造(设计 §6):
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
@@ -40,6 +43,7 @@ import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { settleHold, settleOf } from './settle.mjs'
+import { CARD_KINDS, cardsDirOf, scanCardDir } from './cards.mjs'
 
 const KANBAN = detect()
 if (!KANBAN) process.exit(0)
@@ -62,6 +66,49 @@ try { demos = readdirSync(DEMOS).filter((f) => f.endsWith('.html')) } catch {}
 // 非阻断通知(戳警告 / 安装异常 / 自愈提示),最终与审计结果合并成单条 JSON 输出
 const notices = []
 
+// ---- 一卡一文件(v0.14.0,config.cardsDir):扫一遍卡目录,新鲜度/孤儿语料/下面几段审计共用 ----
+// 未配 cardsDir = 全为空,一切照旧。
+let CARDS_DIR = ''
+try { CARDS_DIR = cardsDirOf(JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8'))) } catch {}
+const cardScan = {} // sub → scanCardDir 的结果
+const cardWatch = [] // 新鲜度要盯的路径:两个子目录本身(增删改名会动目录 mtime)+ 每个卡文件
+if (CARDS_DIR) {
+  for (const k of CARD_KINDS) {
+    const dir = join(KANBAN, CARDS_DIR, k.sub)
+    const s = scanCardDir(dir)
+    cardScan[k.sub] = s
+    if (s.missing) continue
+    cardWatch.push(dir, ...s.files.map((f) => join(dir, f)))
+  }
+}
+/** 卡的读法一处定:cardsDir 开 = 逐文件,关 = 头文件里的数组(下面几段审计共用) */
+const cardsOf = (file, key, sub) => {
+  if (CARDS_DIR && sub) {
+    const s = cardScan[sub]
+    return s && !s.missing ? s.cards.map((x) => x.card) : []
+  }
+  try { return JSON.parse(readFileSync(join(KANBAN, file), 'utf8'))[key] || [] } catch { return [] }
+}
+const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifest.json', 'items', 'backlog'], ['decisions-manifest.json', 'entries', 'decisions']]
+
+// 卡文件审计:gen 遇到这些直接 throw,但一次只报得出第一个;这里一次列全,少来回几趟。
+// 排在新鲜度之前 —— 正是这些错会让下面那趟 gen 失败,消息得赶在那之前备好。
+{
+  const idBad = [], parseBad = []
+  for (const k of CARD_KINDS) {
+    const s = cardScan[k.sub]
+    if (!s) continue
+    const rel = `${CARDS_DIR}/${k.sub}`
+    if (s.missing) { notices.push(S.cardsDirMissing(rel)); continue }
+    for (const x of s.bad) {
+      if (x.kind === 'parse') parseBad.push({ file: `${rel}/${x.file}`, message: x.message })
+      else idBad.push({ file: `${rel}/${x.file}`, id: x.id })
+    }
+  }
+  if (idBad.length) notices.push(S.cardIdBad(idBad.slice(0, 5), idBad.length))
+  if (parseBad.length) notices.push(S.cardParseBad(parseBad.slice(0, 5), parseBad.length))
+}
+
 // ---- ① 新鲜度 → 自动重跑 gen(gen.mjs 未随 plugin 落地时跳过) ----
 if (existsSync(GEN)) {
   const indexPath = join(KANBAN, 'index.html')
@@ -71,6 +118,7 @@ if (existsSync(GEN)) {
     mtime(join(KANBAN, 'theme.css')), // v0.4.0 换装:theme 是 gen 输入;缺席时 mtime=0,零影响
     ...manifests.map((f) => mtime(join(KANBAN, f))),
     ...demos.map((f) => mtime(join(DEMOS, f))),
+    ...cardWatch.map(mtime), // v0.14.0 一卡一文件:卡也是 gen 输入;未配 cardsDir 时为空,零影响
   )
   // v0.11.0:lazyTabs 板若 parts/ 缺件(手删/半拷贝),index 再新也是残废态 → 视同过期重跑自愈
   let lazyBroken = false
@@ -92,11 +140,13 @@ if (existsSync(GEN)) {
     const r = spawnSync(process.execPath, [GEN], { cwd: KANBAN, stdio: ['ignore', 'ignore', 'pipe'] })
     const err = (r.stderr || r.error?.message || '').toString()
     if (r.status !== 0) {
+      // gen 只报得出第一个坏卡,已攒下的 notice(坏卡清单等)一并喂回去,免得一个一个试
+      const why = S.genFail(err.slice(0, 800)) + (notices.length ? '\n' + notices.join('\n') : '')
       if (hook.stop_hook_active) { // 防死循环:同一次收工已拦过 → 降级警告放行
-        console.log(JSON.stringify({ systemMessage: S.genFail(err.slice(0, 800)) }))
+        console.log(JSON.stringify({ systemMessage: why }))
         process.exit(0)
       }
-      process.stderr.write(S.genFail(err.slice(0, 800)))
+      process.stderr.write(why)
       process.exit(2) // 阻断:stderr 喂回给 Claude 自修(manifest 语法错等可修项)
     }
     // gen 成功但带警告(themeColors 未知色组/键、sessionTags 灰章、空 theme.css、指南过大、md 退化…)→ 原样透传,别吞
@@ -107,8 +157,10 @@ if (existsSync(GEN)) {
 }
 
 // ---- ② 孤儿 demo 审计 ----
+// 语料 = 三份 manifest + 卡文件(cardsDir 开着时 demo 链接就写在卡里,不纳入即全员误报孤儿)
 const corpus = manifests
   .map((f) => { try { return readFileSync(join(KANBAN, f), 'utf8') } catch { return '' } })
+  .concat(cardWatch.map((p) => { try { return readFileSync(p, 'utf8') } catch { return '' } }))
   .join('\n')
 let allow = []
 try {
@@ -160,10 +212,10 @@ const orphans = demos.filter((f) => !covered.has(f))
         if (owner.has(n)) notices.push(S.accDupPr(n, owner.get(n), l.key))
         else owner.set(n, l.key)
       }
-      // 卡号全集:三份 manifest 的 tasks / items / entries
+      // 卡号全集:三份 manifest 的 tasks / items / entries(cardsDir 开着时后两者来自卡目录)
       const ids = new Set()
-      for (const [f, k] of [['manifest.json', 'tasks'], ['backlog-manifest.json', 'items'], ['decisions-manifest.json', 'entries']]) {
-        try { for (const c of JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))[k] || []) if (c && c.id) ids.add(String(c.id)) } catch {}
+      for (const [f, k, sub] of CARD_SOURCES) {
+        for (const c of cardsOf(f, k, sub)) if (c && c.id) ids.add(String(c.id))
       }
       for (const l of lists) {
         const seen = new Set()
@@ -186,14 +238,12 @@ const orphans = demos.filter((f) => !covered.has(f))
   if (richOn) {
     const LONG = 800
     const hits = []
-    for (const [f, k, fields] of [
-      ['manifest.json', 'tasks', ['problem', 'approach', 'notes']],
-      ['backlog-manifest.json', 'items', ['problem', 'approach', 'note']],
-      ['decisions-manifest.json', 'entries', ['question', 'decision', 'demoNote', 'source']],
+    for (const [f, k, sub, fields] of [
+      ['manifest.json', 'tasks', null, ['problem', 'approach', 'notes']],
+      ['backlog-manifest.json', 'items', 'backlog', ['problem', 'approach', 'note']],
+      ['decisions-manifest.json', 'entries', 'decisions', ['question', 'decision', 'demoNote', 'source']],
     ]) {
-      let list = []
-      try { list = JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))[k] || [] } catch {}
-      for (const c of list) {
+      for (const c of cardsOf(f, k, sub)) {
         if (!c || c.detail) continue
         let worst = null // 一张卡只点一次,报最长的那个字段(点名是为了让人动手,不是为了铺满屏)
         for (const key of fields) {
@@ -222,12 +272,12 @@ const orphans = demos.filter((f) => !covered.has(f))
     for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
     const settle = [], reopen = []
     if (relPr.size) {
-      for (const [f, k] of [['manifest.json', 'tasks'], ['backlog-manifest.json', 'items'], ['decisions-manifest.json', 'entries']]) {
+      for (const [f, k, sub] of CARD_SOURCES) {
         let data = null
         try { data = JSON.parse(readFileSync(join(KANBAN, f), 'utf8')) } catch { continue }
-        const repo = String((data.instance || {}).ghRepo || '')
+        const repo = String((data.instance || {}).ghRepo || '') // instance 始终在头文件里,与卡拆不拆无关
         if (!repo) continue
-        for (const c of data[k] || []) {
+        for (const c of cardsOf(f, k, sub)) {
           if (!c || !c.id || settleHold(c)) continue // settleHold = 人看过了,别再催
           const s = settleOf(c, prsOfCard(c, repo), relPr, repo)
           if (s.kind === 'settle') settle.push(String(c.id))
@@ -250,9 +300,7 @@ const orphans = demos.filter((f) => !covered.has(f))
   } catch {}
   if (wip) {
     const hard = Number.isFinite(wip.hard) ? wip.hard : 20
-    let items = []
-    try { items = JSON.parse(readFileSync(join(KANBAN, 'backlog-manifest.json'), 'utf8')).items || [] } catch {}
-    const n = items.filter((it) => it && it.status === 'ready').length
+    const n = cardsOf('backlog-manifest.json', 'items', 'backlog').filter((it) => it && it.status === 'ready').length
     if (n > hard) notices.push(S.wipOver(n, hard))
   }
 }

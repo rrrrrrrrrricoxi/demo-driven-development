@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。469 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。516 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -8,9 +8,10 @@
 // done 卡归档(独立 pane + lazy 第三个 part + 深链映射)、积压提醒 wip(三档 + 守卫)、
 // 发布进度时间线几何(轴按繁忙度加宽 / 刻度不压字 / 泳道封顶 / 带高有上界)、
 // 暂不收账 settleHold(三种卡的灰芯片 + 待收账段/守卫闭嘴 + pr-sync --settle --only 挑着收)、
-// tab 条 nowrap(中文/· 断行点回归锚 + 横向滚动)等。
+// tab 条 nowrap(中文/· 断行点回归锚 + 横向滚动)、
+// 一卡一文件 cardsDir(拆分等价四拍 / 五种硬报错 / 顺序与文件系统无关 / 守卫 / 每卡更新日期降级链)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -1919,6 +1920,288 @@ console.log('T47 tab 条不折行')
   ok(/flex:\s*none/.test(tabRule), '.tab 钉了 flex: none(不跟着挤压收缩)', tabRule.slice(0, 120))
   ok(/overflow-x:\s*auto/.test(tabbarRule), '.tabbar 窄视口下横向滚动而不是折行', tabbarRule.slice(0, 160))
   ok(idx.includes('class="tab tab-shots"'), '截图出站 tab 仍带 .tab 类(同吃 nowrap/flex:none)')
+}
+
+// ============ T48 一卡一文件 cardsDir(拆分等价 / 硬报错 / 顺序 / 守卫 / 每卡更新日期)============
+console.log('T48 一卡一文件 cardsDir')
+const runScript = (name, kb, extra = []) =>
+  spawnSync(process.execPath, [join(NEW_SCRIPTS, name), '--dir', kb, ...extra], { encoding: 'utf8' })
+const { stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+{ // 四拍:未配 = 基线 → split 后逐字节相同(除新增的更新时间戳)→ 开着验行为 → join 回来比 sha
+  const fx48 = mkFixture('fx48', { 'c1.html': demoHtml('c1') })
+  const kb = fx48.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP), dec = rd(decP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  const item = (id, date, title) => ({ id, status: st, priority: pri, tier: '1', date, title, problem: 'p', approach: 'a', area: 'x', source: 's' })
+  // BL-7 与 BL-C7 的 numOf 都是 7、日期又相同 —— byDateDesc 是稳定排序,这一对的先后就是数组顺序
+  bl.items = [item('BL-7', '2026-02-02', '甲'), item('BL-C7', '2026-02-02', '乙'), item('BL-3', '2026-01-01', '丙')]
+  const dst = Object.keys(dec.statuses)[0]
+  dec.entries = [
+    { id: 'D9', code: 'D9', status: dst, date: '2026-03-03', title: '决策九', demo: 'demos/c1.html' },
+    { id: 'D2', code: 'D2', status: dst, date: '2026-03-03', title: '决策二' },
+  ]
+  wr(blP, bl); wr(decP, dec)
+  const cfg = rd(cfgP)
+  cfg.lazyTabs = true // parts/*.html 也进对比面(深链表 LAZY_PANE_OF 的键序正是「数组顺序即显示顺序」的活证据)
+  wr(cfgP, cfg)
+  const r0 = runGen(NEW_SCRIPTS, kb)
+  ok(r0.status === 0, '拍 1 未配 cardsDir:gen exit 0', r0.stderr)
+  const baseSha = sha(idxP)
+  const baseIdx = readFileSync(idxP, 'utf8')
+  const basePart = readFileSync(join(kb, 'parts', 'backlog.html'), 'utf8')
+  ok(!baseIdx.includes('class="udate"') && !baseIdx.includes('.udate {'), '未配 cardsDir:更新时间戳与它那条 CSS 一个字都不出')
+
+  const dry = runScript('cards-split.mjs', kb, ['--dry-run'])
+  ok(dry.status === 0 && /5/.test(dry.stdout), `--dry-run 报出将生成 5 个卡文件(实际输出:${dry.stdout.trim().split('\n')[0]})`)
+  ok(!existsSync(join(kb, 'cards')) && sha(idxP) === baseSha, '--dry-run 一个字节都没写')
+
+  const sp = runScript('cards-split.mjs', kb)
+  ok(sp.status === 0, `cards-split exit 0(${(sp.stderr || '').trim()})`)
+  ok(existsSync(join(kb, 'cards', 'backlog', 'BL-C7.json')) && existsSync(join(kb, 'cards', 'decisions', 'D9.json')),
+    '卡按 id 落成文件')
+  ok(rd(blP).items === undefined && rd(decP).entries === undefined, '头文件不再含 items / entries(一个真源)')
+  ok(rd(blP).statuses && rd(blP).groups && rd(decP).statuses && rd(decP).instance, '头文件保留 $comment/instance/statuses/priorities/tiers/groups')
+  ok(rd(cfgP).cardsDir === 'cards', 'kanban.config.json 写入了 cardsDir')
+  ok(rd(join(kb, 'cards', 'backlog', 'BL-7.json')).order === 0 && rd(join(kb, 'cards', 'backlog', 'BL-C7.json')).order === 1,
+    'order = 原数组下标(数组顺序是显示顺序,不记下来还原不回去)')
+
+  const splitIdx = readFileSync(idxP, 'utf8')
+  const splitPart = readFileSync(join(kb, 'parts', 'backlog.html'), 'utf8')
+  ok(stripCardUpdated(splitIdx) === stripCardUpdated(baseIdx), '拍 2 拆分后 index.html 逐字节相同(唯一新增 = 每卡更新时间戳)')
+  ok(stripCardUpdated(splitPart) === basePart, '拍 2 拆分后 parts/backlog.html 也逐字节相同')
+  ok(splitIdx.includes('.udate {'), '拍 3 开着:index.html 里多了 .udate 那条 CSS')
+  ok(count(splitPart, 'class="udate"') === 3 && count(readFileSync(join(kb, 'parts', 'decisions.html'), 'utf8'), 'class="udate"') === 2,
+    '拍 3 开着:5 张卡各一枚「更新」灰字(懒加载时卡正文在 parts 里)')
+  ok(/<span class="udate" title="卡文件最后改动 \d{4}-\d{2}-\d{2}">更新 \d{2}-\d{2}<\/span>/.test(splitPart), '灰字是「更新 MM-DD」,title 里带完整日期')
+
+  const jn = runScript('cards-join.mjs', kb)
+  ok(jn.status === 0, `cards-join exit 0(${(jn.stderr || '').trim()})`)
+  ok(sha(idxP) === baseSha, '拍 4 合回单文件:与基线逐字节相同')
+  ok(!existsSync(join(kb, 'cards')) && rd(cfgP).cardsDir === undefined, '卡目录与 cardsDir 都清干净了')
+  ok(JSON.stringify(rd(blP).items) === JSON.stringify(bl.items) && JSON.stringify(rd(decP).entries) === JSON.stringify(dec.entries),
+    '合回来的两个数组与拆分前逐字段相同(order 已删)')
+}
+{ // 硬报错四种 + 顺序与文件系统无关
+  const fx48b = mkFixture('fx48b', { 'c1.html': demoHtml('c1') })
+  const kb = fx48b.kb
+  const cfgP = join(kb, 'kanban.config.json'), blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP), dec = rd(decP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  bl.items = ['BL-1', 'BL-2', 'BL-3'].map((id, i) => ({ id, status: st, priority: pri, tier: '1', date: `2026-01-0${i + 1}`, title: id }))
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 'd' }]
+  wr(blP, bl); wr(decP, dec)
+  const cfg0 = rd(cfgP)
+  cfg0.lazyTabs = true
+  wr(cfgP, cfg0)
+  runGen(NEW_SCRIPTS, kb)
+  runScript('cards-split.mjs', kb)
+  const idxP = join(kb, 'index.html')
+  const boardSha = (dir) => { // index + 两个 part 一起摁指纹(懒加载时卡正文在 part 里)
+    const h = createHash('sha256')
+    for (const rel of [['index.html'], ['parts', 'decisions.html'], ['parts', 'backlog.html']]) h.update(readFileSync(join(dir, ...rel)))
+    return h.digest('hex')
+  }
+  const splitSha = boardSha(kb)
+  const blDir = join(kb, 'cards', 'backlog')
+  const idmap = () => Object.keys(JSON.parse(readFileSync(idxP, 'utf8').match(/const LAZY_PANE_OF = (\{[^\n]*?\})\n/)[1])).join(',')
+
+  { // 乱序写入:把卡文件全删了按反序重写,输出一模一样(gen readdir 后按名排序)
+    const files = readdirSync(blDir).sort()
+    const texts = files.map((f) => readFileSync(join(blDir, f), 'utf8'))
+    for (const f of files) rmSync(join(blDir, f))
+    for (let i = files.length - 1; i >= 0; i--) writeFileSync(join(blDir, files[i]), texts[i])
+    runGen(NEW_SCRIPTS, kb)
+    ok(boardSha(kb) === splitSha, '卡文件的写入顺序不影响输出(按文件名读,不按文件系统给的顺序)')
+  }
+  { // order 才是显示顺序:把两张卡的 order 对调,深链表的键序跟着换
+    const before = idmap()
+    const a = rd(join(blDir, 'BL-1.json')), z = rd(join(blDir, 'BL-3.json'))
+    wr(join(blDir, 'BL-1.json'), { ...a, order: z.order })
+    wr(join(blDir, 'BL-3.json'), { ...z, order: a.order })
+    runGen(NEW_SCRIPTS, kb)
+    ok(before !== idmap(), `order 一换,深链表的键序跟着换(${before} → ${idmap()})`)
+    wr(join(blDir, 'BL-1.json'), a); wr(join(blDir, 'BL-3.json'), z)
+    runGen(NEW_SCRIPTS, kb)
+    ok(boardSha(kb) === splitSha, 'order 换回来:输出回到基线')
+  }
+  { // ① 头文件残留数组
+    const head = rd(blP)
+    head.items = []
+    wr(blP, head)
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /items/.test(r.stderr), '硬报错:头文件里还留着 items')
+    delete head.items
+    wr(blP, head)
+  }
+  { // ② 文件名与 id 不符
+    const c = rd(join(blDir, 'BL-2.json'))
+    rmSync(join(blDir, 'BL-2.json'))
+    wr(join(blDir, 'BL-9.json'), c)
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /BL-9\.json/.test(r.stderr) && /BL-2/.test(r.stderr), '硬报错:文件名与卡里的 id 对不上(点名文件)')
+    const stop = runStop(NEW_SCRIPTS, fx48b.root)
+    ok(/BL-9\.json/.test(stop.stderr + stop.stdout), '守卫 notice:点名文件名与 id 不符的卡文件')
+    rmSync(join(blDir, 'BL-9.json'))
+    wr(join(blDir, 'BL-2.json'), c)
+  }
+  { // ③ 同一个 id 出现两次(两个子目录各一张,文件名都对得上,只有 id 撞)
+    const decDir = join(kb, 'cards', 'decisions')
+    wr(join(decDir, 'BL-1.json'), { id: 'BL-1', code: 'X', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '撞号' })
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /BL-1/.test(r.stderr), '硬报错:同一个 id 出现两次')
+    rmSync(join(decDir, 'BL-1.json'))
+  }
+  { // ④ 目录不存在
+    const cfg = rd(cfgP)
+    wr(cfgP, { ...cfg, cardsDir: 'nope' })
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /nope/.test(r.stderr), '硬报错:cardsDir 指的目录不在')
+    const stop = runStop(NEW_SCRIPTS, fx48b.root)
+    ok(/nope/.test(stop.stderr + stop.stdout), '守卫 notice:卡目录不在')
+    wr(cfgP, cfg)
+  }
+  { // ⑤ 卡文件不是合法 JSON
+    writeFileSync(join(blDir, 'BL-4.json'), '{ 这不是 JSON')
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /BL-4\.json/.test(r.stderr), '硬报错:卡文件解析失败(点名文件)')
+    const stop = runStop(NEW_SCRIPTS, fx48b.root)
+    ok(/BL-4\.json/.test(stop.stderr + stop.stdout), '守卫 notice:点名解析失败的卡文件')
+    rmSync(join(blDir, 'BL-4.json'))
+    runGen(NEW_SCRIPTS, kb)
+  }
+}
+{ // 守卫:新鲜度盯卡文件 + 孤儿语料纳入卡文件正文 + 积压/正文审计不因拆分失明
+  const fx48c = mkFixture('fx48c', { 'c1.html': demoHtml('c1') })
+  const kb = fx48c.kb
+  const cfgP = join(kb, 'kanban.config.json'), blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP), dec = rd(decP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  bl.items = [{ id: 'BL-1', status: 'ready', priority: pri, tier: '1', date: '2026-01-01', title: '甲', note: '短' }]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 'd', demo: 'demos/lone.html' }]
+  wr(blP, bl); wr(decP, dec)
+  writeFileSync(join(kb, 'demos', 'lone.html'), demoHtml('lone')) // 只被卡引用,不在 .no-card-ok 里
+  const cfg = rd(cfgP)
+  cfg.wip = { soft: 0, hard: 0 }
+  cfg.richText = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  runScript('cards-split.mjs', kb)
+  const idxP = join(kb, 'index.html')
+  const s1 = runStop(NEW_SCRIPTS, fx48c.root)
+  const out1 = JSON.parse(s1.stdout || '{}')
+  ok(s1.status === 0 && !/lone\.html/.test(s1.stdout), '孤儿语料纳入卡文件:只写在卡里的 demo 不算孤儿')
+  ok(/ready/.test(out1.systemMessage || '') || /1/.test(out1.systemMessage || ''), '积压审计仍数得到卡(拆分后从卡目录读)')
+  // 新鲜度:只动一张卡文件,守卫应重跑 gen
+  const cardP = join(kb, 'cards', 'backlog', 'BL-1.json')
+  const c = rd(cardP)
+  c.title = '甲改'
+  wr(cardP, c)
+  touch(cardP)
+  runStop(NEW_SCRIPTS, fx48c.root)
+  ok(readFileSync(idxP, 'utf8').includes('甲改'), '新鲜度盯住卡文件:改一张卡,守卫自动重跑 gen')
+  // 正文长度审计:超长 note 而无 detail
+  c.note = '长'.repeat(900)
+  wr(cardP, c)
+  touch(cardP)
+  const s2 = runStop(NEW_SCRIPTS, fx48c.root)
+  ok(/BL-1/.test(s2.stdout) && /800/.test(s2.stdout), '正文长度审计仍点得到名(拆分后从卡目录读)')
+}
+{ // 每卡更新日期:git 提交日优先,未提交的退文件 mtime
+  const fx48d = mkFixture('fx48d', { 'c1.html': demoHtml('c1') })
+  const kb = fx48d.kb, root = fx48d.root
+  const blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP), dec = rd(decP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  bl.items = [{ id: 'BL-1', status: 'ready', priority: pri, tier: '1', date: '2020-01-01', title: '甲' }]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2020-01-01', title: 'd' }]
+  wr(blP, bl); wr(decP, dec)
+  writeFileSync(join(kb, 'release-manifest.json'), JSON.stringify(REL_MANIFEST, null, 2) + '\n') // 在场即开「沉睡」判定
+  const idxP = join(kb, 'index.html')
+  runGen(NEW_SCRIPTS, kb)
+  ok(readFileSync(idxP, 'utf8').includes('data-dorm="2020-01-01"'), '未拆分时沉睡天数从建卡 date 起算(0.13.0 口径不变)')
+  runScript('cards-split.mjs', kb)
+  const today = new Date().toISOString().slice(0, 10)
+  ok(readFileSync(idxP, 'utf8').includes(`title="卡文件最后改动 ${today}"`), '没提交过的卡:退回文件 mtime(降级链第二档)')
+  ok(readFileSync(idxP, 'utf8').includes(`data-dorm="${today}"`), '拆分后沉睡天数改从卡文件最后改动日起算(1 月立的卡昨天动过,不算沉睡)')
+  const gitEnv = { ...process.env, GIT_AUTHOR_DATE: '2020-05-06T00:00:00Z', GIT_COMMITTER_DATE: '2020-05-06T00:00:00Z' }
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'], { cwd: root })
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'cards'], { cwd: root, env: gitEnv })
+  runGen(NEW_SCRIPTS, kb)
+  const committed = readFileSync(idxP, 'utf8')
+  ok(count(committed, 'title="卡文件最后改动 2020-05-06"') === 2, '提交过的卡:取 git 最后提交日(一条 git log 批量取,不是一卡一条)')
+  ok(committed.includes('>更新 05-06<'), '卡头灰字是「更新 MM-DD」')
+  ok(committed.includes('data-dorm="2020-05-06"'), '沉睡日期跟着走 git 提交日')
+  // 只改一张卡(未提交)→ 它退 mtime,另一张仍是提交日
+  const cardP = join(kb, 'cards', 'backlog', 'BL-1.json')
+  const c = rd(cardP)
+  c.title = '甲二'
+  wr(cardP, c)
+  runGen(NEW_SCRIPTS, kb)
+  const mixed = readFileSync(idxP, 'utf8')
+  ok(count(mixed, 'title="卡文件最后改动 2020-05-06"') === 2 && !mixed.includes(`title="卡文件最后改动 ${today}"`),
+    '改了没提交:git 记的仍是最后一次提交日(gen 只认已提交的事实,不猜工作区)')
+}
+
+// ============ T49 拆分后 pr-sync 照常工作:PR→卡 反查 + --settle --write 写单张卡文件 ============
+console.log('T49 拆分后的 pr-sync')
+{
+  const fx49 = mkFixture('fx49', { 's.html': demoHtml('s') })
+  const kb = fx49.kb
+  const relP = join(kb, 'release-manifest.json')
+  const mP = join(kb, 'manifest.json'), decP = join(kb, 'decisions-manifest.json'), blP = join(kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', note: '【2026-07-01】立卡', pr: 11 }]
+  dec.entries = [{ id: 'D1', code: 'D1', status: 'decided', date: '2026-01-01', title: '决策甲', question: 'q', pr: 11 }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  wr(relP, { stages: REL_MANIFEST.stages, releases: [], prs: [], syncedAt: null })
+  runGen(NEW_SCRIPTS, kb)
+  const sp = runScript('cards-split.mjs', kb)
+  ok(sp.status === 0, `T49 拆分 exit 0(${(sp.stderr || '').trim()})`)
+  const ghDir = join(WORK, 'fakegh49')
+  mkdirSync(ghDir, { recursive: true })
+  writeFileSync(join(ghDir, 'gh'), `#!/bin/sh
+case "$1 $2" in
+"pr list") echo '[{"number":11,"title":"甲","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/a","url":"https://github.com/o/r/pull/11","createdAt":"2026-07-18T01:00:00Z","mergedAt":"2026-07-19T01:00:00Z","closedAt":"2026-07-19T01:00:00Z"}]' ;;
+"release list") echo '[]' ;;
+esac
+`)
+  chmodSync(join(ghDir, 'gh'), 0o755)
+  const runSync = (extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', kb, ...extra],
+    { encoding: 'utf8', env: { ...process.env, PATH: ghDir } })
+  const rs = runSync([])
+  ok(rs.status === 0 && JSON.stringify(rd(relP).prs[0].cards.sort()) === JSON.stringify(['BL-1', 'D1']),
+    'PR → 卡 反查从卡目录读得到(拆分后 prs[].cards 不会变空)', `${rs.stdout}${rs.stderr}`)
+  const blCard = join(kb, 'cards', 'backlog', 'BL-1.json'), decCard = join(kb, 'cards', 'decisions', 'D1.json')
+  const blText = readFileSync(blCard, 'utf8')
+  const rw = runSync(['--settle', '--write'])
+  ok(rw.status === 0, `--settle --write exit 0(${rw.stderr.slice(0, 200)})`)
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const want = JSON.parse(blText)
+  want.status = 'done'
+  want.note = `【2026-07-01】立卡\n\n【${today} 收账】PR#11 已合(自动)`
+  ok(readFileSync(blCard, 'utf8') === JSON.stringify(want, null, 2) + '\n', '收账写的是那一张卡文件本身,形制不变(order 也还在)')
+  ok(rd(decCard).status === 'live' && rd(decCard).order !== undefined, '决策卡同样按文件收账,order 字段没被 pr-sync 吃掉')
+  const after = runGen(NEW_SCRIPTS, kb)
+  ok(after.status === 0, `收账后 gen 仍 exit 0(${after.stderr.slice(0, 200)})`)
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

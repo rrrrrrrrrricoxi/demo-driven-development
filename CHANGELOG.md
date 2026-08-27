@@ -9,6 +9,58 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Added
+- **One file per card** (`config.cardsDir`, opt-in). Point it at a directory
+  name — `"cards"` by convention — and backlog cards are read from
+  `<cardsDir>/backlog/<id>.json` and decision cards from
+  `<cardsDir>/decisions/<id>.json`, one file each, while the two manifests keep
+  only their headers. The problem this solves is concurrent writes: several
+  sessions editing one 400KB manifest rewrite the whole file and quietly take
+  each other's in-flight cards with them, and git reports no conflict because
+  nothing conflicted textually. One path per card either avoids that or turns
+  it into a conflict git can stop. The filename must equal the `id` inside, an
+  `items`/`entries` array left behind in a header file is a hard error (one
+  source of truth), and so is the same id appearing twice. Card files are read
+  in filename order, so the filesystem's own ordering never reaches the output.
+  Not configured means nothing changes, byte for byte. `manifest.json`'s tasks,
+  the acceptance manifest and the release manifest are not split.
+- Each card carries an **`order`** field written by the migration: the array
+  index it had before the split. Array order *was* display order in several
+  places — the screenshot gallery groups by a decision's position, the deep-link
+  pane map is a plain object whose key order is the array's, and the by-date
+  sort is stable, so two cards sharing a date and a number kept their array
+  order. `gen` sorts by `order` then by `id` and deletes the field afterwards,
+  so a card object is identical to what it was inside the array.
+- A **per-card update date** on the card header, a quiet `更新 MM-DD` next to
+  the creation date, taken from one batched `git log` over the card directory
+  (last commit date per file; falls back to the file's mtime, then to nothing —
+  the same silent chain the document library already uses). The dormancy chip
+  measures from this date instead of the card's creation date when cards are
+  split, which is the honest number: a card written in January and touched
+  yesterday is not dormant.
+- **`scripts/cards-split.mjs`** and **`scripts/cards-join.mjs`** for the
+  migration and the way back. Both write the files, re-run `gen`, and compare
+  the output byte for byte against what was there before; on any difference
+  they put the changed files back exactly as they were and exit non-zero. The
+  split is pure movement, so different output means the movement has a bug, and
+  a board that was moved wrong should not be left in someone's repository. The
+  two comparisons ignore exactly what the split is allowed to change: the new
+  per-card timestamps, the dormancy dates now measured from them, and the lazy
+  panes' byte counts (whose panes are themselves compared byte for byte).
+  `--dry-run` reports the file counts and any id that cannot be a filename.
+
+### Changed
+- The guard watches `<cardsDir>/**/*.json` for freshness, includes card files
+  in the corpus that decides whether a demo is orphaned, and names card files
+  whose filename disagrees with the id inside or that fail to parse. Those two
+  are hard errors in `gen`, which can only report the first one, so the guard
+  lists them all and hands them over with the failure.
+- `pr-sync.mjs` reads cards from the card directory when one is configured, so
+  the pull-request-to-card reverse lookup and `--settle` keep working after a
+  split; `--settle --write` then writes the individual card file.
+
 ## [0.13.1] - 2026-08-27
 
 ### Added

@@ -36,6 +36,7 @@ import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { cmpAt } from './relstage.mjs'
 import { KIND_TERMINAL, settleHold, settleOf } from './settle.mjs'
+import { cardsDirOf, scanCardDir, sortCards } from './cards.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KANBAN = resolveKanbanDir()
@@ -65,6 +66,23 @@ const MANIFESTS = [
 const inst = (k) => { for (const x of MANIFESTS) { const v = (x.data.instance || {})[k]; if (v) return String(v) } return '' }
 const REPO = inst('ghRepo')
 if (!REPO) die(S.noRepo())
+
+// ---- 卡从哪读、往哪写(v0.14.0 一卡一文件)----
+// 配了 cardsDir:backlog/decisions 的卡各自一个文件(instance 仍在头文件里,上面那段不受影响);
+// 没配:照旧从头文件的数组里读。下面的「PR → 卡」反查与 --settle 只认这一张表。
+const CARDS_DIR = cardsDirOf(readJson(join(KANBAN, 'kanban.config.json')) || {})
+const SUB_OF = { items: 'backlog', entries: 'decisions' }
+const CARD_ROWS = [] // { f: 相对看板目录的文件, key: 数组名('' = 整个文件就是这张卡), kind, card }
+for (const x of MANIFESTS) {
+  const sub = CARDS_DIR ? SUB_OF[x.key] : null
+  if (!sub) {
+    for (const c of x.data[x.key] || []) CARD_ROWS.push({ f: x.f, key: x.key, kind: x.key, card: c })
+    continue
+  }
+  const scan = scanCardDir(join(KANBAN, CARDS_DIR, sub))
+  for (const c of sortCards(scan.cards.map((y) => y.card)))
+    CARD_ROWS.push({ f: `${CARDS_DIR}/${sub}/${c.id}.json`, key: '', kind: x.key, card: c })
+}
 
 // ---- gh ----
 const gh = (args, what) => {
@@ -101,7 +119,7 @@ out.releases.sort((a, b) => cmpAt((a || {}).at, (b || {}).at))
 
 // ---- prs:全量重写(gh 是真源)----
 const MAIN = inst('branch')
-const CARDS = MANIFESTS.flatMap((x) => x.data[x.key] || []).filter(Boolean)
+const CARDS = CARD_ROWS.map((r) => r.card).filter(Boolean)
 const cardsOfPr = new Map()
 for (const c of CARDS) for (const p of prsOfCard(c, REPO)) {
   if (p.repo !== REPO || !c.id) continue
@@ -155,19 +173,18 @@ const relPr = new Map(out.prs.map((p) => [p.number, p]))
 const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' } // 决策卡没有时间线字段,只改 status
 const all = []
 const held = [] // 写了 settleHold 的 settle 卡:单列一行,--write 不碰
-for (const x of MANIFESTS) {
-  const to = KIND_TERMINAL[x.key]
+for (const r of CARD_ROWS) {
+  const to = KIND_TERMINAL[r.kind]
   if (!to) continue
-  for (const c of x.data[x.key] || []) {
-    if (!c || !c.id) continue
-    const prs = prsOfCard(c, REPO)
-    if (settleOf(c, prs, relPr, REPO).kind !== 'settle') continue
-    if (settleHold(c)) { held.push(String(c.id)); continue }
-    all.push({
-      f: x.f, key: x.key, id: String(c.id), from: String(c.status || ''), to,
-      nums: prs.filter((p) => p.repo === REPO && relPr.has(p.num)).map((p) => p.num).sort((a, b) => a - b),
-    })
-  }
+  const c = r.card
+  if (!c || !c.id) continue
+  const prs = prsOfCard(c, REPO)
+  if (settleOf(c, prs, relPr, REPO).kind !== 'settle') continue
+  if (settleHold(c)) { held.push(String(c.id)); continue }
+  all.push({
+    f: r.f, key: r.key, kind: r.kind, id: String(c.id), from: String(c.status || ''), to,
+    nums: prs.filter((p) => p.repo === REPO && relPr.has(p.num)).map((p) => p.num).sort((a, b) => a - b),
+  })
 }
 const sayHeld = () => { if (held.length) console.log(S.settleHeld(held, held.length)) }
 if (!all.length) {
@@ -211,10 +228,11 @@ for (const f of [...new Set(rows.map((r) => r.f))]) {
   const data = JSON.parse(text)
   if (JSON.stringify(data, null, 2) + '\n' !== text) { console.error(S.settleReformat(f)); continue }
   for (const r of rows.filter((x) => x.f === f)) {
-    const card = (data[r.key] || []).find((c) => c && String(c.id) === r.id)
+    // key = '' 是一卡一文件:整个文件就是这张卡,不必在数组里找
+    const card = r.key ? (data[r.key] || []).find((c) => c && String(c.id) === r.id) : (String(data.id) === r.id ? data : null)
     if (!card) continue
     card.status = r.to
-    const nf = NOTE_FIELD[r.key]
+    const nf = NOTE_FIELD[r.kind]
     if (nf) {
       const line = `【${today} 收账】PR#${r.nums.join(' #')} 已合(自动)`
       const cur = String(card[nf] || '')
