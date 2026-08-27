@@ -121,11 +121,13 @@ if (existsSync(GEN)) {
     ...cardWatch.map(mtime), // v0.14.0 一卡一文件:卡也是 gen 输入;未配 cardsDir 时为空,零影响
   )
   // v0.11.0:lazyTabs 板若 parts/ 缺件(手删/半拷贝),index 再新也是残废态 → 视同过期重跑自愈
+  // v0.14.0:归档是 0.13.0 起的第三个 part —— 漏掉它,深链到已归档的卡就静默落空,而 index 是
+  // 新的,守卫永远不会重跑。门控照 gen:backlogArchive 开着才有 archive.html。
   let lazyBroken = false
   try {
     const c = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8'))
-    lazyBroken = c.lazyTabs === true &&
-      !(existsSync(join(KANBAN, 'parts', 'decisions.html')) && existsSync(join(KANBAN, 'parts', 'backlog.html')))
+    const parts = ['decisions.html', 'backlog.html', ...(c.backlogArchive === true ? ['archive.html'] : [])]
+    lazyBroken = c.lazyTabs === true && !parts.every((f) => existsSync(join(KANBAN, 'parts', f)))
   } catch {}
   const myVer = readPluginVersion() // null = 安装异常(plugin.json 缺失/损坏/非纯数字版本)
   const stamp = readStamp(indexPath) // 版本串 | null(有产物无戳=旧 gen 产物)| undefined(无产物,首跑)

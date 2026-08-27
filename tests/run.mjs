@@ -1506,6 +1506,15 @@ console.log('T39 done 卡归档')
     try { new Function(sc[1]) } catch (e) { compiled = false }
     ok(compiled, 'lazy + 归档同开的壳 JS 可编译')
   }
+  // ---- 守卫的缺件自愈认第三个 part:archive.html 被删掉也要重跑 ----
+  // 深链 #BL-3(已归档)与「归档」tab 都只活在这个 part 里;index 是新的,守卫不重跑就永远补不回来。
+  for (const part of ['decisions.html', 'backlog.html', 'archive.html']) {
+    const pp = join(fx39.kb, 'parts', part)
+    touch(idxP) // index 是最新的 —— 只有「缺件」这一条能触发重跑,新鲜度那条不许帮忙
+    rmSync(pp)
+    const rs = runStop(NEW_SCRIPTS, fx39.root)
+    ok(rs.status === 0 && existsSync(pp), `守卫发现 parts/${part} 缺件 → 重跑 gen 补回(exit ${rs.status})`, rs.stderr)
+  }
   // ---- 只关归档、lazy 还开着:第三个 part 的陈迹清掉(壳里已无入口)----
   cfg.backlogArchive = false
   writeFileSync(cfgP, JSON.stringify(cfg))
