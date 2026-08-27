@@ -9,7 +9,7 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
-## [Unreleased]
+## [0.15.0] - 2026-08-27
 
 ### Added
 - **An overview landing pane** (`config.overviewTab`, opt-in). The first thing a
@@ -46,6 +46,40 @@ downgrade would freeze every already-stamped board. See
   inside it are rewritten a directory level out, and an old `#path` deep link
   now lands on the doc library entry and flashes it. Turning it back off removes
   the generated page again. Left unset, output is byte-identical.
+
+### Changed
+- **The acceptance and release panes join the lazy split** (`config.lazyTabs`).
+  Since 0.11.0 the shell has been the first thing a reader waits for, and two
+  tabs added since then had been going into it whole: a checklist pane with its
+  items baked in, and a release table with a row per pull request plus the four
+  lookup tables the table and the timeline share. On the board this was written
+  for they were most of what was left — the shell had grown back to 653KB, and
+  most of it was content behind a tab nobody had clicked yet. Both now travel
+  as their own part files, `parts/acceptance.html` and `parts/release.html`,
+  fetched on first visit like the other three. The same shell is now 306KB
+  (133.7KB → 71.4KB gzipped), and the two panes are no longer paid for by
+  readers who never open them.
+- Their baked-in data moved with them. Each part carries a
+  `<script type="application/json">` block that the runtime reads once on
+  injection; the two former IIFEs became `initAcceptance(root)` /
+  `initRelease(root)`, guarded so the tab click, the idle prefetch and a deep
+  link cannot initialise the same pane twice. The timeline's geometry stays in
+  the shell — it is code, not data, and the tests import the same source.
+- Numbers that live in one pane and are computed from another's data still add
+  up. A card's `验收中 · n/N` chip and the release table's acceptance column are
+  both rendered from acceptance ticks, so injecting any pane that carries a
+  `[data-acc]` element now fetches the acceptance part first and syncs after —
+  otherwise the numerator would sit at its baked-in `0/N` until the reader
+  happened to open the acceptance tab.
+- Deep links keep working across the split: `#acc-<pr>`, `#acc-<checklist>` and
+  `#pr-<number>` are registered in the card → pane map, so the runtime knows
+  which part to fetch before it looks for the anchor. The Stop guard's
+  missing-part self-heal knows about the two new files as well, gated the same
+  way generation is — a tab that is off has no part to miss.
+- Turning either tab off while `lazyTabs` stays on removes just that part file,
+  the way the archive part already behaved. With `lazyTabs` unset, output is
+  byte-identical to 0.14.1: both panes render into the single file exactly as
+  before, data and all.
 
 ## [0.14.1] - 2026-08-27
 
