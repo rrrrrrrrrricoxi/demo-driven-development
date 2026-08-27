@@ -183,12 +183,40 @@ function segKeyOfCat(cat) {
   return seg.key
 }
 
+// ———— 决策路径入文档库(v0.15.0,config.pathTab:"docs")————
+// 「决策路径」是给接手人一次性读完的来龙去脉,不是天天要点开的 tab。配成 "docs" 后:顶栏那一项与 pane 都不渲染,
+// 同一份 path-manifest.json 改渲成 refs/design-path.html 一篇文档,登记进文档库 Hub(类别默认「交接与接手」,
+// config.pathDocCategory 可改);#path 深链改落到文档库那条目 —— 数据一条不删,历史链接不死。
+// 未配 = 一切照旧,产物逐字节冻结。
+const PATH_DOCS = cfg.pathTab === 'docs'
+if (cfg.pathTab !== undefined && !PATH_DOCS)
+  console.warn(`[gen] ⚠ 未知 pathTab=${JSON.stringify(cfg.pathTab)},按未配处理(唯一合法值:"docs")`)
+const PATH_DOC_OUT = 'design-path.html'
+const PATH_DOC_TITLE = '设计路径(A→B→C)'
+const PATH_DOC_SRC = `${KANBAN_REL}/path-manifest.json` // repo-root 相对(更新日期与 srcLabel 共用)
+const PATH_DOC_CAT = (() => {
+  const c = cfg.pathDocCategory
+  if (c === undefined) return '交接与接手'
+  if (DOC_CATS.includes(c)) return c
+  console.warn(`[gen] ⚠ pathDocCategory「${c}」非法,退回「交接与接手」;合法值:${DOC_CATS.join(' / ')}`)
+  return '交接与接手'
+})()
+
+// ———— 总览落地页(v0.15.0,config.overviewTab:true)————
+// 第一个 pane(id 仍是 progress、hash 仍是 #)改渲一条叙事流:当前迭代 → 在验收 → 可做 → 待收账 →
+// 沉睡 → 近 7 天 → 发布,原来的迭代任务表整块折进页底「迭代史」(深链照旧可达)。
+// 每一行都从现有 manifest 与卡文件派生,零新数据源;数据源缺席的行整行不渲染。未配 = 逐字节冻结。
+const OVERVIEW = cfg.overviewTab === true
+const OV_RECENT_MAX = 20 // 「近 7 天动过的卡」最多列几张(超出只报个数)
+const OV_RECENT_DAYS = 7
+
 // 文档更新时间(真源 = git log 最后提交日;untracked/无 git 退回文件 mtime;都拿不到则空)—— gen 期取好嵌入。
 // 一条 git log 批量取全部文档的最后提交日,不是一篇一条命令 —— 与 v0.14.0 的每卡更新日期同一招。
 // 一个进程 fork 一次约 34ms,而守卫每次收工都跑 gen:55 篇文档就是 1.9s 的纯等待,还随文档数线性长。
 const DOC_COMMITTED = new Map() // repo-root 相对路径 → 'YYYY-MM-DD'
 {
-  const paths = [...new Set((cfg.docs || []).map((d) => d && d.path).filter((x) => typeof x === 'string' && x))]
+  const paths = [...new Set((cfg.docs || []).map((d) => d && d.path).filter((x) => typeof x === 'string' && x)
+    .concat(pm && PATH_DOCS ? [PATH_DOC_SRC] : []))] // 决策路径文档的更新日期走同一条批量 git log
   if (paths.length) {
     try {
       const out = execFileSync('git', ['log', '--format=%ad', '--date=short', '--name-only', '--', ...paths],
@@ -232,6 +260,18 @@ const REF_DOCS = (cfg.docs || []).map((d, i) => {
     seg: segKeyOfCat(d.category), updated: docUpdated(d.path),
   }
 })
+// 决策路径文档(pathTab:"docs"):不是 config.docs 里的条目,但从这里起与其它文档同一条命 ——
+// 进 Hub、进 tab 计数、进 refs/,只有渲染那一步走 type:"path" 分支(源是 manifest 不是 markdown)。
+if (pm && PATH_DOCS) {
+  const taken = REF_DOCS.find((d) => d.out === PATH_DOC_OUT)
+  if (taken) throw new Error(GS.pathDocOutTaken(PATH_DOC_OUT, taken.src))
+  REF_DOCS.push({
+    src: PATH_DOC_SRC, out: PATH_DOC_OUT, title: PATH_DOC_TITLE, baseDir: KANBAN_REL, cat: PATH_DOC_CAT,
+    line: undefined, desc: '三纪元叙事:每一步为什么这么拐 —— 接手的人读一遍,不用天天读',
+    order: null, type: 'path', liveUrl: undefined,
+    seg: segKeyOfCat(PATH_DOC_CAT), updated: docUpdated(PATH_DOC_SRC),
+  })
+}
 // out 同名冲突:HTML 复制件与 md 渲染件(或另一复制件)同名会在 refs/ 互相覆盖,牵涉即报错
 {
   const byOut = new Map()
@@ -528,6 +568,10 @@ const DK_TOGGLE_JS = !DARK ? '' : `
   })();`
 const LANES_ON = LANES !== null // 线别 UI(工具条分段/文档库 chips/hint/h1 重写)只在此开
 const LANE_IDS = LANES_ON ? LANES.ids : []
+// 决策路径那篇是 A→B→C 全叙事(与那个 pane 同一句话:不随线路筛选收敛)—— 每一档都算它的,
+// 否则筛到任一档它就从文档库消失,#path 深链会滚到一张 display:none 的卡上。
+// (线别规整在这一行才完成,所以这个字段在 REF_DOCS 建好之后补,不在建的时候写。)
+if (LANES_ON && PATH_DOCS) { const d = REF_DOCS.find((x) => x.type === 'path'); if (d) d.line = LANE_IDS.join(' ') }
 // 线别归属:开时读每条 entry 的显式 line 字段(通用、可审计);关时恒空 —— 产物与未开线别逐字节一致。
 const lineOf = (e) => LANES_ON ? String((e && e.line) || '') : ''
 const decLine = lineOf, iterLine = lineOf, docLine = lineOf, taskLine = lineOf, blLine = lineOf
@@ -1148,7 +1192,7 @@ function buildTocHtml(headings) {
   return '<aside class="reftoc"><div class="reftoc-h">目录 · ' + items.length + ' 项</div><nav class="reftoc-nav">' + nav + '</nav></aside>'
 }
 
-function renderRefPage({ title, bodyHtml, srcLabel, headings }) {
+function renderRefPage({ title, bodyHtml, srcLabel, headings, extraCss = '' }) {
   const toc = buildTocHtml(headings)
   const spy = toc
     ? `<script>
@@ -1172,7 +1216,7 @@ function renderRefPage({ title, bodyHtml, srcLabel, headings }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} · ${esc(BRAND)} 看板</title>${DK_BOOT}
-<style>${REF_CSS}${DK_SCHEME_CSS}</style>${THEME_STYLE}
+<style>${REF_CSS}${extraCss}${DK_SCHEME_CSS}</style>${THEME_STYLE}
 </head>
 <body>
 <nav id="refnav"><a class="back" href="../index.html">← 决策看板</a><span class="src">${esc(srcLabel)}</span>${DK_TOGGLE_BTN ? `<span style="flex:1"></span>${DK_TOGGLE_BTN}` : ''}</nav>
@@ -1197,6 +1241,12 @@ function writeRefs() {
       copyFileSync(join(REPO_ROOT, d.src), join(REFS_DIR, d.out))
       continue
     }
+    if (d.type === 'path') { // 决策路径(pathTab:"docs"):源是 manifest 不是 markdown,主体由 buildPathBody 现渲
+      writeFileSync(join(REFS_DIR, d.out), renderRefPage({
+        title: d.title, bodyHtml: PATH_DOC_BODY, srcLabel: d.src, headings: [], extraCss: PATH_DOC_CSS,
+      }), 'utf8')
+      continue
+    }
     let bodyHtml, headings = []
     try {
       const raw = readFileSync(join(REPO_ROOT, d.src), 'utf8')
@@ -1211,6 +1261,11 @@ function writeRefs() {
       console.warn(`[gen] ⚠ refs: fell back for ${d.src}: ${e.message}`)
     }
     writeFileSync(join(REFS_DIR, d.out), renderRefPage({ title: d.title, bodyHtml, srcLabel: d.src, headings }), 'utf8')
+  }
+  // 关掉 pathTab 之后的陈迹自动清理(照 parts/ 的规矩);有 docs 条目占着这个 out 就不碰,那是人家的文件
+  if (!PATH_DOCS && !REF_DOCS.some((d) => d.out === PATH_DOC_OUT)) {
+    const stale = join(REFS_DIR, PATH_DOC_OUT)
+    if (existsSync(stale)) rmSync(stale)
   }
   const nGuide = REF_DOCS.filter((d) => d.type === 'html').length
   console.log(`[gen] 📄 refs 渲染 ${REF_DOCS.length - nGuide} 篇${nGuide ? ` + 原样复制 ${nGuide} 篇 HTML 指南` : ''} → refs/${totalWarn ? `(${totalWarn} 块退化兜底)` : ''}`)
@@ -1877,8 +1932,9 @@ const cTaskByIter = Object.fromEntries(m.tasks.filter((t) => /^TC\d+$/.test(t.id
 // decByIter 已在进度看板区提升定义(进度面板 + 本 timeline 共用)
 const DESIGN_DOC = pm?.designDoc || '' // 叙事段「设计文档分节链」的基址(可选,path-manifest.designDoc 提供;缺省不成链)
 
-function buildPathPane() {
-  if (!pm) return '<p class="stamp">path-manifest.json 缺失,决策路径不可用。</p>'
+// 主体(topbar 之外的一切)单拎出来:pane 与 refs/design-path.html 两处渲同一份,
+// 标题那一行各给各的(pane 用 topbar,文档页用 refs 页壳的 h1)。
+function buildPathBody() {
   const demoBase = pm.demoBase || ''
 
   // ——三纪元脊柱:A 委托单(ADR·对比 demo)→ B 台账(直接拍板·0 demo)→ C 提单模型(demo 成熟)——
@@ -2030,12 +2086,6 @@ function buildPathPane() {
 
   // 由脊柱(A→B→C 全景)到细节:C 落地路径(当下)→ C 拍板项 → C demo 探索 → A 对比 demo → 为什么这么设计(起点)
   return `
-  <div class="topbar">
-    <h1>决策路径</h1>
-    <span class="sess">A 委托单(ADR · 对比 demo)→ B 台账(直接拍板)→ C 提单模型(demo 成熟):demo-驱动决策自 A 线起步,到 C 线成熟</span>
-    <span class="cnote">A / B / C 三线全叙事 · 不随线路筛选收敛,当前线高亮</span>
-    <span class="branch">branch: ${esc(dm.instance.branch)}</span>
-  </div>
   ${epochSpine}
   ${timeline}
   ${pinboard}
@@ -2044,7 +2094,203 @@ function buildPathPane() {
   ${originBlock}
   <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>path-manifest.json</code>(三纪元叙事)+ <code>decisions-manifest.json</code>(D/AD 码)。A 线对比 demo 存本板 <code>demos/</code>,C 线 demo 链 <code>:8890</code>;§ 链接跳 <code>refs/design-c.html</code>,D/TC/AD 链接跨 tab 定位卡片。</p>`
 }
-const pathPane = buildPathPane()
+
+function buildPathPane() {
+  if (!pm) return '<p class="stamp">path-manifest.json 缺失,决策路径不可用。</p>'
+  return `
+  <div class="topbar">
+    <h1>决策路径</h1>
+    <span class="sess">A 委托单(ADR · 对比 demo)→ B 台账(直接拍板)→ C 提单模型(demo 成熟):demo-驱动决策自 A 线起步,到 C 线成熟</span>
+    <span class="cnote">A / B / C 三线全叙事 · 不随线路筛选收敛,当前线高亮</span>
+    <span class="branch">branch: ${esc(dm.instance.branch)}</span>
+  </div>${buildPathBody()}`
+}
+// ———— 决策路径的样式(index 的 pane 与 refs/design-path.html 共用同一份)————
+// 抽成常量只为「一份口径两处用」:index 里在原位插值回去,与抽取前逐字节相同;
+// pathTab:"docs" 时同一份跟着 HTML 搬进那篇文档页 —— refs 页的变量名族不同(--text/--border/…),
+// 靠 .pathdoc 上的一层别名接住,不必把规则改写第二遍。
+const PATH_CSS_A = `  /* ============ 决策路径 pane ============ */
+  .secband { display: flex; align-items: baseline; gap: 10px; margin: 34px 0 4px; padding-bottom: 6px;
+             border-bottom: 2px solid var(--line); }
+  .secband.first { margin-top: 10px; }
+  .secband h2 { margin: 0; font-size: 17px; }
+  .secband h2 span { font-size: 13px; font-weight: 400; color: var(--mut); margin-left: 8px; }
+  .secband-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; }
+  .secband-links a { color: var(--accent); text-decoration: none; }
+  .secband-links a:hover { text-decoration: underline; }
+
+  /* ① 理念转向 */
+  .shift { display: grid; grid-template-columns: 1fr 46px 1fr; gap: 10px; margin: 14px 0; }
+  .shift-lane { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card); }
+  .shift-lane.from { border-left: 3px solid #a8a29e; }
+  .shift-lane.to { border-left: 3px solid ${BRAND_TK}; background: ${tk('brand-tint')}; }
+  .shift-tag { display: inline-block; font-size: 12px; font-weight: 700; color: #fff; border-radius: 6px;
+               padding: 1px 9px; margin-bottom: 7px; }
+  .shift-lane.from .shift-tag { background: #a8a29e; }
+  .shift-lane.to .shift-tag { background: ${BRAND_TK}; }
+  .shift-lane p { margin: 0; font-size: 13px; color: ${tk('body-ink')}; line-height: 1.6; }
+  .shift-arrow { display: grid; place-items: center; gap: 2px; color: ${BRAND_TK}; }
+  .shift-arrow::before { content: "→"; font-size: 22px; font-weight: 700; }
+  .shift-arrow span { font-size: 10.5px; color: var(--mut); }
+  .pivot { font-size: 13px; color: ${tk('body-ink')}; line-height: 1.6; background: ${tk('paper-tint')};
+           border: 1px solid var(--line); border-left: 3px solid #d97706; border-radius: 10px; padding: 10px 14px; }
+  .pivot-lbl { display: inline-block; font-size: 11px; font-weight: 700; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
+               border: 1px solid #fde68a; border-radius: 6px; padding: 0 7px; margin-right: 8px; }
+  .principles { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; background: var(--card); }
+  .pr-lbl { font-size: 12.5px; font-weight: 700; color: ${BRAND_TK}; }
+  .principles ul { margin: 8px 0 2px; padding-left: 20px; columns: 2; column-gap: 26px; }
+  .principles li { font-size: 12.5px; color: ${tk('body-ink')}; line-height: 1.5; margin: 3px 0; break-inside: avoid; }
+  @media (max-width: 720px) { .shift { grid-template-columns: 1fr; } .shift-arrow::before { content: "↓"; } .principles ul { columns: 1; } }
+
+  /* ② demo 探索历程 */
+  .demorail { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+  .demonode { flex: 1 1 150px; min-width: 138px; display: flex; flex-direction: column; gap: 3px;
+              text-decoration: none; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+              background: var(--card); color: var(--ink); }
+  .demonode:hover { border-color: var(--accent); }
+  .demonode.flag { border-color: ${BRAND_TK}; background: ${tk('brand-tint')}; box-shadow: 0 1px 6px ${tk('flag-glow')}; }
+  .dn-id { font-size: 11px; font-weight: 700; color: var(--mut); font-family: ui-monospace, monospace; }
+  .demonode.flag .dn-id { color: ${BRAND_TK}; }
+  .dn-name { font-size: 14px; font-weight: 700; }
+  .dn-bet { font-size: 11.5px; color: ${tk('sub-ink')}; line-height: 1.45; }
+  .dn-role { font-size: 11px; color: var(--mut); margin-top: 2px; }
+  .railnote { font-size: 12px; color: var(--mut); margin: 6px 0 0; }
+  .roundhdr { margin: 20px 0 8px; font-size: 13.5px; font-weight: 700; color: ${tk('body-ink')}; }
+  .rounds { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px 0; }
+  .roundnode { flex: 1 1 150px; min-width: 148px; border: 1px solid var(--line); border-radius: 10px;
+               padding: 8px 10px; background: var(--card); display: flex; gap: 8px; }
+  .rn-n { font-size: 12px; font-weight: 700; color: #fff; background: ${BRAND_TK}; border-radius: 6px;
+          padding: 1px 6px; height: fit-content; white-space: nowrap; }
+  .rn-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .rn-body b { font-size: 12.5px; }
+  .rn-body span { font-size: 11px; color: var(--mut); line-height: 1.4; }
+  .rn-link { flex: 0 0 10px; align-self: center; height: 2px; background: var(--line); }
+
+  /* ③ 拍板项 → D 码 */
+  .pins { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin: 12px 0; }
+  .pin { border: 1px solid var(--line); border-left: 3px solid #d97706; border-radius: 12px;
+         padding: 12px 14px; background: var(--card); display: flex; flex-direction: column; gap: 7px; }
+  .pin header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .pin-id { font-size: 11px; font-weight: 700; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
+            border: 1px solid #fde68a; border-radius: 6px; padding: 0 7px; }
+  .pin header b { font-size: 14.5px; }
+  .pin-arrow { margin-left: auto; font-size: 12px; font-weight: 700; color: ${BRAND_TK}; text-decoration: none;
+               background: ${tk('ok-bg-faint')}; border: 1px solid #b8e2da; border-radius: 999px; padding: 2px 10px; }
+  .pin-arrow:hover { background: #e0f3ee; }
+  .pin-row { display: grid; grid-template-columns: 72px 1fr; gap: 8px; font-size: 12.5px; color: ${tk('body-ink')}; line-height: 1.5; }
+  .pin-lbl { font-weight: 600; color: var(--mut); }
+  .pin-lbl.land { color: ${BRAND_TK}; }
+
+  /* ④ C1→C10 时间线泳道 */
+  .timeline { margin: 14px 0 0; }
+  .tlband { display: grid; grid-template-columns: 52px 1fr; gap: 6px; }
+  .tl-rail { display: flex; justify-content: center; position: relative; }
+  .tl-rail::before { content: ""; position: absolute; top: 12px; bottom: -6px; left: 50%; width: 2px;
+                     margin-left: -1px; background: var(--line); z-index: 0; }
+  .tlband:last-child .tl-rail::before { display: none; }
+  .tl-dot { position: relative; z-index: 1; width: 36px; height: 24px; border-radius: 8px; display: grid;
+            place-items: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); margin-top: 6px; }
+  .tl-main { padding: 4px 0 18px; min-width: 0; }
+  .tl-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .tl-head b { font-size: 14.5px; }
+  .tl-task { font-size: 12px; color: var(--accent); text-decoration: none; }
+  .tl-task:hover { text-decoration: underline; }
+  .tl-st { font-size: 11px; font-weight: 600; color: #fff; background: var(--c); border-radius: 999px; padding: 1px 8px; }
+  .tl-lane { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; font-size: 12.5px; }
+  .tl-lbl { flex: 0 0 34px; color: var(--mut); font-weight: 600; padding-top: 2px; }
+  .tl-chips { display: flex; flex-wrap: wrap; gap: 5px 6px; min-width: 0; }
+  .tl-dec { text-decoration: none; border-radius: 7px; padding: 2px 9px; font-weight: 600; font-size: 12px; }
+  .tl-dec.decide { color: ${tk('ok-ink-deep')}; background: ${tk('ok-bg')}; border: 1px solid #a7ddca; }
+  .tl-dec.land { color: var(--mut); background: var(--bg); border: 1px dashed var(--line); }
+  /* D 码 chip 是跨 tab 链接(#Dxx → 决策卡定位+闪烁),hover 给明确的「可点」信号 */
+  .tl-dec:hover { border-color: var(--accent); border-style: solid; color: var(--accent-deep); background: var(--accent-soft); }
+  .tl-sec { text-decoration: none; color: ${tk('sec-ink')}; background: ${tk('sec-bg')}; border-radius: 7px; padding: 2px 9px;
+            font-weight: 600; font-size: 12px; }
+  .tl-sec:hover { background: #d7e6ee; }
+  .tl-demonote { color: ${tk('note-ink')}; line-height: 1.5; }
+  .tl-implnote { color: var(--mut); font-style: italic; }`
+const PATH_CSS_B = `  /* ============ 三纪元脊柱(决策路径顶部:A 委托单 → B 台账 → C 提单)============ */
+  .epochs { display: grid; gap: 0; margin: 16px 0 24px; }
+  .epoch { display: grid; grid-template-columns: 132px 1fr; gap: 14px; position: relative; padding-bottom: 16px; }
+  .epoch:not(:last-child)::before { content: ""; position: absolute; left: 21px; top: 28px; bottom: -2px;
+                     width: 2px; background: var(--line); }
+  .ep-rail { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; position: relative; z-index: 1; }
+  .ep-tag { font-size: 12.5px; font-weight: 800; color: #fff; border-radius: 7px; padding: 3px 12px; letter-spacing: .02em; }
+  .ep-period { font-size: 11px; color: var(--faint); font-family: ui-monospace, monospace; }
+  .ep-body { border: 1px solid var(--line); border-radius: 12px; padding: 12px 15px; background: var(--card);
+             transition: border-color .15s, box-shadow .15s; }
+  .ep-name { font-size: 15.5px; font-weight: 700; margin-bottom: 6px; }
+  .ep-axis, .ep-how { margin: 4px 0; font-size: 12.5px; color: ${tk('body-ink')}; line-height: 1.55; }
+  .ep-axis b, .ep-how b { display: inline-block; min-width: 4.4em; margin-right: 8px; font-size: 11px;
+             font-weight: 700; color: var(--mut); }
+  .ep-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 9px; padding-top: 8px;
+             border-top: 1px dashed var(--line); font-size: 11.5px; }
+  .ep-tally { color: var(--mut); font-family: ui-monospace, monospace; }
+  .ep-see { color: var(--accent); }
+  .epoch.ep-A { --c-ep: #b5843a; } .epoch.ep-B { --c-ep: #7a8590; } .epoch.ep-C { --c-ep: ${BRAND_TK}; }
+  .epoch.ep-A .ep-tag { background: #b5843a; } .epoch.ep-B .ep-tag { background: #7a8590; } .epoch.ep-C .ep-tag { background: ${BRAND_TK}; }
+  /* 筛某条线时:该纪元描边高亮(全景始终清晰可读,不淡出其余纪元) */
+  .wrap[data-line="A"] .epoch.ep-A .ep-body, .wrap[data-line="B"] .epoch.ep-B .ep-body, .wrap[data-line="C"] .epoch.ep-C .ep-body {
+     border-color: color-mix(in srgb, var(--c-ep) 45%, var(--line)); box-shadow: 0 1px 10px color-mix(in srgb, var(--c-ep) 14%, transparent); }
+  @media (max-width: 640px) { .epoch { grid-template-columns: 1fr; } .epoch::before { display: none; } }
+
+  /* §标题前的线路字母 chip */
+  .secband h2 .sec-line { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px;
+     color: #fff; font-size: 12px; font-weight: 800; margin-right: 3px; vertical-align: -3px; }
+  .sec-line.line-A { background: #b5843a; } .sec-line.line-B { background: #7a8590; } .sec-line.line-C { background: ${BRAND_TK}; }
+  .secband h2 .sub { font-size: 13px; font-weight: 400; color: var(--mut); margin-left: 8px; }
+
+  /* A 线 demo rail(卡内含「打开 demo」+「决策卡↗」两段) */
+  .demorail.arail .anode { flex: 1 1 158px; min-width: 152px; display: flex; flex-direction: column;
+     border: 1px solid var(--line); border-left: 3px solid #b5843a; border-radius: 10px; background: var(--card); overflow: hidden; }
+  .anode .dn-main { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: var(--ink); padding: 9px 11px 8px; }
+  .anode:hover { border-color: #b5843a; }
+  .anode .dn-jump { font-size: 11px; color: var(--accent); text-decoration: none; padding: 5px 11px;
+     border-top: 1px dashed var(--line); background: ${tk('faint-bg')}; }
+  .anode .dn-jump:hover { background: #f0f6fb; }`
+// pathTab:"docs" 时顶栏那一项与 pane 都不渲染(PANES 与 tabRail 跟着少一项;tabRail 从 tab 条解析,自动)
+const PATH_ON = Boolean(pm) && !PATH_DOCS
+const pathPane = !PATH_ON ? '' : buildPathPane()
+const PATH_PANE_ID = PATH_DOCS ? '' : `, 'path'` // 未配时照旧恒有 'path'(pm 缺席也一样)—— 逐字节冻结
+// 看板 pane 里的链接是相对看板根写的;搬进 refs/ 那一层要各退一级,
+// 卡的 #锚 在文档页没有落点,得回 index.html 才找得到(历史深链不死的另一半)。
+const toRefHref = (html) => html.replace(/ href="([^"]*)"/g, (all, h) => {
+  if (h === '#' || /^[a-z][a-z0-9+.-]*:/i.test(h)) return all // safeHref 拒掉的死链 / 站外绝对地址
+  if (h.startsWith('#')) return ` href="../index.html${h}"`
+  if (h.startsWith('refs/')) return ` href="${h.slice(5)}"`
+  return ` href="../${h}"`
+})
+const PATH_DOC_BODY = !PATH_DOCS || !pm ? '' : `<h1>${esc(PATH_DOC_TITLE)}</h1>
+<p class="pathlede">A 委托单(ADR · 对比 demo)→ B 台账(直接拍板)→ C 提单模型(demo 成熟)。每一步为什么这么拐,靠的不是记忆而是这份记录 —— 接手的人读一遍就知道现在的形状从哪来。源是 <code>path-manifest.json</code>,与看板同一份数据,一个字段都没删。</p>
+<div class="pathdoc">${toRefHref(buildPathBody())}
+</div>`
+const PATH_DOC_CSS = !PATH_DOCS || !pm ? '' : `
+  /* ============ 决策路径文档页(v0.15.0,config.pathTab:"docs")============ */
+  /* refs 页的变量名族是 --text/--muted/--border/--panel,搬过来的规则认的是 --ink/--mut/--line/--card;
+     在容器上做一层别名接住,规则本身一个字都不改。暗档由 darkStyle 统一包 light-dark()。 */
+  .pathdoc{--ink:var(--text);--mut:var(--muted);--faint:var(--muted);--line:var(--border);
+    --card:var(--panel);--accent-deep:var(--accent);--accent-soft:${rtk('soft-bg')}}
+  /* article.md 给 h2/a 加的下划线与分隔线在这些 chip / 段带上是噪音,就近关掉 */
+  .pathdoc h2{border-bottom:0;padding-bottom:0}
+  .pathdoc a{border-bottom:0}
+  .pathdoc .secband{margin-top:30px}
+  .pathdoc .secband.first{margin-top:8px}
+  .pathdoc .stamp{margin-top:18px;font-size:12px;color:var(--muted)}
+  .pathlede{color:var(--muted)}
+${PATH_CSS_A}
+${PATH_CSS_B}`
+// 老的 #path 深链:tab 没了,链接不能死 —— 落到文档库那条目上并闪一下(与卡片深链同一套 flash-target)
+const PATH_ROUTE = !PATH_DOCS ? '' : `if (id === 'path') { // 决策路径已搬进文档库
+      show('docs')
+      const pdoc = document.querySelector('.doccard[data-doc="${PATH_DOC_OUT}"]')
+      if (pdoc) {
+        pdoc.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        pdoc.classList.add('flash-target')
+        setTimeout(() => pdoc.classList.remove('flash-target'), 1600)
+      }
+      return
+    }
+    `
 
 // ============================================================================
 //  文档库 Hub(D46 方案B):地基→流程→操作→存档 四段卡片墙 + 阅读顺序 stepper + 已读进度
@@ -2395,6 +2641,15 @@ const ACC_CSS = !ACC ? '' : `
 // 运行期:勾选(localStorage)/ 筛选 / 进度 / 目录 / 复制 TSV / 复制勾选结果 / 卡头分子。
 // 数据烤入,分子全在浏览器算(gen 零时间);<  逃逸照 LAZY_PANE_OF 做法。
 const accJson = (x) => JSON.stringify(x).replace(/</g, '\\u003c')
+// 总览「在验收」那行的迷你进度条:分子分母已由上面那圈算好写进 [data-acc],这里只把它换算成宽度 ——
+// 不另开一份勾选口径(总览关时空串,验收 pane 的 JS 逐字节不变)。
+const OV_ACC_BAR = !OVERVIEW ? '' : `
+      var ovs = document.querySelector('.ovacc [data-acc]')
+      var ovi = document.querySelector('.ovacc .ovbar i')
+      if (ovs && ovi) {
+        var ovp = String(ovs.textContent).split('/')
+        ovi.style.width = (Number(ovp[1]) ? Number(ovp[0]) / Number(ovp[1]) * 100 : 0) + '%'
+      }`
 const ACC_JS = !ACC ? '' : `
   ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
     var LISTS = ${accJson(ACC_LISTS.map((l) => ({
@@ -2480,7 +2735,7 @@ const ACC_JS = !ACC ? '' : `
         var mine = ck[l.k], d = 0
         l.items.forEach(function (it) { if (mine[it.id]) d++ })
         s.textContent = d + '/' + l.items.length
-      })
+      })${OV_ACC_BAR}
     }
     function spy() { // 分组目录跟随滚动;滚到底点亮末项(末组太短时永远轮不到它)
       LISTS.forEach(function (l) {
@@ -2750,6 +3005,270 @@ const REL_TAB = !REL ? '' : `\n    <button class="tab" data-pane="release">发�
 const REL_PANE_HTML = !REL ? '' : `\n  <section class="pane" id="pane-release">${releasePane}</section>`
 const REL_PANE_ID = !REL ? '' : `, 'release'`
 const REL_SHOW = !REL ? '' : `\n    if (name === 'release' && window.relSync) relSync()`
+
+// ============================================================================
+//  总览 pane(v0.15.0,config.overviewTab)—— B 叙事流:一条流,按「先看什么」排
+//  每行 = 一个数据源的一句话 + 可展开的明细;数据源缺席则整行不渲染(空行比没有更吵)。
+//  全部派生:manifest / backlog / decisions / acceptance / release + 卡文件更新日,零新数据。
+//  gen 零时间的老规矩照旧:天数、7 天窗口、勾选进度全在浏览器算,这里只烤日期与分母。
+//  OVERVIEW 关时本节所有产物为空串,index.html 逐字节冻结。
+// ============================================================================
+const ovRow = ({ k, label, head, tail = '', body, cls = '' }) => `
+    <section class="ovrow${cls ? ` ${cls}` : ''}" data-ovrow="${k}">
+      <details><summary><span class="ovk">${esc(label)}</span><span class="ovm">${head}</span><span class="ovx">${tail}</span><span class="ovc">▸</span></summary>
+      <div class="ovb">${body}</div></details>
+    </section>`
+const ovCid = (id) => `<a class="ovcid" href="#${esc(id)}">${esc(id)}</a>`
+// why 传纯文本就自动包一层 .ovwhy;传 <span class="ovwhy" …> 则原样收下(要挂 data- 属性给运行期用时)
+const ovLine = (inner, why = '', attrs = '') => `<div class="ovline"${attrs}>${inner}${!why ? '' : why[0] === '<' ? why : `<span class="ovwhy">${why}</span>`}</div>`
+const ovCard = (id, title, why = '', attrs = '') => ovLine(`${ovCid(id)}<span class="ovt">${esc(title)}</span>`, why, attrs)
+const ovNil = (t) => `<div class="ovnil">${esc(t)}</div>`
+
+// ① 迭代:manifest 里当前 active 的那个迭代 + 迭代计划链(没有 active 迭代 = 这一行没有话说,不渲染)
+const ovIter = !OVERVIEW ? null : iterStats.find((it) => it.state === 'active') || null
+const OV_ITER = !ovIter ? '' : ovRow({
+  k: 'iter', label: '迭代',
+  head: `<b>${esc(ovIter.id)}</b> · ${esc(ovIter.title)}`,
+  tail: m.instance.planDoc ? `<a href="${esc(cardLink(m.instance.planDoc).href)}">迭代计划 ↗</a>` : `${ovIter.done}/${ovIter.total}`,
+  body: (() => {
+    const ts = m.tasks.filter((t) => t.iteration === ovIter.id && (t.status === 'active' || t.status === 'testing'))
+    return (ts.length ? ts.map((t) => ovCard(t.id, t.title, esc(m.statuses[t.status] || ''))).join('')
+      : ovNil('这个迭代里没有进行中的任务。')) +
+      ovNil(`其余 ${iterStats.length - 1} 个迭代的任务表都在页底「迭代史」里,一条没删。`)
+  })(),
+})
+
+// ② 在验收:acceptance-manifest 的 current 那份清单(分母烤入,分子与进度条由 accSync 在浏览器里算)
+const OV_ACC = !OVERVIEW || !ACC ? '' : ACC_CUR ? ovRow({
+  k: 'acc', label: '在验收', cls: 'ovacc',
+  head: `PR <a class="ovcid" href="#acc-${ACC_CUR.nums[0]}">#${ACC_CUR.nums[0]}</a> · 已试 <b><span data-acc="${ACC_CUR.nums[0]}">0/${ACC_CUR.items.length}</span></b><span class="ovbar"><i></i></span>`,
+  tail: `第 ${ACC_CUR.rev} 版清单`,
+  body: ovNil(`${ACC_CUR.title || '验收清单'} · ${ACC_CUR.groups.length} 组 ${ACC_CUR.items.length} 条`) +
+    accCardsOf(ACC_CUR).slice(0, 6).map((c) => ovCard(c.id, c.title, esc(c.st))).join('') +
+    `<div class="ovline"><a class="ovcid" href="#acc-${ACC_CUR.nums[0]}">打开验收清单 ↗</a></div>`,
+}) : ovRow({
+  k: 'acc', label: '在验收', cls: 'ov-quiet',
+  head: '当前没有在验收的 PR',
+  tail: ACC_LISTS.length ? `${ACC_LISTS.length} 份清单在册` : '',
+  body: ovNil('acceptance-manifest.json 的 current 是 null —— 有 PR 要验收时把号写进去。'),
+})
+
+// ③ 可做:与积压提醒(wip)同一个计数,同一套档位色。lanes 开着时随线别重算(见 OV_SETLINE)
+const ovReadyCards = !OVERVIEW ? [] : b.items.filter((it) => it.status === 'ready')
+const OV_READY_N = ovReadyCards.length
+const OV_READY_LV = !OVERVIEW || !WIP ? '' : wipLevel(OV_READY_N)
+const OV_READY = !OVERVIEW ? '' : ovRow({
+  k: 'ready', label: '可做', cls: OV_READY_LV ? `ov-${OV_READY_LV}` : '',
+  head: `<b><span id="ovreadyn">${OV_READY_N}</span></b> 张 ready`,
+  tail: `<a href="#backlog">Backlog ↗</a>`,
+  body: (() => {
+    const top = ovReadyCards.slice().sort((a, b) => { // 积压最久的排前面(没写日期的垫底)
+      const x = String(a.date || '9999-99-99'), y = String(b.date || '9999-99-99')
+      return x < y ? -1 : x > y ? 1 : 0
+    })
+    const withPr = ovReadyCards.filter((it) => prsOfCard(it, PR_REPO).length).length
+    return (withPr ? ovNil(`其中 ${withPr} 张已开 PR。`) : '') +
+      top.slice(0, 6).map((it) => ovCard(it.id, it.title, `<span class="ovwhy" data-ovage="${esc(String(it.date || ''))}"></span>`)).join('') +
+      (top.length > 6 ? ovNil(`…另 ${top.length - 6} 张`) : '')
+  })(),
+})
+
+// ④ 待收账 / 挂起:与卡头琥珀芯片、守卫、pr-sync --settle 同一份 settleOf 口径(挂起的单列,不混进数)
+const ovHold = !OVERVIEW || !REL ? [] : CARD_INDEX.filter((c) => settleHold(c.e))
+const OV_SETTLE = !OVERVIEW || !REL ? '' : ovRow({
+  k: 'settle', label: '待收账', cls: relSettleCards.size ? '' : 'ov-quiet',
+  head: `<b>${relSettleCards.size}</b> 张${ovHold.length ? ` · 挂起 <b>${ovHold.length}</b> 张` : ''}`,
+  tail: `<a href="#release">发布进度 ↗</a>`,
+  body: (relSettleGroups.length
+    ? relSettleGroups.map((g) => ovLine(`<a class="ovcid" href="${esc(prUrl({ repo: PR_REPO, num: g.n }))}" target="_blank" rel="noopener">PR #${g.n}</a><span class="ovt">${g.cards.map((c) => `${ovCid(c.id)} `).join('')}</span>`)).join('')
+    : ovNil('没有卡等着收账 —— PR 全合而卡未收终态的情况,当前为零。')) +
+    (ovHold.length ? ovNil('挂起中(卡上写了 settleHold,看板与守卫都闭嘴):') +
+      ovHold.map((c) => ovCard(c.id, c.title, esc(settleHold(c.e)))).join('') : ''),
+})
+
+// ⑤ 沉睡:ready + 一个 PR 都没挂 + 超 RESP_DORM 天没动;gen 只烤日期,天数与筛选在浏览器
+const ovDormCards = !OVERVIEW || !RESP ? [] : b.items
+  .map((it) => ({ it, d: (CARDS_DIR && cardUpd(it.id)) || dormantDate(it) }))
+  .filter((x) => dormantDate(x.it) && x.d && !prsOfCard(x.it, PR_REPO).length)
+const OV_DORM = !OVERVIEW || !RESP ? '' : ovRow({
+  k: 'dorm', label: '沉睡',
+  head: `<b><span data-ovdormn>—</span></b> 张`,
+  tail: `ready · 无 PR · 超 ${RESP_DORM} 天没动`,
+  body: ovDormCards.map((x) => ovCard(x.it.id, x.it.title, '<span class="ovwhy"></span>', ` data-dorm="${esc(x.d)}" hidden`).replace('class="ovline"', 'class="ovline ovdormrow"')).join('') +
+    `<div class="ovnil ovdormnil" hidden>没有沉睡的卡。</div>`,
+})
+
+// ⑥ 近 7 天动过的卡:更新日 = 卡文件最后提交日(cardsDir 开才有这个事实);窗口在浏览器里算。
+// 超出 OV_RECENT_MAX 的不逐张烤,只烤「日期:张数」的游程 —— 日期已降序,「近 7 天还有几张」是个前缀和。
+const ovUpd = !OVERVIEW || !CARDS_DIR ? [] : [...m.tasks, ...b.items, ...dm.entries]
+  .map((c) => ({ id: String(c.id), title: String(c.title || ''), d: cardUpd(c.id) }))
+  .filter((x) => x.d)
+  .sort((a, b2) => (a.d < b2.d ? 1 : a.d > b2.d ? -1 : 0))
+const OV_RECENT = !OVERVIEW || !CARDS_DIR ? '' : ovRow({
+  k: 'recent', label: '近 7 天', cls: 'ov-quiet',
+  head: `<b><span data-ovrecn>—</span></b> 张动过`,
+  tail: '卡文件最后提交日',
+  body: ovUpd.slice(0, OV_RECENT_MAX).map((x) => ovCard(x.id, x.title, esc(x.d.slice(5)), ` data-upd="${esc(x.d)}" hidden`).replace('class="ovline"', 'class="ovline ovrecrow"')).join('') +
+    `<span class="ovrest" data-ovrest="${esc((() => {
+      const out = []
+      for (const x of ovUpd.slice(OV_RECENT_MAX)) {
+        const last = out[out.length - 1]
+        if (last && last[0] === x.d) last[1]++
+        else out.push([x.d, 1])
+      }
+      return out.map(([d, n]) => `${d}:${n}`).join(',')
+    })())}" hidden></span>` +
+    `<div class="ovnil ovmore" hidden></div>` + `<div class="ovnil ovrecnil" hidden>近 ${OV_RECENT_DAYS} 天没有卡动过。</div>`,
+})
+
+// ⑦ 发布:三段计数(prod 带最新版本号),条长按三段里的最大值归一
+const ovStageColor = { dev: 'var(--accent)', test: tk('warn-ink'), prod: BRAND_TK }
+const OV_REL = !OVERVIEW || !REL ? '' : ovRow({
+  k: 'rel', label: '发布',
+  head: REL_STAGES.map((s) => `${esc(s.id)} <b>${REL_COUNT[s.id] || 0}</b>`).join(' / ') + (REL_LATEST ? ` · 最新 ${esc(REL_LATEST)}` : ''),
+  tail: `<a href="#release">发布进度 ↗</a>`,
+  body: (() => {
+    const mx = Math.max(1, ...REL_STAGES.map((s) => REL_COUNT[s.id] || 0))
+    const bars = REL_STAGES.map((s) => {
+      const n = REL_COUNT[s.id] || 0
+      return `<div class="ovstg" style="--c:${escC(ovStageColor[s.id] || 'var(--mut)')}"><span class="ovsn">${esc(s.label)}${s.hint ? ` · ${esc(s.hint)}` : ''}</span><span class="ovsb"><i style="width:${Math.round(n / mx * 100)}%"></i></span><span class="ovsv">${n}</span></div>`
+    }).join('')
+    const open = REL_ROWS.filter((r) => r.sg.id === 'dev').slice(0, 6)
+    return bars + (open.length ? ovNil('开着的:') + open.map((r) => ovLine(`<a class="ovcid" href="${esc(prUrl({ repo: PR_REPO, num: r.n }))}" target="_blank" rel="noopener">#${r.n}</a><span class="ovt">${esc(String(r.p.title || ''))}</span>`)).join('') : '')
+  })(),
+})
+
+// ⑧ 迭代史:原「进度看板」整块折在页底,一条没删;深链落进折叠内时 routeHash 先把它打开(OV_ROUTE)
+const OV_HIST = !OVERVIEW ? '' : `
+  <details class="iterhist">
+    <summary>迭代史 · ${iterStats.length} 个迭代 · ${m.tasks.length} 个任务<span class="ovhs">原「进度看板」整块折在这里,任务卡深链照旧可达</span></summary>
+    <div class="ovhist">${progressPane}</div>
+  </details>`
+
+const overviewPane = !OVERVIEW ? '' : `
+  <div class="topbar">
+    <h1>${esc(m.instance.label || BRAND + ' · 开发进度')}</h1>
+    <span class="sess">${esc(m.instance.session)}</span>
+    <span class="branch">branch: ${esc(m.instance.branch)}</span>
+  </div>
+  <div class="ovflow">${OV_ITER}${OV_ACC}${OV_READY}${OV_SETTLE}${OV_DORM}${OV_RECENT}${OV_REL}
+  </div>${OV_HIST}
+  <p class="stamp">全部由现有 manifest 与卡文件派生,不新增数据源;天数、7 天窗口与勾选进度都在浏览器里算。</p>`
+
+// 颜色只用既有变量与既有令牌(琥珀走 warn 一族、红沿用 wipbar 的 #d44c47),暗档由 darkStyle 统一包 light-dark()
+const OV_CSS = !OVERVIEW ? '' : `
+  /* ============ 总览(v0.15.0,config.overviewTab)============ */
+  .ovflow { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; margin: 14px 0 0; }
+  .ovrow { border-bottom: 1px solid var(--line); }
+  .ovrow:last-child { border-bottom: 0; }
+  .ovrow > details > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 11px;
+     padding: 11px 15px; font-size: 13.5px; }
+  .ovrow > details > summary::-webkit-details-marker { display: none; }
+  .ovrow > details > summary:hover { background: var(--bg); }
+  .ovk { flex: none; width: 74px; font-size: 11.5px; color: var(--faint); }
+  /* 摘要是一句话:行内文字与 <b> 混排,不做 flex —— flex 容器会把裸文字切成一个个 flex item,
+     「dev 4 / test 9」当场被 gap 拆散。进度条走 inline-block 跟着文字走。 */
+  .ovm { flex: 1; min-width: 0; }
+  .ovm b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ovx { flex: none; color: var(--mut); font-size: 12.5px; }
+  .ovx a, .ovcid { color: var(--accent); text-decoration: none; }
+  .ovx a:hover, .ovcid:hover { text-decoration: underline; }
+  .ovc { flex: none; color: var(--faint); font-size: 10px; transition: transform .14s ease; }
+  .ovrow > details[open] .ovc { transform: rotate(90deg); }
+  .ovb { padding: 2px 15px 14px 100px; font-size: 12.5px; }
+  .ovrow.ov-soft .ovm b { color: ${tk('warn-ink')}; }
+  .ovrow.ov-hard .ovm b { color: #d44c47; }
+  .ovrow.ov-quiet .ovm { color: var(--mut); }
+  .ovbar { display: inline-block; vertical-align: middle; width: 120px; height: 6px; margin-left: 5px;
+     border-radius: 99px; background: var(--line-strong); overflow: hidden; }
+  .ovbar > i { display: block; width: 0; height: 100%; border-radius: 99px; background: ${BRAND_TK}; }
+  .ovline { display: flex; gap: 9px; align-items: baseline; padding: 4px 0; border-top: 1px dashed var(--line); }
+  .ovline:first-child { border-top: 0; }
+  .ovcid { flex: none; font-variant-numeric: tabular-nums; }
+  .ovt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ovwhy { flex: none; color: var(--faint); font-size: 11.5px; }
+  .ovnil { color: var(--faint); padding: 4px 0; }
+  .ovstg { display: flex; align-items: center; gap: 9px; padding: 5px 0; }
+  .ovstg .ovsn { flex: none; width: 128px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ovstg .ovsb { flex: 1; height: 8px; border-radius: 99px; background: var(--line-strong); overflow: hidden; }
+  .ovstg .ovsb > i { display: block; height: 100%; border-radius: 99px; background: var(--c); }
+  .ovstg .ovsv { flex: none; width: 34px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .iterhist { margin: 18px 0 0; border-top: 1px solid var(--line); padding-top: 12px; }
+  .iterhist > summary { list-style: none; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--mut); }
+  .iterhist > summary::-webkit-details-marker { display: none; }
+  .iterhist > summary::before { content: "▸ "; font-size: 10px; }
+  .iterhist[open] > summary::before { content: "▾ "; }
+  .ovhs { margin-left: 9px; font-weight: 400; font-size: 11.5px; color: var(--faint); }
+  .ovhist .topbar h1 { font-size: 17px; }
+  @media (max-width: 720px) {
+    .ovrow > details > summary { flex-wrap: wrap; }
+    .ovk { width: auto; }
+    .ovb { padding-left: 15px; }
+    .ovstg .ovsn { width: 92px; }
+  }`
+
+// 相对天数一律浏览器算(gen 零时间是硬纪律);沉睡阈值与卡头芯片同一个常数
+const OV_JS = !OVERVIEW ? '' : `
+  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    var ovPane = document.getElementById('pane-progress')
+    if (!ovPane) return
+    function ovDays(s) { var t = Date.parse(String(s) + 'T00:00:00'); return isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : null }
+    function ovText(sel, v) { var el = ovPane.querySelector(sel); if (el) el.textContent = String(v) }
+    function ovAges() { // 「积压了几天」:gen 只烤建卡日
+      ovPane.querySelectorAll('[data-ovage]').forEach(function (el) {
+        var d = ovDays(el.getAttribute('data-ovage'))
+        el.textContent = d === null ? '' : d + ' 天'
+      })
+    }
+    function ovDorm() { // 沉睡:超 ${RESP_DORM} 天才现身,数也才算数
+      var n = 0
+      ovPane.querySelectorAll('.ovdormrow').forEach(function (row) {
+        var d = ovDays(row.getAttribute('data-dorm'))
+        var on = d !== null && d > ${RESP_DORM}
+        row.hidden = !on
+        if (on) { n++; var w = row.querySelector('.ovwhy'); if (w) w.textContent = d + ' 天没动' }
+      })
+      ovText('[data-ovdormn]', n)
+      var nil = ovPane.querySelector('.ovdormnil'); if (nil) nil.hidden = n > 0
+    }
+    function ovRecent() { // 近 ${OV_RECENT_DAYS} 天:列最近 ${OV_RECENT_MAX} 张,更远的只报个数(游程表里数)
+      var n = 0
+      ovPane.querySelectorAll('.ovrecrow').forEach(function (row) {
+        var d = ovDays(row.getAttribute('data-upd'))
+        var on = d !== null && d <= ${OV_RECENT_DAYS}
+        row.hidden = !on
+        if (on) n++
+      })
+      var rest = 0, box = ovPane.querySelector('.ovrest')
+      if (box) String(box.getAttribute('data-ovrest') || '').split(',').filter(Boolean).forEach(function (p) {
+        var kv = p.split(':'), d = ovDays(kv[0])
+        if (d !== null && d <= ${OV_RECENT_DAYS}) rest += Number(kv[1]) || 0
+      })
+      ovText('[data-ovrecn]', n + rest)
+      var more = ovPane.querySelector('.ovmore')
+      if (more) { more.hidden = !rest; more.textContent = '还有 ' + rest + ' 张(这里只列最近 ${OV_RECENT_MAX} 张)' }
+      var nil = ovPane.querySelector('.ovrecnil'); if (nil) nil.hidden = (n + rest) > 0
+    }
+    ovAges(); ovDorm(); ovRecent()
+  })()`
+
+// 「可做」随线别/筛选重算:与积压提醒数同一个可见谓词(nVis 是 setLine 内的局部函数)
+const OV_SETLINE = !OVERVIEW ? '' : `
+    const ovN = document.getElementById('ovreadyn')
+    const ovBl = document.getElementById('pane-backlog')
+    if (ovN && ovBl && ovBl.dataset.lazyPending === undefined) { // 未取 pane:保持烤入的数,别先归零再跳
+      const ovV = nVis(ovBl, '.bl-ready')
+      ovN.textContent = ovV${!WIP ? '' : `
+      const ovRow = ovN.closest('.ovrow')
+      if (ovRow) {
+        ovRow.classList.toggle('ov-soft', ovV > ${WIP_SOFT} && ovV <= ${WIP_HARD})
+        ovRow.classList.toggle('ov-hard', ovV > ${WIP_HARD})
+      }`}
+    }`
+
+// 深链落进折叠区(总览页底的迭代史)时先把沿途的 details 全打开,否则跳到 display:none 元素 = 毫无反应
+const OV_ROUTE = !OVERVIEW ? '' : `
+    for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true`
 const REL_CSS = !REL ? '' : `
   /* ============ 发布进度 tab(v0.12.0,config.releaseTab)============ */
   .relbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 9px; }
@@ -3339,8 +3858,8 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
 // 关 = HTML / CSS / JS / 两处同步全为空串,产物逐字节冻结。
 const TABRAIL = cfg.tabRail === true
 const TABBAR_HTML = `<div class="tabbar">
-    <button class="tab tab-active" data-pane="progress">进度看板</button>
-    ${pm ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
+    <button class="tab tab-active" data-pane="progress">${OVERVIEW ? '总览' : '进度看板'}</button>
+    ${PATH_ON ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
     <button class="tab" data-pane="decisions" data-label="决策/Demo">决策/Demo · ${decCount}</button>
     <button class="tab${WIP_TAB_CLS}" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}${REL_TAB}
     <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>${ARCH_TAB}
@@ -3736,106 +4255,7 @@ const html = `<!doctype html>
   .refchip { color: #7c3aed; background: ${tk('ref-bg')}; }
   .refchip:hover { background: #e6dbf7; }
 
-  /* ============ 决策路径 pane ============ */
-  .secband { display: flex; align-items: baseline; gap: 10px; margin: 34px 0 4px; padding-bottom: 6px;
-             border-bottom: 2px solid var(--line); }
-  .secband.first { margin-top: 10px; }
-  .secband h2 { margin: 0; font-size: 17px; }
-  .secband h2 span { font-size: 13px; font-weight: 400; color: var(--mut); margin-left: 8px; }
-  .secband-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; }
-  .secband-links a { color: var(--accent); text-decoration: none; }
-  .secband-links a:hover { text-decoration: underline; }
-
-  /* ① 理念转向 */
-  .shift { display: grid; grid-template-columns: 1fr 46px 1fr; gap: 10px; margin: 14px 0; }
-  .shift-lane { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card); }
-  .shift-lane.from { border-left: 3px solid #a8a29e; }
-  .shift-lane.to { border-left: 3px solid ${BRAND_TK}; background: ${tk('brand-tint')}; }
-  .shift-tag { display: inline-block; font-size: 12px; font-weight: 700; color: #fff; border-radius: 6px;
-               padding: 1px 9px; margin-bottom: 7px; }
-  .shift-lane.from .shift-tag { background: #a8a29e; }
-  .shift-lane.to .shift-tag { background: ${BRAND_TK}; }
-  .shift-lane p { margin: 0; font-size: 13px; color: ${tk('body-ink')}; line-height: 1.6; }
-  .shift-arrow { display: grid; place-items: center; gap: 2px; color: ${BRAND_TK}; }
-  .shift-arrow::before { content: "→"; font-size: 22px; font-weight: 700; }
-  .shift-arrow span { font-size: 10.5px; color: var(--mut); }
-  .pivot { font-size: 13px; color: ${tk('body-ink')}; line-height: 1.6; background: ${tk('paper-tint')};
-           border: 1px solid var(--line); border-left: 3px solid #d97706; border-radius: 10px; padding: 10px 14px; }
-  .pivot-lbl { display: inline-block; font-size: 11px; font-weight: 700; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
-               border: 1px solid #fde68a; border-radius: 6px; padding: 0 7px; margin-right: 8px; }
-  .principles { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; background: var(--card); }
-  .pr-lbl { font-size: 12.5px; font-weight: 700; color: ${BRAND_TK}; }
-  .principles ul { margin: 8px 0 2px; padding-left: 20px; columns: 2; column-gap: 26px; }
-  .principles li { font-size: 12.5px; color: ${tk('body-ink')}; line-height: 1.5; margin: 3px 0; break-inside: avoid; }
-  @media (max-width: 720px) { .shift { grid-template-columns: 1fr; } .shift-arrow::before { content: "↓"; } .principles ul { columns: 1; } }
-
-  /* ② demo 探索历程 */
-  .demorail { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
-  .demonode { flex: 1 1 150px; min-width: 138px; display: flex; flex-direction: column; gap: 3px;
-              text-decoration: none; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
-              background: var(--card); color: var(--ink); }
-  .demonode:hover { border-color: var(--accent); }
-  .demonode.flag { border-color: ${BRAND_TK}; background: ${tk('brand-tint')}; box-shadow: 0 1px 6px ${tk('flag-glow')}; }
-  .dn-id { font-size: 11px; font-weight: 700; color: var(--mut); font-family: ui-monospace, monospace; }
-  .demonode.flag .dn-id { color: ${BRAND_TK}; }
-  .dn-name { font-size: 14px; font-weight: 700; }
-  .dn-bet { font-size: 11.5px; color: ${tk('sub-ink')}; line-height: 1.45; }
-  .dn-role { font-size: 11px; color: var(--mut); margin-top: 2px; }
-  .railnote { font-size: 12px; color: var(--mut); margin: 6px 0 0; }
-  .roundhdr { margin: 20px 0 8px; font-size: 13.5px; font-weight: 700; color: ${tk('body-ink')}; }
-  .rounds { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px 0; }
-  .roundnode { flex: 1 1 150px; min-width: 148px; border: 1px solid var(--line); border-radius: 10px;
-               padding: 8px 10px; background: var(--card); display: flex; gap: 8px; }
-  .rn-n { font-size: 12px; font-weight: 700; color: #fff; background: ${BRAND_TK}; border-radius: 6px;
-          padding: 1px 6px; height: fit-content; white-space: nowrap; }
-  .rn-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .rn-body b { font-size: 12.5px; }
-  .rn-body span { font-size: 11px; color: var(--mut); line-height: 1.4; }
-  .rn-link { flex: 0 0 10px; align-self: center; height: 2px; background: var(--line); }
-
-  /* ③ 拍板项 → D 码 */
-  .pins { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin: 12px 0; }
-  .pin { border: 1px solid var(--line); border-left: 3px solid #d97706; border-radius: 12px;
-         padding: 12px 14px; background: var(--card); display: flex; flex-direction: column; gap: 7px; }
-  .pin header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-  .pin-id { font-size: 11px; font-weight: 700; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
-            border: 1px solid #fde68a; border-radius: 6px; padding: 0 7px; }
-  .pin header b { font-size: 14.5px; }
-  .pin-arrow { margin-left: auto; font-size: 12px; font-weight: 700; color: ${BRAND_TK}; text-decoration: none;
-               background: ${tk('ok-bg-faint')}; border: 1px solid #b8e2da; border-radius: 999px; padding: 2px 10px; }
-  .pin-arrow:hover { background: #e0f3ee; }
-  .pin-row { display: grid; grid-template-columns: 72px 1fr; gap: 8px; font-size: 12.5px; color: ${tk('body-ink')}; line-height: 1.5; }
-  .pin-lbl { font-weight: 600; color: var(--mut); }
-  .pin-lbl.land { color: ${BRAND_TK}; }
-
-  /* ④ C1→C10 时间线泳道 */
-  .timeline { margin: 14px 0 0; }
-  .tlband { display: grid; grid-template-columns: 52px 1fr; gap: 6px; }
-  .tl-rail { display: flex; justify-content: center; position: relative; }
-  .tl-rail::before { content: ""; position: absolute; top: 12px; bottom: -6px; left: 50%; width: 2px;
-                     margin-left: -1px; background: var(--line); z-index: 0; }
-  .tlband:last-child .tl-rail::before { display: none; }
-  .tl-dot { position: relative; z-index: 1; width: 36px; height: 24px; border-radius: 8px; display: grid;
-            place-items: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); margin-top: 6px; }
-  .tl-main { padding: 4px 0 18px; min-width: 0; }
-  .tl-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
-  .tl-head b { font-size: 14.5px; }
-  .tl-task { font-size: 12px; color: var(--accent); text-decoration: none; }
-  .tl-task:hover { text-decoration: underline; }
-  .tl-st { font-size: 11px; font-weight: 600; color: #fff; background: var(--c); border-radius: 999px; padding: 1px 8px; }
-  .tl-lane { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; font-size: 12.5px; }
-  .tl-lbl { flex: 0 0 34px; color: var(--mut); font-weight: 600; padding-top: 2px; }
-  .tl-chips { display: flex; flex-wrap: wrap; gap: 5px 6px; min-width: 0; }
-  .tl-dec { text-decoration: none; border-radius: 7px; padding: 2px 9px; font-weight: 600; font-size: 12px; }
-  .tl-dec.decide { color: ${tk('ok-ink-deep')}; background: ${tk('ok-bg')}; border: 1px solid #a7ddca; }
-  .tl-dec.land { color: var(--mut); background: var(--bg); border: 1px dashed var(--line); }
-  /* D 码 chip 是跨 tab 链接(#Dxx → 决策卡定位+闪烁),hover 给明确的「可点」信号 */
-  .tl-dec:hover { border-color: var(--accent); border-style: solid; color: var(--accent-deep); background: var(--accent-soft); }
-  .tl-sec { text-decoration: none; color: ${tk('sec-ink')}; background: ${tk('sec-bg')}; border-radius: 7px; padding: 2px 9px;
-            font-weight: 600; font-size: 12px; }
-  .tl-sec:hover { background: #d7e6ee; }
-  .tl-demonote { color: ${tk('note-ink')}; line-height: 1.5; }
-  .tl-implnote { color: var(--mut); font-style: italic; }
+${PATH_CSS_A}
 
   [id] { scroll-margin-top: 58px; } /* 锚点跳转别钻到吸顶栏底下 */
   .flash-target { animation: flashpulse 1.6s ease; border-radius: 12px; }
@@ -3879,45 +4299,7 @@ const html = `<!doctype html>
   .rbody .blbadges { margin-top: 10px; }
   .search-hide { display: none !important; }
 
-  /* ============ 三纪元脊柱(决策路径顶部:A 委托单 → B 台账 → C 提单)============ */
-  .epochs { display: grid; gap: 0; margin: 16px 0 24px; }
-  .epoch { display: grid; grid-template-columns: 132px 1fr; gap: 14px; position: relative; padding-bottom: 16px; }
-  .epoch:not(:last-child)::before { content: ""; position: absolute; left: 21px; top: 28px; bottom: -2px;
-                     width: 2px; background: var(--line); }
-  .ep-rail { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; position: relative; z-index: 1; }
-  .ep-tag { font-size: 12.5px; font-weight: 800; color: #fff; border-radius: 7px; padding: 3px 12px; letter-spacing: .02em; }
-  .ep-period { font-size: 11px; color: var(--faint); font-family: ui-monospace, monospace; }
-  .ep-body { border: 1px solid var(--line); border-radius: 12px; padding: 12px 15px; background: var(--card);
-             transition: border-color .15s, box-shadow .15s; }
-  .ep-name { font-size: 15.5px; font-weight: 700; margin-bottom: 6px; }
-  .ep-axis, .ep-how { margin: 4px 0; font-size: 12.5px; color: ${tk('body-ink')}; line-height: 1.55; }
-  .ep-axis b, .ep-how b { display: inline-block; min-width: 4.4em; margin-right: 8px; font-size: 11px;
-             font-weight: 700; color: var(--mut); }
-  .ep-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 9px; padding-top: 8px;
-             border-top: 1px dashed var(--line); font-size: 11.5px; }
-  .ep-tally { color: var(--mut); font-family: ui-monospace, monospace; }
-  .ep-see { color: var(--accent); }
-  .epoch.ep-A { --c-ep: #b5843a; } .epoch.ep-B { --c-ep: #7a8590; } .epoch.ep-C { --c-ep: ${BRAND_TK}; }
-  .epoch.ep-A .ep-tag { background: #b5843a; } .epoch.ep-B .ep-tag { background: #7a8590; } .epoch.ep-C .ep-tag { background: ${BRAND_TK}; }
-  /* 筛某条线时:该纪元描边高亮(全景始终清晰可读,不淡出其余纪元) */
-  .wrap[data-line="A"] .epoch.ep-A .ep-body, .wrap[data-line="B"] .epoch.ep-B .ep-body, .wrap[data-line="C"] .epoch.ep-C .ep-body {
-     border-color: color-mix(in srgb, var(--c-ep) 45%, var(--line)); box-shadow: 0 1px 10px color-mix(in srgb, var(--c-ep) 14%, transparent); }
-  @media (max-width: 640px) { .epoch { grid-template-columns: 1fr; } .epoch::before { display: none; } }
-
-  /* §标题前的线路字母 chip */
-  .secband h2 .sec-line { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px;
-     color: #fff; font-size: 12px; font-weight: 800; margin-right: 3px; vertical-align: -3px; }
-  .sec-line.line-A { background: #b5843a; } .sec-line.line-B { background: #7a8590; } .sec-line.line-C { background: ${BRAND_TK}; }
-  .secband h2 .sub { font-size: 13px; font-weight: 400; color: var(--mut); margin-left: 8px; }
-
-  /* A 线 demo rail(卡内含「打开 demo」+「决策卡↗」两段) */
-  .demorail.arail .anode { flex: 1 1 158px; min-width: 152px; display: flex; flex-direction: column;
-     border: 1px solid var(--line); border-left: 3px solid #b5843a; border-radius: 10px; background: var(--card); overflow: hidden; }
-  .anode .dn-main { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: var(--ink); padding: 9px 11px 8px; }
-  .anode:hover { border-color: #b5843a; }
-  .anode .dn-jump { font-size: 11px; color: var(--accent); text-decoration: none; padding: 5px 11px;
-     border-top: 1px dashed var(--line); background: ${tk('faint-bg')}; }
-  .anode .dn-jump:hover { background: #f0f6fb; }
+${PATH_CSS_B}
 
   /* hubbar 搜索框 */
   #hubsearch { appearance: none; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--card);
@@ -3941,7 +4323,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -3959,8 +4341,8 @@ const html = `<!doctype html>
 </nav>${LAZY_BAR}${TABRAIL_HTML}
 <div class="wrap" data-line="all">${LANE.lineHintsHtml}
   ${TABBAR_HTML}
-  <section class="pane pane-active" id="pane-progress">${progressPane}</section>
-  ${pm ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
+  <section class="pane pane-active" id="pane-progress">${OVERVIEW ? overviewPane : progressPane}</section>
+  ${PATH_ON ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
   <section class="pane" id="pane-decisions"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : decisionsPane}</section>
   <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>${ACC_PANE_HTML}${REL_PANE_HTML}
   <section class="pane" id="pane-docs">${docsPane}</section>${ARCH_PANE_HTML}
@@ -3984,11 +4366,11 @@ const html = `<!doctype html>
     if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}${REL_SHOW}
   }
   tabs.forEach((t) => t.addEventListener('click', () => { show(t.dataset.pane); history.replaceState(null, '', t.dataset.pane === 'progress' ? '#' : '#' + t.dataset.pane) }))
-  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}${ARCH_PANE_ID}])
+  const PANES = new Set(['progress'${PATH_PANE_ID}, 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}${ARCH_PANE_ID}])
   function routeHash() {
     const id = decodeURIComponent(location.hash.slice(1))
     if (!id) return
-    if (PANES.has(id)) { show(id); return }
+    ${PATH_ROUTE}if (PANES.has(id)) { show(id); return }
     const el = document.getElementById(id)
     ${LAZY_ROUTE}if (!el) return
     const pane = el.closest('.pane')
@@ -4002,7 +4384,7 @@ const html = `<!doctype html>
       if (el.classList.contains('flt-hide')) toolbars.forEach((tb) => tb.clearAll()) // 被工具条筛掉:放开筛选再跳
     }
     const ppanel = el.closest('.pathpanel') // 目标在某步详情面板里(如决策路径跳 TCx 任务卡)→ 先激活该面板
-    if (ppanel) selectIter(ppanel.dataset.iter)
+    if (ppanel) selectIter(ppanel.dataset.iter)${OV_ROUTE}
     if (el.classList.contains('rcard')) el.classList.add('open') // 跳到某卡时自动展开看详情
     el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     el.classList.add('flash-target')
@@ -4082,7 +4464,7 @@ const html = `<!doctype html>
     document.querySelectorAll('.tab[data-label]').forEach((t) => {
       const pane = document.getElementById('pane-' + t.dataset.pane)
       ${LAZY_BADGE}if (pane) t.textContent = t.dataset.label + ' · ' + nVis(pane, '.lcard')
-    })${WIP_SETLINE}${TABRAIL_BADGE}
+    })${WIP_SETLINE}${OV_SETLINE}${TABRAIL_BADGE}
     // 汇总行(决策/Backlog 各一条):总数 + 分状态 chip 重算
     // 进度条按线路重算(与 gen 同口径:separate 不计;非全部档加线路前缀)
     const pbi = document.querySelector('#pane-progress .pbar i')
@@ -4363,7 +4745,7 @@ ${LANE.savedLineJs}
   let savedTf = 0
   try { savedTf = Number(localStorage.getItem('${LANE.lsTfKey}') || 0) || 0 } catch (e) {}
   setTime(savedTf) // 内部会 setLine(curLine)
-  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}${RESP_JS}${TABRAIL_JS}
+  routeHash() // 初始 hash 路由放最后:此时 setLine/setTime/wrapEl 都就位,跳隐藏卡能先放开筛选${DK_TOGGLE_JS}${ACC_JS}${REL_JS}${RICH_JS}${RESP_JS}${TABRAIL_JS}${OV_JS}
 </script>
 `
 

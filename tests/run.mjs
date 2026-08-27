@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。647 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。703 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -13,7 +13,9 @@
 // 写操作 CLI(建卡的号靠 openSync 'wx' 预留 —— 真起两个进程并发验 / 六种校验拒绝 / 时间线 /
 // 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)、
 // 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)、
-// 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门)等。
+// 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门)、
+// 总览落地页 overviewTab(四拍冻结 × lazy 开关 / 各行随数据源出没 / 迭代史折叠含原任务表 / 深链先展开折叠)、
+// 决策路径入文档库 pathTab:"docs"(四拍冻结 / refs 文档页 + Hub 条目 / 相对链接各退一级 / #path 改落文档库 / out 撞名硬报错)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -2771,6 +2773,277 @@ console.log('T55 左侧竖向 tab 导航 tabRail')
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, fx55.kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
+// ============ T56 总览落地页 overviewTab(opt-in;未配/false = 字节冻结,开 = 叙事流 + 迭代史折叠)============
+console.log('T56 总览落地页 overviewTab')
+{
+  const fx56 = mkFixture('fx56', { 's.html': demoHtml('s') })
+  const kb = fx56.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const mP = join(kb, 'manifest.json'), blP = join(kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), bl = rd(blP)
+  mm.instance.planDoc = ''
+  mm.iterations = [{ id: 'I1', title: '迭代甲', detail: '收完了' }, { id: 'I2', title: '迭代乙', detail: '在做' }]
+  mm.tasks = [
+    { id: 'T1', iteration: 'I1', status: 'done', title: '任务甲', approach: 'a' },
+    { id: 'T2', iteration: 'I2', status: 'active', title: '任务乙', approach: 'a' },
+    { id: 'T3', iteration: 'I2', status: 'planned', title: '任务丙', approach: 'a' },
+  ]
+  bl.tiers = { 1: '核心' }
+  const item = (id, date, title) => ({ id, status: 'ready', priority: 'high', tier: '1', date, title, problem: 'p', approach: 'a', area: 'x', source: 's' })
+  bl.items = [item('BL-1', '2026-01-01', '待办甲'), item('BL-2', '2026-02-02', '待办乙'), { ...item('BL-3', '2026-03-03', '旧账丙'), status: 'done' }]
+  wr(mP, mm); wr(blP, bl)
+  const cfg = rd(cfgP)
+  cfg.wip = { soft: 1, hard: 5 } // 2 张 ready → 软档,验「可做」那行的琥珀色跟 wip 同一套阈值
+  wr(cfgP, cfg)
+
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(off.includes('data-pane="progress">进度看板<') && !off.includes('ovflow') && !off.includes('iterhist'),
+    '未配 overviewTab:第一个 tab 还是「进度看板」,壳里零总览痕迹')
+  cfg.overviewTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, 'overviewTab:false 与未配逐字节相同(冻结)')
+
+  cfg.overviewTab = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'overviewTab:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('data-pane="progress">总览<') && !on.includes('>进度看板<'), 'tab 文案改「总览」,pane id 仍是 progress(hash 不变)')
+  const pane = on.slice(on.indexOf('id="pane-progress"'), on.indexOf('id="pane-decisions"'))
+  const rows = [...pane.matchAll(/data-ovrow="([a-z]+)"/g)].map((x) => x[1])
+  ok(rows.join(',') === 'iter,ready', '数据源缺席的行整行不渲染:只出「迭代」与「可做」两行', rows.join(','))
+  ok(/data-ovrow="iter"[\s\S]*?<b>I2<\/b> · 迭代甲?乙/.test(pane) && pane.includes('href="#T2"'),
+    '迭代行 = manifest 里 active 的那个迭代 + 它进行中的任务', (pane.match(/data-ovrow="iter"[\s\S]{0,220}/) || [''])[0].slice(0, 220))
+  ok(pane.includes('<b><span id="ovreadyn">2</span></b> 张 ready') && pane.includes('href="#backlog"'),
+    '可做行 = backlog ready 数(done 不算)+ 链 #backlog')
+  ok(/class="ovrow ov-soft" data-ovrow="ready"/.test(pane), '可做行按 wip 阈值挂琥珀档(soft)')
+  const hist = pane.slice(pane.indexOf('<details class="iterhist">'))
+  ok(hist.includes('迭代史 · 2 个迭代 · 3 个任务'), '迭代史摘要 = 迭代数 · 任务数', (hist.match(/<summary>[^<]*/) || [''])[0])
+  ok(hist.includes('class="pathmap"') && hist.includes('id="T1"') && hist.includes('id="T3"'),
+    '原「进度看板」整块折进迭代史,任务卡一条没删')
+  ok(on.includes("for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true"),
+    '深链命中折叠内元素时先把沿途 details 打开(否则跳到 display:none 元素毫无反应)')
+  ok(on.includes('const ovN = document.getElementById(\'ovreadyn\')') && on.includes("nVis(ovBl, '.bl-ready')"),
+    '可做数随线别/筛选重算,与积压提醒同一个可见谓词')
+  { // 「不引新色」的真检法:总览段里出现的每个色值,样式表前面都已经在用(令牌 tk()/BRAND_TK 未换装时是字面量)
+    const styleAll = on.slice(on.indexOf('<style>'), on.indexOf('</style>'))
+    const cut = styleAll.indexOf('/* ============ 总览(v0.15.0')
+    const ovCss = styleAll.slice(cut), before = styleAll.slice(0, cut)
+    const hexes = [...new Set(ovCss.match(/#[0-9a-fA-F]{3,8}\b/g) || [])]
+    ok(ovCss.length > 500 && hexes.length > 0 && hexes.every((h) => before.includes(h)),
+      '总览 CSS 不引新色:每个色值样式表前面都已在用(暗档自然跟着同一条 light-dark 链)',
+      hexes.filter((h) => !before.includes(h)).join(' ') || ovCss.length + ' 字符')
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  cfg.overviewTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+
+  // ---- 同一套四拍在 lazyTabs 开着时再走一遍(总览住在壳里,不进 parts)----
+  cfg.lazyTabs = true
+  delete cfg.overviewTab
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const lzSha = sha(idxP)
+  cfg.overviewTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === lzSha, 'lazy 开着时 overviewTab:false 也与未配逐字节相同')
+  cfg.overviewTab = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const lzOn = readFileSync(idxP, 'utf8')
+  ok(lzOn.includes('class="ovflow"') && lzOn.includes('id="T2"') && !existsSync(join(kb, 'parts', 'progress.html')),
+    'lazy 开着时总览连同迭代史都留在壳里(第一屏不该等 fetch)')
+  cfg.overviewTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === lzSha, 'lazy 档下关回后同样逐字节回基线')
+}
+
+// ============ T57 总览各行按数据源在场与否出没(逐个撤掉数据源,行跟着消失)============
+console.log('T57 总览各行随数据源出没')
+{
+  const fx57 = mkFixture('fx57', { 's.html': demoHtml('s') })
+  const kb = fx57.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const mP = join(kb, 'manifest.json'), blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const relP = join(kb, 'release-manifest.json'), accP = join(kb, 'acceptance-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), bl = rd(blP), dec = rd(decP)
+  for (const x of [mm, bl, dec]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  mm.iterations = [{ id: 'I1', title: '迭代甲', detail: '在做' }]
+  mm.tasks = [{ id: 'T1', iteration: 'I1', status: 'active', title: '任务甲', approach: 'a' }]
+  bl.tiers = { 1: '核心' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', date: '2020-01-01', title: '睡了很久的甲', problem: 'p', approach: 'a', area: 'x', source: 's' },
+    { id: 'BL-2', status: 'ready', priority: 'high', tier: '1', date: '2026-02-02', title: '待收账的乙', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 227 },
+    { id: 'BL-3', status: 'ready', priority: 'high', tier: '1', date: '2026-02-03', title: '挂起的丙', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 227, settleHold: '这一轮只落了一半' },
+  ]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲', pr: 230 }]
+  wr(mP, mm); wr(blP, bl); wr(decP, dec)
+  wr(relP, REL_MANIFEST)
+  wr(accP, { current: 230, lists: [ACC_LIST] })
+  const cfg = rd(cfgP)
+  cfg.overviewTab = true
+  cfg.acceptanceTab = true
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  const sp = runScript('cards-split.mjs', kb) // 它自己往 config 写 cardsDir(反向 cards-join 再删掉)
+  ok(sp.status === 0, 'T57 一卡一文件拆分 exit 0', sp.stderr)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, '七行齐活时 gen exit 0', r.stderr)
+  const rowsOf = () => {
+    const s = readFileSync(idxP, 'utf8')
+    const pane = s.slice(s.indexOf('id="pane-progress"'), s.indexOf('id="pane-decisions"'))
+    return [...pane.matchAll(/data-ovrow="([a-z]+)"/g)].map((x) => x[1]).join(',')
+  }
+  ok(rowsOf() === 'iter,acc,ready,settle,dorm,recent,rel', '数据源齐全:七行按叙事顺序全在', rowsOf())
+  {
+    const s = readFileSync(idxP, 'utf8')
+    const pane = s.slice(s.indexOf('id="pane-progress"'), s.indexOf('id="pane-decisions"'))
+    ok(pane.includes('<span data-acc="230">0/4</span>') && pane.includes('href="#acc-230"'),
+      '在验收行:分母烤入、分子留给 accSync(与卡头芯片同一把钥匙)', (pane.match(/data-acc="230">[^<]*/) || [''])[0])
+    ok(pane.includes('class="ovbar"'), '在验收行带迷你进度条')
+    ok(/data-ovrow="settle"[\s\S]*?<b>1<\/b> 张 · 挂起 <b>1<\/b> 张/.test(pane),
+      '待收账行:settle 与 settleHold 分开数(挂起的不并进待收账)', (pane.match(/data-ovrow="settle"[\s\S]{0,180}/) || [''])[0].slice(0, 180))
+    ok(pane.includes('data-dorm="2020-01-01"') || /data-dorm="\d{4}-\d{2}-\d{2}"/.test(pane),
+      '沉睡行只烤日期,天数留给浏览器算(gen 零时间)')
+    ok(/class="ovline ovrecrow" data-upd="\d{4}-\d{2}-\d{2}" hidden/.test(pane) && /data-ovrest="[^"]*"/.test(pane),
+      '近 7 天行:每张只烤日期、默认藏起来,超出上限的卡烤成「日期:张数」游程(不逐张进壳)',
+      (pane.match(/data-ovrest="[^"]*"/) || [''])[0])
+    ok(/data-ovrow="rel"[\s\S]*?dev <b>3<\/b> \/ test <b>1<\/b> \/ prod <b>1<\/b>/.test(pane),
+      '发布行:三段计数与发布进度 tab 同一份 stageOf 口径', (pane.match(/data-ovrow="rel"[\s\S]{0,200}/) || [''])[0].slice(0, 200))
+  }
+  // ---- 逐个撤掉数据源 ----
+  const cfgA = rd(cfgP)
+  cfgA.acceptanceTab = false
+  wr(cfgP, cfgA)
+  runGen(NEW_SCRIPTS, kb)
+  ok(rowsOf() === 'iter,ready,settle,dorm,recent,rel', '关掉验收:在验收行整行消失,其余不动', rowsOf())
+  const jn = runScript('cards-join.mjs', kb) // 合回单文件,顺手把 config 的 cardsDir 删掉
+  ok(jn.status === 0, 'T57 卡合回头 manifest exit 0', jn.stderr)
+  runGen(NEW_SCRIPTS, kb)
+  ok(rowsOf() === 'iter,ready,settle,dorm,rel', '关掉 cardsDir:近 7 天那行消失(没有卡文件就没有更新日这个事实)', rowsOf())
+  const cfg2 = rd(cfgP)
+  cfg2.releaseTab = false
+  wr(cfgP, cfg2)
+  rmSync(relP)
+  runGen(NEW_SCRIPTS, kb)
+  ok(rowsOf() === 'iter,ready', '撤掉 release-manifest:待收账 / 沉睡 / 发布 三行一起消失', rowsOf())
+  const mm3 = rd(mP)
+  mm3.tasks[0].status = 'done'
+  wr(mP, mm3)
+  runGen(NEW_SCRIPTS, kb)
+  ok(rowsOf() === 'ready', '没有 active 迭代:迭代行也不硬撑', rowsOf())
+}
+
+// ============ T58 决策路径入文档库 pathTab:"docs"(未配 = 字节冻结,开 = 一篇 refs 文档 + hub 条目 + #path 路由)============
+console.log('T58 决策路径入文档库 pathTab')
+const PATH_MANIFEST = {
+  demoBase: 'http://127.0.0.1:8890/',
+  demoBrief: '', demoHandover: '',
+  pivot: '当时为什么拐这个弯',
+  principles: ['原则甲', '原则乙'],
+  epochs: [
+    { line: 'A', period: '2026-01 – 02', name: '纪元甲', axis: '主轴甲', how: '先做对比 demo 再拍板', tally: '7 项决策', see: '决策卡 AD1' },
+    { line: 'C', period: '2026-03 –', name: '纪元丙', axis: '主轴丙', how: 'demo 成熟', tally: '9 项决策', see: '决策卡 D1' },
+  ],
+  rounds: [{ n: '1', title: '第一轮', gist: '要点甲' }],
+  demos: [{ id: 'demo-1', name: 'demo 甲', file: 'demo-1.html', bet: '赌注甲', role: '角色甲', flagship: true }],
+  aDemos: [{ id: 'AD1', name: 'A demo 甲', file: 'a1.html', gist: '对比要点' }],
+  pinboard: [{ id: 'P1', no: '第一条', title: '拍板甲', becameD: 'D1', demoDefault: '默认甲', landed: '落地甲' }],
+}
+{
+  const fx58 = mkFixture('fx58', { 's.html': demoHtml('s') })
+  const kb = fx58.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const decP = join(kb, 'decisions-manifest.json'), pathP = join(kb, 'path-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const dec = rd(decP)
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲' }]
+  wr(decP, dec)
+  wr(pathP, PATH_MANIFEST)
+
+  runGen(NEW_SCRIPTS, kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(off.includes('data-pane="path">决策路径<') && off.includes('id="pane-path"'), '未配 pathTab:「决策路径」tab 与 pane 照旧在')
+  ok(!existsSync(join(kb, 'refs', 'design-path.html')), '未配 pathTab:不写 refs/design-path.html')
+  const cfg = rd(cfgP)
+  cfg.pathTab = false // 非 "docs" 的值一律按未配处理(只出一条 warn)
+  wr(cfgP, cfg)
+  const rf = runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, 'pathTab 非 "docs" 与未配逐字节相同(冻结)')
+  ok(/未知 pathTab/.test(rf.stderr), '非法值出一条 warn,不静默', (rf.stderr || '').slice(0, 90))
+
+  cfg.pathTab = 'docs'
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'pathTab:"docs" gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(!on.includes('data-pane="path"') && !on.includes('id="pane-path"'), 'tab 与 pane 都不再渲染')
+  ok(/const PANES = new Set\(\['progress', 'decisions'/.test(on), 'PANES 集合跟着少一项', (on.match(/const PANES = new Set\([^)]*\)/) || [''])[0])
+  ok(on.includes('文档库 · 1'), '文档库计数把这一篇算进去(config.docs 是空的,这篇就是唯一一篇)')
+  ok(on.includes('href="refs/design-path.html" data-doc="design-path.html"') && on.includes('<h3>设计路径(A→B→C)</h3>'),
+    'Hub 里长出这条目')
+  ok(/<span class="dcat">交接与接手<\/span>/.test(on), '默认落在「交接与接手」类(docSegments 把它归到「流程」段)')
+  ok(on.includes("if (id === 'path') { // 决策路径已搬进文档库") && on.includes("document.querySelector('.doccard[data-doc=\"design-path.html\"]')"),
+    '老的 #path 深链改落到文档库那条目(历史链接不死)')
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  const docp = join(kb, 'refs', 'design-path.html')
+  ok(existsSync(docp), 'refs/design-path.html 已生成')
+  const doc = readFileSync(docp, 'utf8')
+  ok(doc.includes('<nav id="refnav"><a class="back" href="../index.html">← 决策看板</a>') && doc.includes('app/kanban/path-manifest.json'),
+    '套 refs 页壳:返回栏 + 源文件名')
+  ok(doc.includes('<h1>设计路径(A→B→C)</h1>') && doc.includes('<title>设计路径(A→B→C) · HTEST 看板</title>'), '标题两处一致')
+  ok(doc.includes('原则甲') && doc.includes('原则乙') && doc.includes('纪元甲') && doc.includes('纪元丙') && doc.includes('当时为什么拐这个弯'),
+    '内容 = pathPane 的主体:原则、纪元、转折点一样不少(数据一条没删)')
+  ok(doc.includes('href="../index.html#D1"'), '跳决策卡的 #锚 改指回 index.html(在文档页里没有落点)')
+  ok(doc.includes('href="../demos/a1.html"'), 'demos/ 相对链接退一级')
+  ok(doc.includes('href="http://127.0.0.1:8890/demo-1.html"'), '站外绝对地址原样不动')
+  ok(doc.includes('/* ============ 决策路径 pane ============ */') && doc.includes('.pathdoc{--ink:var(--text)'),
+    '样式与看板 pane 同一份规则,靠 .pathdoc 上一层变量别名接住 refs 页的变量名族')
+  ok(!on.includes('id="pane-path"') && on.includes('/* ============ 决策路径 pane ============ */'),
+    '同一份 CSS 常量插值回 index 原位(所以关档能逐字节冻结)')
+
+  // ---- out 撞名:人家的 docs 条目已经占了 design-path.html → 硬报错,不闷声覆盖 ----
+  writeFileSync(join(fx58.root, 'X.md'), '# X\n')
+  const cfg2 = rd(cfgP)
+  cfg2.docs = [{ path: 'X.md', out: 'design-path.html', title: 'X', baseDir: '', category: '其他' }]
+  wr(cfgP, cfg2)
+  const rx = runGen(NEW_SCRIPTS, kb)
+  ok(rx.status !== 0 && /已有条目占了这个 out/.test(rx.stderr), 'out 撞名 → 硬报错', (rx.stderr || '').split('\n')[0].slice(0, 110))
+
+  // ---- 关回:字节回基线,陈迹文件清掉 ----
+  const cfg3 = rd(cfgP)
+  delete cfg3.pathTab
+  cfg3.docs = []
+  wr(cfgP, cfg3)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+  ok(!existsSync(docp), '关回后 refs/design-path.html 陈迹自动清理(照 parts/ 的规矩)')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

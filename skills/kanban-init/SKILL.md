@@ -263,6 +263,40 @@ app/kanban/
 - **不跟人抢地方**:它住在内容列之外的留白里,验收 pane 的分组目录、文档库的左导航都在列内,互不遮挡。
 - **字节冻结**:不配或 `false` 时输出逐字节不变。
 
+## 总览落地页(overviewTab,v0.15.0:opt-in)
+
+`config.overviewTab` 缺省关;设 `true` 后第一个 pane 不再是迭代任务表,改成一条**叙事流** ——
+按「先看什么」从上往下排,每行一句摘要 + 可展开明细:
+
+| 行 | 数据源 | 说什么 |
+| --- | --- | --- |
+| 迭代 | `manifest.json` | 当前 `active` 的那个迭代、它进行中的任务、迭代计划链 |
+| 在验收 | `acceptance-manifest.json` | `current` 那个 PR、已试 `n/N`(与验收 tab 同一把 localStorage 钥匙)+ 迷你进度条 |
+| 可做 | `backlog-manifest.json` | `ready` 张数 —— 与积压提醒 `wip` 同一个计数、同一套阈值色 |
+| 待收账 | `release-manifest.json` | PR 全合而卡未收终态的卡,以及写了 `settleHold` 的挂起卡 |
+| 沉睡 | `release-manifest.json` | `ready` 且无 PR 且超 30 天没动 |
+| 近 7 天 | `cardsDir` | 卡文件最后提交日落在窗口内的卡 |
+| 发布 | `release-manifest.json` | dev / test / prod 三段计数与最新版本号 |
+
+- **零新数据源**:每一行都从板上已有的 manifest 与卡文件派生,不新增字段、不新增文件。
+- **数据源缺席则整行不渲染**:空行比没有更吵。没配验收就没有「在验收」那行,以此类推。
+- **落地页身份不变**:pane id 仍是 `progress`、hash 仍是裸 `#`,老链接照旧落在这里。
+- **迭代史一条没删**:原「进度看板」整块折进页底 `<details class="iterhist">`;深链落进折叠区时
+  routeHash 先把沿途的 `details` 打开,再滚过去 —— 不会跳到一个 `display:none` 的元素上毫无反应。
+- **gen 零时间照旧**:天数、7 天窗口、勾选进度全在浏览器算,gen 只烤日期与分母。
+- **字节冻结**:不配或 `false` 时输出逐字节不变。
+
+## 决策路径入文档库(pathTab:"docs",v0.15.0:opt-in)
+
+「决策路径」是给接手人一次性读完的来龙去脉,不是天天要点开的东西。`config.pathTab` 设成 `"docs"` 后:
+
+- 顶栏那一项与 pane 都不渲染(`PANES` 与左侧 rail 跟着少一项 —— rail 从 tab 条解析,自动)。
+- 同一份 `path-manifest.json` 渲成 `refs/design-path.html` 一篇文档(套 refs 页壳、带返回栏),
+  登记进文档库 Hub 的「交接与接手」类(`config.pathDocCategory` 可改)。**数据一条不删。**
+- 老的 `#path` 深链落到文档库那条目并闪一下 —— 历史链接不死。
+- 样式是同一份规则(gen 里抽成常量,index 与文档页两处插值),不是抄第二遍。
+- 关回去时 `refs/design-path.html` 陈迹自动清理(照 `parts/` 的规矩);不配时输出逐字节不变。
+
 ## 写操作 CLI(ddd.mjs,v0.14.0)
 
 `node <plugin>/scripts/ddd.mjs`,零依赖,`--dir` 与 gen 同一口径。两种形制都认:配了 `cardsDir` 就逐卡文件读写(一张卡一次原子写),没配就从头文件的数组读、整文件重写(竞态照旧,但校验与形制一致)。
