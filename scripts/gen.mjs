@@ -512,7 +512,8 @@ const BRAND_RE = BRAND.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') // 生成 JS 里�
 // localStorage 前缀:brand slug(换名重置一次偏好,拍板不迁移)
 const LS_PREFIX = BRAND.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'kanban'
 // ———— 懒加载拆页(v0.11.0,config.lazyTabs:布尔,默认关)————
-// 关 = 单文件,输出逐字节冻结。开 = 决策/Backlog 两 pane 正文外提 parts/*.html(其余 pane 留壳内),
+// 关 = 单文件,输出逐字节冻结。开 = 长内容的 pane 正文外提 parts/*.html(v0.11.0 决策/Backlog,
+// 0.13.0 加归档,0.15.0 加验收与发布进度 —— 后三个各自的 tab 开着才有那一份;其余 pane 留壳内),
 // 壳内放骨架卡,切 tab 即时切换、fetch 注入正文(真字节进度走顶部 2px 细线);注入后补课一条链
 // (工具条接线 → 搜索补戳 → 时间筛补戳,全幂等)闭合跨 pane 契约;深链靠 gen 期烤入的
 // 卡号→pane 映射先取再定位;搜索框一有输入即拉全未取 chunk,保住全局搜索/徽章计数口径。
@@ -2528,13 +2529,19 @@ const acceptancePane = !ACC ? '' : `
 
 // ———— 验收:门控注入片(ACC 关时全为空串)————
 const ACC_TAB = !ACC ? '' : `\n    <button class="tab" data-pane="acceptance">验收${ACC_CUR ? ` · ${ACC_CUR.items.length}` : ''}</button>`
-const ACC_PANE_HTML = !ACC ? '' : `\n  <section class="pane" id="pane-acceptance">${acceptancePane}</section>`
+// v0.15.0:lazyTabs 开着时验收也是一个 part —— 壳里只留骨架,正文与数据随 parts/acceptance.html 到。
+const ACC_LAZY = ACC && LAZY
+const ACC_PANE_HTML = !ACC ? '' : `\n  <section class="pane" id="pane-acceptance"${ACC_LAZY ? ' data-lazy-pending' : ''}>${ACC_LAZY ? LAZY_SKEL : acceptancePane}</section>`
 const ACC_PANE_ID = !ACC ? '' : `, 'acceptance'`
 // 切进验收要重算目录/进度;切去别的 pane 也顺手刷卡头分子(卡在别的 pane 里也照算)。
 const ACC_SHOW = !ACC ? '' : `\n    if (window.accSync) accSync()`
 // 懒加载的 pane 是后到的:show() 里那次同步跑在 fetch 落地之前,卡头芯片那会儿还没进 DOM,
 // 分子会一直停在烤入的 0/N,直到下一次切 tab。注入完当场再补一次(accSync 幂等)。
-const ACC_INJECTED = !ACC ? '' : `\n    if (window.accSync) accSync()`
+// v0.15.0 验收自己也外提之后,分子的数据源同样是后到的:别的 pane 里只要有 [data-acc](卡头芯片、
+// 发布表格的「验收」列),就把验收那份先取回来 —— 不然分子永远停在烤入的 0/N。
+const ACC_INJECTED = !ACC ? '' : `\n    if (name === 'acceptance') initAcceptance(document.getElementById('pane-acceptance'))
+    else if (!lazyDone.acceptance && document.querySelector('[data-acc]')) ensurePane('acceptance') // 分子算得出来,靠的是验收那份数据
+    if (window.accSync) accSync()`
 const PRCHIP_CSS = !HAS_PR ? '' : `
   /* 卡头 PR 芯片(v0.12.0,卡上 pr 字段):与 session 小章同排,安静不抢戏 */
   .prchip { display: inline-flex; align-items: baseline; gap: 4px; font-size: 10.5px; font-weight: 600; line-height: 17px;
@@ -2650,15 +2657,32 @@ const OV_ACC_BAR = !OVERVIEW ? '' : `
         var ovp = String(ovs.textContent).split('/')
         ovi.style.width = (Number(ovp[1]) ? Number(ovp[0]) / Number(ovp[1]) * 100 : 0) + '%'
       }`
+const ACC_D_LISTS = !ACC ? [] : ACC_LISTS.map((l) => ({
+  k: l.key, rev: l.rev, nums: l.nums,
+  items: l.items.map((it) => ({ id: it.id, g: it.group, pr: it.pr, rd: it.round })),
+  pre: ((l.result || {}).checked || []).map(String),
+}))
+const ACC_D_TSV = !ACC ? {} : Object.fromEntries(ACC_LISTS.map((l) => [l.key, Object.fromEntries(Object.keys(l.data).map((k) => [k, accTsv(l, k)]))]))
+const ACC_D_OF_PR = !ACC ? {} : Object.fromEntries(ACC_LISTS.flatMap((l) => l.nums.map((n) => [String(n), l.key])))
+// 数据搬家(v0.15.0):非懒照旧就地烤在 IIFE 里;懒模式下同一份 JSON 随 part 走,注入后读 textContent
+// (application/json 不执行,innerHTML 注入照样留得住文本;`<` 仍走 accJson 的 \u003c,`</script` 拼不出来)。
+const ACC_DATA_BLOCK = !ACC_LAZY ? '' : `\n  <script type="application/json" id="acc-data">${accJson({ LISTS: ACC_D_LISTS, TSV: ACC_D_TSV, OF_PR: ACC_D_OF_PR })}</script>`
+const ACC_PART = !ACC_LAZY ? '' : acceptancePane + ACC_DATA_BLOCK
+const ACC_OPEN = !ACC ? '' : (!ACC_LAZY
+  ? `;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    var LISTS = ${accJson(ACC_D_LISTS)}
+    var TSV = ${accJson(ACC_D_TSV)}
+    var OF_PR = ${accJson(ACC_D_OF_PR)}`
+  : `// 验收 pane 随 parts/acceptance.html 外提,数据跟着走:壳里只留这只初始化函数,注入完跑一次
+  var accReady = false
+  function initAcceptance(root) {
+    if (accReady || !root) return  // 幂等:点 tab、空闲预取、发布表格要分子,三条路都可能到,只认第一次
+    accReady = true
+    var __ad = JSON.parse(root.querySelector('#acc-data').textContent)
+    var LISTS = __ad.LISTS, TSV = __ad.TSV, OF_PR = __ad.OF_PR`)
+const ACC_CLOSE = !ACC ? '' : (!ACC_LAZY ? `})();` : `}`)
 const ACC_JS = !ACC ? '' : `
-  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
-    var LISTS = ${accJson(ACC_LISTS.map((l) => ({
-      k: l.key, rev: l.rev, nums: l.nums,
-      items: l.items.map((it) => ({ id: it.id, g: it.group, pr: it.pr, rd: it.round })),
-      pre: ((l.result || {}).checked || []).map(String),
-    })))}
-    var TSV = ${accJson(Object.fromEntries(ACC_LISTS.map((l) => [l.key, Object.fromEntries(Object.keys(l.data).map((k) => [k, accTsv(l, k)]))])))}
-    var OF_PR = ${accJson(Object.fromEntries(ACC_LISTS.flatMap((l) => l.nums.map((n) => [String(n), l.key]))))}
+  ${ACC_OPEN}
     var byKey = {}, ck = {}, view = {}
     function lsKey(l) { return '${LS_PREFIX}_acc_' + l.k + '_r' + l.rev }
     function load(l) {
@@ -2795,7 +2819,7 @@ const ACC_JS = !ACC ? '' : `
     window.addEventListener('hashchange', accRoute)
     window.accSync()
     accRoute()
-  })();`
+  ${ACC_CLOSE}`
 
 // ============================================================================
 //  发布进度 pane(v0.12.0):release-manifest.json → 三段计数 + 时间线 / 表格两视图
@@ -3002,9 +3026,13 @@ const releasePane = !REL ? '' : `
 
 // ———— 发布进度:门控注入片(REL 关时全为空串)————
 const REL_TAB = !REL ? '' : `\n    <button class="tab" data-pane="release">发布进度 · ${REL_COUNT.dev}</button>`
-const REL_PANE_HTML = !REL ? '' : `\n  <section class="pane" id="pane-release">${releasePane}</section>`
+// v0.15.0:lazyTabs 开着时发布进度也是一个 part(表格行是这块板上最长的一段标记)
+const REL_LAZY = REL && LAZY
+const REL_PANE_HTML = !REL ? '' : `\n  <section class="pane" id="pane-release"${REL_LAZY ? ' data-lazy-pending' : ''}>${REL_LAZY ? LAZY_SKEL : releasePane}</section>`
 const REL_PANE_ID = !REL ? '' : `, 'release'`
 const REL_SHOW = !REL ? '' : `\n    if (name === 'release' && window.relSync) relSync()`
+// 懒加载(v0.15.0):发布进度 pane 也是后到的 —— show() 那次 relSync 跑在 fetch 落地之前,注入完当场初始化。
+const REL_INJECTED = !REL ? '' : `\n    if (name === 'release') initRelease(document.getElementById('pane-release'))`
 
 // ============================================================================
 //  总览 pane(v0.15.0,config.overviewTab)—— B 叙事流:一条流,按「先看什么」排
@@ -3385,20 +3413,37 @@ const REL_CSS = !REL ? '' : `
   @media (max-width: 820px) { .relseg { margin-left: 0; } .relmore { margin-left: 0; } }`
 // 运行期:筛选 / 搜索 / 排序 / 版本折叠 / 视图切换 / 时间线绘制 / syncedAt 换算。
 // 两视图共用同一份 REL_D 与同一个 pass():筛选一次,表格与时间线看到的是同一批 PR。
-const REL_JS = !REL ? '' : `
-  ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+// 表格与时间线共用的那几份表抽成常量(v0.15.0):同一份数据两种落法 —— 非懒烤进 IIFE,懒模式随 part 走。
+const REL_D_ROWS = !REL ? [] : REL_ROWS.map((r) => ({
+  n: r.n, t: r.p.title || '', s: String(r.p.state || ''),
+  c: String(r.p.createdAt || ''), m: String(r.p.mergedAt || ''), x: String(r.p.closedAt || ''),
+  d: relDate(r), st: r.sg.id, tag: r.sg.tag, gp: relGid(r.sg), k: r.cards.map((c) => c.id),
+  q: `${r.n} ${r.p.title || ''} ${r.p.branch || ''} ${r.cards.map((c) => c.id).join(' ')}`.toLowerCase(),
+}))
+const REL_D_RELS = !REL ? [] : relSorted.map((r) => ({ tag: String(r.tag), at: String(r.at) }))
+// 数据搬家(v0.15.0):懒模式下四份表随 part 走;几何算子是代码不是数据,照旧留在壳里。
+const REL_DATA_BLOCK = !REL_LAZY ? '' : `\n  <script type="application/json" id="rel-data">${accJson({ D: REL_D_ROWS, G: REL_GROUPS, RELS: REL_D_RELS, ATOF: Object.fromEntries(REL_AT) })}</script>`
+const REL_PART = !REL_LAZY ? '' : releasePane + REL_DATA_BLOCK
+const REL_OPEN = !REL ? '' : (!REL_LAZY
+  ? `;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
 ${REL_GEOM_SRC}
     // 一行 PR 的运行期数据。分支 / 状态词 / 段词都不烤第二份 —— 表格那一行的格子里已经有了,
     // 搜索认的是拼好的 q;时间线只要号、标题、卡与三个日期。
-    var D = ${accJson(REL_ROWS.map((r) => ({
-      n: r.n, t: r.p.title || '', s: String(r.p.state || ''),
-      c: String(r.p.createdAt || ''), m: String(r.p.mergedAt || ''), x: String(r.p.closedAt || ''),
-      d: relDate(r), st: r.sg.id, tag: r.sg.tag, gp: relGid(r.sg), k: r.cards.map((c) => c.id),
-      q: `${r.n} ${r.p.title || ''} ${r.p.branch || ''} ${r.cards.map((c) => c.id).join(' ')}`.toLowerCase(),
-    })))}
+    var D = ${accJson(REL_D_ROWS)}
     var G = ${accJson(REL_GROUPS)}
-    var RELS = ${accJson(relSorted.map((r) => ({ tag: String(r.tag), at: String(r.at) })))}
-    var ATOF = ${accJson(Object.fromEntries(REL_AT))}
+    var RELS = ${accJson(REL_D_RELS)}
+    var ATOF = ${accJson(Object.fromEntries(REL_AT))}`
+  : `// 发布进度 pane 随 parts/release.html 外提,四份表跟着走:壳里留几何算子与这只初始化函数
+  var relReady = false
+  function initRelease(root) {
+    if (relReady || !root) return  // 幂等:点 tab 与空闲预取都会到,只认第一次
+    relReady = true
+${REL_GEOM_SRC}
+    var __rd = JSON.parse(root.querySelector('#rel-data').textContent)
+    var D = __rd.D, G = __rd.G, RELS = __rd.RELS, ATOF = __rd.ATOF`)
+const REL_CLOSE = !REL ? '' : (!REL_LAZY ? `})();` : `}`)
+const REL_JS = !REL ? '' : `
+  ${REL_OPEN}
     var pane = document.getElementById('pane-release')
     if (!pane) return
     var tb = document.getElementById('reltb')
@@ -3658,7 +3703,7 @@ ${REL_GEOM_SRC}
     renderTable()
     window.addEventListener('hashchange', relRoute)
     relRoute()
-  })();`
+  ${REL_CLOSE}`
 
 // ———— 卡正文轻 markdown:门控注入片(RICH 关时全为空串)————
 // 颜色一律走既有 :root 变量,不引新 hex —— darkStyle 只包 <style> 里的色值,变量天然跟着主题走。
@@ -3776,6 +3821,10 @@ const CARDS_CSS = !CARDS_DIR ? '' : `
 // ———— 懒加载装配件(v0.11.0;OFF 全为空串/空表,模板逐字节冻结)————
 const LAZY_IDMAP = {}
 if (LAZY) {
+  // 验收清单锚(整份 + 每个成员 PR)与发布表格的 PR 行:v0.15.0 起也在 part 里,深链得先知道去取哪一份。
+  // 排在卡号之前 = 万一哪块板的卡号真叫 acc-x / pr-x,卡号说了算(卡是人写的,这两串是派生的)。
+  if (ACC_LAZY) for (const l of ACC_LISTS) { LAZY_IDMAP['acc-' + l.key] = 'acceptance'; for (const n of l.nums) LAZY_IDMAP['acc-' + n] = 'acceptance' }
+  if (REL_LAZY) for (const r of REL_ROWS) LAZY_IDMAP['pr-' + r.n] = 'release'
   for (const e of dm.entries) LAZY_IDMAP[e.id] = 'decisions'
   for (const it of b.items) LAZY_IDMAP[it.id] = 'backlog'
   for (const it of archItems) LAZY_IDMAP[it.id] = 'archive' // 归档卡改判到第三个 part(深链跨 part 靠这张表)
@@ -3786,7 +3835,7 @@ const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
 const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
 const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(线别/工具条/搜索/时间筛全幂等重跑)————
   const LAZY_PANE_OF = ${JSON.stringify(LAZY_IDMAP).replace(/</g, '\\u003c')}
-  const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')}${!ARCH ? '' : `, archive: ${Buffer.byteLength(archivePane, 'utf8')}`} } // 未压缩字节 = 真进度分母
+  const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')}${!ARCH ? '' : `, archive: ${Buffer.byteLength(archivePane, 'utf8')}`}${!ACC_LAZY ? '' : `, acceptance: ${Buffer.byteLength(ACC_PART, 'utf8')}`}${!REL_LAZY ? '' : `, release: ${Buffer.byteLength(REL_PART, 'utf8')}`} } // 未压缩字节 = 真进度分母
   let curTf = 0
   const lazyDone = {}, lazyInflight = {}
   let lazyRx = 0, lazyExp = 0
@@ -3805,7 +3854,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
     if (name === 'backlog') initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })
     applySearch() // 幂等全文档补 search-hide 戳
     setTime(curTf) // 补 tf-hide 戳;内含 setLine 终算计数/组显隐/徽章/空态
-    clampScan(document.querySelector('.pane-active'))${ACC_INJECTED}${RESP_INJECTED}
+    clampScan(document.querySelector('.pane-active'))${ACC_INJECTED}${REL_INJECTED}${RESP_INJECTED}
   }
   function ensurePane(name) {
     if (!(name in LAZY_BYTES) || lazyDone[name]) return Promise.resolve()
@@ -4758,13 +4807,20 @@ if (LAZY) {
   mkdirSync(PARTS_DIR, { recursive: true })
   writeFileSync(join(PARTS_DIR, 'decisions.html'), decisionsPane)
   writeFileSync(join(PARTS_DIR, 'backlog.html'), backlogPane)
-  // 归档是第三个 part;归档关着时清掉上一轮的陈迹(壳里已无 archive 入口,留着只会误导)
-  if (ARCH) writeFileSync(join(PARTS_DIR, 'archive.html'), archivePane)
-  else { const ap = join(PARTS_DIR, 'archive.html'); if (existsSync(ap)) rmSync(ap) }
-  console.log(`[gen] lazyTabs:parts/decisions ${(Buffer.byteLength(decisionsPane, 'utf8') / 1024).toFixed(0)}KB + parts/backlog ${(Buffer.byteLength(backlogPane, 'utf8') / 1024).toFixed(0)}KB${ARCH ? ` + parts/archive ${(Buffer.byteLength(archivePane, 'utf8') / 1024).toFixed(0)}KB` : ''} 已外提,壳留骨架`)
+  // 归档 / 验收 / 发布进度是后来的三个 part;各自关着时清掉上一轮的陈迹(壳里已无入口,留着只会误导)
+  const optPart = (on, name, body) => {
+    const fp = join(PARTS_DIR, name)
+    if (on) writeFileSync(fp, body)
+    else if (existsSync(fp)) rmSync(fp)
+  }
+  optPart(ARCH, 'archive.html', archivePane)
+  optPart(ACC_LAZY, 'acceptance.html', ACC_PART)
+  optPart(REL_LAZY, 'release.html', REL_PART)
+  const kb = (s) => (Buffer.byteLength(s, 'utf8') / 1024).toFixed(0) + 'KB'
+  console.log(`[gen] lazyTabs:parts/decisions ${kb(decisionsPane)} + parts/backlog ${kb(backlogPane)}${ARCH ? ` + parts/archive ${kb(archivePane)}` : ''}${ACC_LAZY ? ` + parts/acceptance ${kb(ACC_PART)}` : ''}${REL_LAZY ? ` + parts/release ${kb(REL_PART)}` : ''} 已外提,壳留骨架`)
 } else if (existsSync(PARTS_DIR)) {
-  // 只清己产的三个文件;目录非空(有别人的东西)绝不整删
-  for (const f of ['decisions.html', 'backlog.html', 'archive.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
+  // 只清己产的那几个文件;目录非空(有别人的东西)绝不整删
+  for (const f of ['decisions.html', 'backlog.html', 'archive.html', 'acceptance.html', 'release.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
   try { if (readdirSync(PARTS_DIR).length === 0) rmSync(PARTS_DIR, { recursive: true }) } catch {}
 }
 console.log(

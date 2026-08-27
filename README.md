@@ -83,7 +83,7 @@ Set `config.darkMode` to `true` and the board (plus doc pages and the screenshot
 
 ## Lazy tabs (optional)
 
-For boards that have grown heavy on slow links, `config.lazyTabs: true` splits the two biggest tabs (decisions, backlog) into `parts/*.html` fetched on first visit, leaving a small first-paint shell with skeleton cards and a thin real-progress bar. Deep links, global search, and every filter keep working — the runtime re-wires each pane after injection. Requires serving via the bundled `serve.py` (the documented path anyway). Left unset, output is a single file, byte-identical to a board without the feature.
+For boards that have grown heavy on slow links, `config.lazyTabs: true` splits the long tabs into `parts/*.html` fetched on first visit, leaving a small first-paint shell with skeleton cards and a thin real-progress bar. Decisions and backlog always split; the archive, acceptance and release tabs split too when they are switched on, each into its own part. Their baked-in data (checklists, pull request rows) travels with the part as a `<script type="application/json">` block and is read once on injection, so nothing about those tabs weighs on the shell. Deep links — including `#acc-<pr>` and `#pr-<number>` — global search, and every filter keep working: the runtime re-wires each pane after injection, and a pane that needs another one's data (the release table's acceptance column, a card's `n/N` chip) fetches it before rendering the number. Requires serving via the bundled `serve.py` (the documented path anyway). Left unset, output is a single file, byte-identical to a board without the feature.
 
 ## Acceptance tab (optional)
 

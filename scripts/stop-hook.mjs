@@ -126,7 +126,9 @@ if (existsSync(GEN)) {
   let lazyBroken = false
   try {
     const c = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8'))
-    const parts = ['decisions.html', 'backlog.html', ...(c.backlogArchive === true ? ['archive.html'] : [])]
+    // v0.15.0:验收与发布进度也进了 parts,门控照 gen(各自的 tab 开着才有那一份)
+    const parts = ['decisions.html', 'backlog.html', ...(c.backlogArchive === true ? ['archive.html'] : []),
+      ...(c.acceptanceTab === true ? ['acceptance.html'] : []), ...(c.releaseTab === true ? ['release.html'] : [])]
     lazyBroken = c.lazyTabs === true && !parts.every((f) => existsSync(join(KANBAN, 'parts', f)))
   } catch {}
   const myVer = readPluginVersion() // null = 安装异常(plugin.json 缺失/损坏/非纯数字版本)

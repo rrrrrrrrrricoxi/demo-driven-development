@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。703 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。726 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -15,7 +15,9 @@
 // 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)、
 // 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门)、
 // 总览落地页 overviewTab(四拍冻结 × lazy 开关 / 各行随数据源出没 / 迭代史折叠含原任务表 / 深链先展开折叠)、
-// 决策路径入文档库 pathTab:"docs"(四拍冻结 / refs 文档页 + Hub 条目 / 相对链接各退一级 / #path 改落文档库 / out 撞名硬报错)等。
+// 决策路径入文档库 pathTab:"docs"(四拍冻结 / refs 文档页 + Hub 条目 / 相对链接各退一级 / #path 改落文档库 / out 撞名硬报错)、
+// 验收/发布进度也进 parts(壳里零烤入数据 / 数据块随 part 走 / init 幂等 / 跨 part 取分子 /
+// #acc-*、#pr-* 深链映射 / LAZY_BYTES 五项对账 / 守卫缺件自愈 / 单独关一个 tab 只清一份)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -3044,6 +3046,119 @@ const PATH_MANIFEST = {
   runGen(NEW_SCRIPTS, kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
   ok(!existsSync(docp), '关回后 refs/design-path.html 陈迹自动清理(照 parts/ 的规矩)')
+}
+
+// ============ T60 验收 / 发布进度也进 parts(lazyTabs 开时;数据随 part 走,注入时初始化)============
+console.log('T60 验收/发布进度进 parts')
+{
+  const fx60 = mkFixture('fx60', { 's.html': demoHtml('s') })
+  const cfgP = join(fx60.kb, 'kanban.config.json'), idxP = join(fx60.kb, 'index.html')
+  const accP = join(fx60.kb, 'acceptance-manifest.json'), relP = join(fx60.kb, 'release-manifest.json')
+  const mP = join(fx60.kb, 'manifest.json'), decP = join(fx60.kb, 'decisions-manifest.json'), blP = join(fx60.kb, 'backlog-manifest.json')
+  const part = (f) => join(fx60.kb, 'parts', f)
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) x.instance.ghRepo = 'o/r'
+  bl.tiers = { 1: '核心' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '待办甲', pr: 230 }, // 卡头长出 [data-acc]
+    { id: 'BL-2', status: 'done', priority: 'low', tier: '1', title: '旧账乙' }, // 归档那份 part 得有内容
+  ]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策甲' }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  wr(accP, { current: 230, lists: [ACC_LIST] })
+  wr(relP, REL_MANIFEST)
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  cfg.releaseTab = true
+  cfg.backlogArchive = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx60.kb)
+  const flatSha = sha(idxP) // 两 tab 开着、lazy 关着的单文件基线
+  const flat = readFileSync(idxP, 'utf8')
+  ok(flat.includes('class="acclist"') && flat.includes('class="relr"') && !existsSync(join(fx60.kb, 'parts')),
+    '未开 lazyTabs:两 pane 正文照旧在壳里,没有 parts 目录')
+
+  cfg.lazyTabs = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx60.kb)
+  ok(r.status === 0, 'lazyTabs + 两 tab 同开 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  const pAcc = readFileSync(part('acceptance.html'), 'utf8'), pRel = readFileSync(part('release.html'), 'utf8')
+  ok(pAcc.includes('id="acc-230-232"') && pRel.includes('id="pr-232"'), 'parts/acceptance.html 与 parts/release.html 落盘且含 pane 正文')
+  ok(!on.includes('class="acclist"') && !on.includes('class="relr"') &&
+    /id="pane-acceptance" data-lazy-pending/.test(on) && /id="pane-release" data-lazy-pending/.test(on),
+    '壳里两 pane 只剩骨架(正文不在壳内)')
+  { // 数据也搬了家:壳里不再有烤入的表,part 里是一块 application/json
+    const accData = (pAcc.match(/<script type="application\/json" id="acc-data">([\s\S]*?)<\/script>/) || [])[1]
+    const relData = (pRel.match(/<script type="application\/json" id="rel-data">([\s\S]*?)<\/script>/) || [])[1]
+    ok(!!accData && !!relData, '两 part 各带一块 application/json 数据')
+    let parsed = null
+    try { parsed = [JSON.parse(accData), JSON.parse(relData)] } catch (e) { parsed = null }
+    ok(parsed && Object.keys(parsed[0]).join(',') === 'LISTS,TSV,OF_PR' && Object.keys(parsed[1]).join(',') === 'D,G,RELS,ATOF',
+      '数据块是合法 JSON,键与运行期取用的四份表对得上')
+    ok(!accData.includes('<') && !relData.includes('<'),
+      '数据块里 `<` 一律 \\u003c(拼不出 </script,注入后原样读得回来)')
+    ok(!/var LISTS = \[/.test(on) && !/var TSV = \{/.test(on) && !/var D = \[/.test(on) && !/var RELS = \[/.test(on),
+      '壳里零烤入数据(LISTS / TSV / D / RELS 都跟着 part 走了)')
+    ok(on.includes('var LISTS = __ad.LISTS') && on.includes('var D = __rd.D'),
+      '壳里剩的是从 part 数据块解出来的那两行')
+  }
+  ok(/function initAcceptance\(root\) \{\s*\n\s*if \(accReady \|\| !root\) return/.test(on) &&
+    /function initRelease\(root\) \{\s*\n\s*if \(relReady \|\| !root\) return/.test(on),
+    '两个 IIFE 改成 init 函数,各带幂等守卫(预取与点 tab 都到,只跑第一次)')
+  {
+    const inj = (on.match(/function onPaneInjected\(name\) \{[\s\S]*?\n {2}\}/) || [''])[0]
+    ok(inj.includes("if (name === 'acceptance') initAcceptance(") && inj.includes("if (name === 'release') initRelease("),
+      '注入完当场初始化对应 pane', inj.slice(-260))
+    ok(/else if \(!lazyDone\.acceptance && document\.querySelector\('\[data-acc\]'\)\) ensurePane\('acceptance'\)/.test(inj),
+      '跨 part 依赖:注进来的 pane 里有 [data-acc](卡头芯片 / 发布表格那一列)就先把验收数据取回来')
+  }
+  { // 深链表:清单锚(整份 + 每个成员 PR)与 PR 行都得知道去取哪一份
+    const map = JSON.parse((on.match(/const LAZY_PANE_OF = (\{[\s\S]*?\})\n/) || [, '{}'])[1].replace(/\\u003c/g, '<'))
+    ok(map['acc-230-232'] === 'acceptance' && map['acc-230'] === 'acceptance' && map['acc-232'] === 'acceptance',
+      '#acc-<清单串> 与 #acc-<成员 PR> 都指向验收那份 part')
+    ok(map['pr-232'] === 'release' && map['pr-227'] === 'release', '#pr-<号> 指向发布那份 part')
+    ok(map['BL-1'] === 'backlog' && map['D1'] === 'decisions', '卡号照旧各归各的 part(派生锚不抢卡号)')
+  }
+  { // 真进度分母对账:五份都要对得上落盘字节
+    const bd = (on.match(/const LAZY_BYTES = \{([^}]*)\}/) || [, ''])[1]
+    const num = (k) => Number((bd.match(new RegExp(k + ': (\\d+)')) || [])[1])
+    const { Buffer } = await import('node:buffer')
+    ok(num('acceptance') === Buffer.byteLength(pAcc, 'utf8') && num('release') === Buffer.byteLength(pRel, 'utf8'),
+      'LAZY_BYTES 的验收 / 发布两项与 part 落盘字节一致')
+    ok(['decisions', 'backlog', 'archive', 'acceptance', 'release'].every((k) => num(k) > 0), 'LAZY_BYTES 五项齐活')
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  // ---- 守卫的缺件自愈认得新来的两个 part:删掉也要重跑补回(否则 #acc-* / #pr-* 深链静默落空)----
+  for (const f of ['acceptance.html', 'release.html']) {
+    const pp = part(f)
+    touch(idxP) // index 是最新的 —— 只有「缺件」这一条能触发重跑
+    rmSync(pp)
+    const rs = runStop(NEW_SCRIPTS, fx60.root)
+    ok(rs.status === 0 && existsSync(pp), `守卫发现 parts/${f} 缺件 → 重跑 gen 补回(exit ${rs.status})`, rs.stderr)
+  }
+  { // 单独关掉验收 tab:只清它那一份,别人不受影响(照归档那条的规矩)
+    cfg.acceptanceTab = false
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx60.kb)
+    ok(!existsSync(part('acceptance.html')) && existsSync(part('release.html')) && existsSync(part('backlog.html')),
+      '关掉验收 tab:parts/acceptance.html 清除,另几个 part 不受影响')
+    cfg.acceptanceTab = true
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx60.kb)
+  }
+  cfg.lazyTabs = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx60.kb)
+  ok(!existsSync(join(fx60.kb, 'parts')), '关回 lazyTabs:五个 part 全清,目录一并清除')
+  ok(sha(idxP) === flatSha, '关回后 index 与单文件基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
