@@ -25,7 +25,7 @@ import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
-import { dormantDate, settleOf, staleLink } from './settle.mjs'
+import { dormantDate, settleHold, settleOf, staleLink } from './settle.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -595,8 +595,12 @@ const RESP = Boolean(rlm)
 const RESP_DORM = 30 // 沉睡阈值(天);天数在浏览器算,gen 只烤日期
 const respOf = (entry) => settleOf(entry, prsOfCard(entry, PR_REPO), relPr, PR_REPO)
 // 卡头芯片:settle / reopen 各一枚;都不是但多 PR 部分合并 → 安静报个「2/3 已合」。
+// 卡上写了 settleHold = 人已经看过这张卡并判定「这一轮不收」,机器不再重复它已经知道的事:
+// 只留一枚灰芯片,理由挂 title(v0.13.1)。它换掉的是那三枚里的任意一枚,不是叠在它们上面。
 const respChips = (entry) => {
   if (!RESP) return ''
+  const hold = settleHold(entry)
+  if (hold) return `<span class="rspchip rsp-hold" title="${esc(hold)}">暂不收账</span>`
   const s = respOf(entry)
   if (s.kind === 'settle') return '<span class="rspchip rsp-settle" title="所有关联 PR 都已合并,卡还没收到终态 —— 跑 pr-sync.mjs --settle 看清单">PR 已合 · 待收账</span>'
   if (s.kind === 'reopen') return '<span class="rspchip rsp-reopen" title="卡已在终态,但还有关联 PR 开着">已收账但 PR 未合</span>'
@@ -2569,6 +2573,7 @@ const relTableRows = (() => {
 const relSettleGroups = !REL ? [] : (() => {
   const byPr = new Map()
   for (const c of CARD_INDEX) {
+    if (settleHold(c.e)) continue // 挂起的卡不进这段:它已经有人管着,再列一遍就是要人第二次做同一个判断
     const prs = prsOfCard(c.e, PR_REPO)
     if (settleOf(c.e, prs, relPr, PR_REPO).kind !== 'settle') continue
     for (const p of prs) {
@@ -3079,7 +3084,8 @@ const RESP_CSS = !RESP ? '' : `
   .rspchip { display: inline-flex; align-items: baseline; font-size: 10.5px; font-weight: 600; line-height: 17px;
      padding: 0 7px; border-radius: 5px; white-space: nowrap; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
      font-variant-numeric: tabular-nums; }
-  .rsp-part { font-weight: 400; color: var(--mut); background: ${tk('seg-bg')}; }
+  .rsp-part, .rsp-hold { font-weight: 400; color: var(--mut); background: ${tk('seg-bg')}; }
+  .rsp-hold { cursor: help; } /* 理由在 title 里,给个可悬停的暗示 */
   .rspdorm { font-size: 10.5px; line-height: 17px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
   /* 手写状态词过时:划掉但不删 —— 数据是人写的,看板只表态不改口 */
   .row.links s.stale { color: var(--faint); text-decoration-thickness: 1px; }

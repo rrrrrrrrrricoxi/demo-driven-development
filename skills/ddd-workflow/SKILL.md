@@ -44,6 +44,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
    **开 PR 的同时在卡上写 `pr` 字段**(`230` / `[227, 230]` / `"owner/repo#4"`)—— 卡与实现它的那段工作从此是数据关系,不是散文。
    **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。
    **合完 PR 用 `pr-sync.mjs --settle` 收账**(v0.13.0):它同步之后列出「关联 PR 都合了、卡还停在非终态」的卡与建议 status(backlog / 进度卡 `done`,决策卡 `live`),**默认只打印**;核对无误再加 `--write`(改 status,并在 `note` / `notes` 末尾追一行时间线)。守卫在收工时也会点名这两种卡(待收账 / 已收账但 PR 未合),非阻断。
+   **一张卡跨几轮 PR 时写 `settleHold`**(v0.13.1):这一轮的 PR 只落了一半 / 只落了接口,卡该留在 `ready` —— 在卡上写一句 `"settleHold": "理由"`,它从此不进待收账清单、不出芯片、守卫不催,卡头换成一枚灰芯片「暂不收账」(理由挂 title)。新一轮 PR 开了就把号加进卡的 `pr` 数组;真收账时删掉 `settleHold`。清单上只有几张该收时,用 `--settle --write --only BL-1,D2` 挑着收(点名了清单外的卡号会报错,一个字节都不写)。
    **`links[]` 的标题不写状态词**:「(开而不合)」「(待合)」「(已合并)」这类手写注解一定会过时 —— 板上有了 `release-manifest.json` 之后,指向本仓 PR 的链接自动带真实状态(开着 / 已合 08-26 / 已发 v0.0.3),写过的旧词若与实际不符会被划掉。标题只写这个 PR 干了什么。
 
 **发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。

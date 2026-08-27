@@ -87,3 +87,15 @@ export function dormantDate(card) {
   const d = String(card.date || '')
   return DATE_RE.test(d) ? d : ''
 }
+
+// 「PR 合了」≠「卡能收」。一张卡跨几轮 PR(这一轮只落了一半、只落了接口)时,机器判出来的
+// settle 是对的判断、错的动作 —— 人看过之后写一句 settleHold 把这张卡的账挂起,看板与守卫就闭嘴,
+// 卡头改出一枚安静的灰芯片说明这事有人管着。要收账时删掉这个字段即可(不设过期,过期就是又一个要维护的钟)。
+
+/**
+ * 卡上的「暂不收账」理由。
+ * @returns 非空字符串 = 挂起中(即理由本身);'' = 正常参与 settle/reopen 判定
+ */
+export function settleHold(card) {
+  return String((card && card.settleHold) || '').trim()
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PR / 版本同步(v0.12.0)。gh → release-manifest.json,给「发布进度」tab 与卡头芯片后缀供数。
 //
-//   node scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run] [--settle [--write]]
+//   node scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run] [--settle [--write] [--only <id>[,<id>…]]]
 //
 // 为什么是独立脚本而不是 hook:gen 必须零网络零时间(测试床里没有 gh、没有 remote),
 // 「现在几点、GitHub 上是什么状态」只能由一个人/工作流显式触发的脚本落进数据里。
@@ -22,6 +22,11 @@
 //     决策卡没有时间线字段(gen 不渲染 note),不硬塞一个没人读的字段进去,只改 status。
 // 改写前先验一遍「原文 === JSON.stringify(解析结果, null, 2) + 换行」:对不上就整份跳过,
 // 免得一次收账把别人手写的排版整份重排(那种 diff 没人敢看)。落盘走 tmp + rename。
+//
+// --only <id>[,<id>…](v0.13.1):清单上的卡逐张挑着收。实证:0.13.0 上板第一次跑 --settle 抓到三张,
+// 人一核只有一张真该收 —— 另两张的 PR 只落了一半 / 只落了接口。全收或全不收都不是这里的正确答案。
+// 点名了清单外的 id 就整个拒绝(不写任何文件):那多半是卡号敲错,静默少收一张比报错难查得多。
+// 长期挂账的卡不必每次都写 --only,在卡上写一句 settleHold 理由,它就从清单里挪进「已 hold」一行。
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -30,7 +35,7 @@ import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { cmpAt } from './relstage.mjs'
-import { KIND_TERMINAL, settleOf } from './settle.mjs'
+import { KIND_TERMINAL, settleHold, settleOf } from './settle.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KANBAN = resolveKanbanDir()
@@ -39,6 +44,14 @@ const ARGV = process.argv.slice(2)
 const DRY = ARGV.includes('--dry-run')
 const SETTLE = ARGV.includes('--settle')
 const WROTE_ASKED = ARGV.includes('--write') && SETTLE // --write 是 --settle 的修饰,单独给不作数
+// --only 同样是 --settle 的修饰。两种写法都收:`--only a,b` 与 `--only=a,b`。
+const ONLY = (() => {
+  if (!SETTLE) return null
+  const i = ARGV.findIndex((a) => a === '--only' || a.startsWith('--only='))
+  if (i < 0) return null
+  const raw = ARGV[i].startsWith('--only=') ? ARGV[i].slice('--only='.length) : ARGV[i + 1]
+  return String(raw || '').split(',').map((x) => x.trim()).filter(Boolean)
+})()
 const OUT = join(KANBAN, 'release-manifest.json')
 const die = (msg) => { console.error(msg); process.exit(1) }
 
@@ -140,7 +153,8 @@ if (!SETTLE) process.exit(0)
 
 const relPr = new Map(out.prs.map((p) => [p.number, p]))
 const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' } // 决策卡没有时间线字段,只改 status
-const rows = []
+const all = []
+const held = [] // 写了 settleHold 的 settle 卡:单列一行,--write 不碰
 for (const x of MANIFESTS) {
   const to = KIND_TERMINAL[x.key]
   if (!to) continue
@@ -148,20 +162,36 @@ for (const x of MANIFESTS) {
     if (!c || !c.id) continue
     const prs = prsOfCard(c, REPO)
     if (settleOf(c, prs, relPr, REPO).kind !== 'settle') continue
-    rows.push({
+    if (settleHold(c)) { held.push(String(c.id)); continue }
+    all.push({
       f: x.f, key: x.key, id: String(c.id), from: String(c.status || ''), to,
       nums: prs.filter((p) => p.repo === REPO && relPr.has(p.num)).map((p) => p.num).sort((a, b) => a - b),
     })
   }
 }
-if (!rows.length) {
+const sayHeld = () => { if (held.length) console.log(S.settleHeld(held, held.length)) }
+if (!all.length) {
   console.log(S.settleNone())
+  sayHeld()
   process.exit(0)
 }
-console.log(S.settleHead(rows.length))
-for (const r of rows) console.log(S.settleRow(r.id, r.from, r.to, 'PR #' + r.nums.join(' #')))
+// 清单永远整份打印(哪怕 --only 只挑一张):人得看得见自己没挑的那些还在那儿。
+console.log(S.settleHead(all.length))
+for (const r of all) console.log(S.settleRow(r.id, r.from, r.to, 'PR #' + r.nums.join(' #')))
+sayHeld()
+
+// --only:先验再动。清单外的 id(敲错的卡号、已经 hold 的卡)一律拒绝整次写入 —— 静默少收一张
+// 比一行报错难查得多,而部分收账已经落盘之后再报错,就成了「写了一半」。
+let rows = all
+if (ONLY) {
+  if (!ONLY.length) die(S.settleOnlyEmpty())
+  const known = new Set(all.map((r) => r.id))
+  const bad = ONLY.filter((id) => !known.has(id))
+  if (bad.length) die(S.settleOnlyBad(bad))
+  rows = all.filter((r) => ONLY.includes(r.id))
+}
 if (!WROTE_ASKED || DRY) {
-  console.log(WROTE_ASKED && DRY ? S.settleDryWins() : S.settleDry())
+  console.log(WROTE_ASKED && DRY ? S.settleDryWins() : S.settleDry(all.slice(0, 2).map((r) => r.id).join(',')))
   process.exit(0)
 }
 

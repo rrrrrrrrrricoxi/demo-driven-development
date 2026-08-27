@@ -11,6 +11,24 @@ downgrade would freeze every already-stamped board. See
 
 ## [0.13.1] - 2026-08-27
 
+### Added
+- An optional `settleHold` card field (all three card kinds) — a one-line reason
+  for why a card is *not* being settled yet. "The pull request merged" is not
+  "the card is done": a card routinely spans several rounds, and the round that
+  just landed may have shipped only half of it. A card carrying the field drops
+  out of the settle list, loses its "merged · unsettled" / "settled but the pull
+  request is open" chip, stops being named by the Stop guard, and shows one
+  quiet grey chip instead, with the reason in its tooltip. Delete the field when
+  the card really is ready to settle; it never expires on its own. Cards without
+  the field render byte-identically.
+- `pr-sync.mjs --settle --write --only <id>[,<id>…]` — settle the named cards
+  only. The full list is still printed, so what was skipped stays visible. An id
+  that is not on that list (a typo, or a card already on hold) is refused
+  outright and nothing is written at all — a partial write that half-succeeded
+  is worse to unpick than an error. The dry run now points at the flag, and
+  cards on hold are summarised as one "on hold (N)" line rather than dropped
+  silently.
+
 ### Changed
 - The **timeline view of the release progress tab was rebuilt** around version
   bands and lane packing. The 0.12.0 timeline gave every pull request its own

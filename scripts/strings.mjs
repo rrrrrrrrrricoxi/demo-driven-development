@@ -35,7 +35,7 @@ const zh = {
     `⚠ 看板守卫:${total} 张卡的正文字段超过 800 字,却没有 detail 字段 —— 卡正文留结论(problem ≤ 2 句、approach 结论先行、note 只记时间线),逐文件证据与灰盒记录移进 detail:\n` +
     hits.map((h) => `  - ${h.id} 的 ${h.key} 有 ${h.n} 字`).join('\n'),
   respSettle: (ids, total) =>
-    `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账。`,
+    `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账(挑着收加 --only 卡号)。\n  这一轮不该收的卡(PR 只落了一半),在卡上写 "settleHold": "理由" —— 它从此不进清单、不出芯片,守卫这条也不再点它。`,
   respReopen: (ids, total) =>
     `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
   wipOver: (n, hard) =>
@@ -55,8 +55,11 @@ const zh = {
     settleNone: () => 'pr-sync --settle:没有待收账的卡 —— 关联 PR 都合了的卡,status 都已经在终态了。',
     settleHead: (n) => `pr-sync --settle:${n} 张卡的关联 PR 都已合并,status 还没收:`,
     settleRow: (id, from, to, prs) => `  ${id}  ${from} → ${to}  ${prs}`,
-    settleDry: () => '干跑:一个字节都没写。核对无误后加 --write 收账 —— 只改这些卡的 status,并在有时间线字段的卡(note / notes)末尾追加一行「【日期 收账】PR#N 已合(自动)」。',
+    settleDry: (sample) => `干跑:一个字节都没写。核对无误后加 --write 收账 —— 只改这些卡的 status,并在有时间线字段的卡(note / notes)末尾追加一行「【日期 收账】PR#N 已合(自动)」。\n  只收其中几张:--write --only ${sample || '<卡号>'}(逗号分隔多张)。一张卡这一轮本来就不该收(PR 只落了一半)→ 在卡上写 "settleHold": "理由",它不再进这份清单。`,
     settleWrote: (n, files) => `pr-sync --settle --write:已收账 ${n} 张卡 → ${files}`,
+    settleHeld: (ids, n) => `  已 hold(${n}):${ids.join(' ')} —— 这些卡的 PR 也都合了,但卡上写了 settleHold(理由见卡头灰芯片),本次不收、守卫也不催。要收就先删掉那个字段。`,
+    settleOnlyEmpty: () => 'pr-sync --settle --only:没给卡号。写法 --only BL-1 或 --only BL-1,D2(逗号分隔);本次一个字节都没写。',
+    settleOnlyBad: (ids) => `pr-sync --settle --only:这些卡号不在上面的待收账清单里,本次一个字节都没写:${ids.join(' ')}\n  对着清单核卡号;写了 settleHold 的卡本来就不在清单里(要收它,先删掉卡上的 settleHold)。`,
     settleDryWins: () => 'pr-sync:--dry-run 与 --write 同时给了,按 --dry-run 处理 —— 只打印,不写。',
     settleReformat: (file) => `pr-sync --settle --write:${file} 的排版不是 JSON.stringify(…, null, 2) 的标准形制,拒绝改写(重排会动到其它卡的字节)。这几张卡请手工收账。`,
   },
@@ -226,7 +229,7 @@ const en = {
     `⚠ Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail field — keep the card body to conclusions (problem ≤ 2 sentences, approach conclusion-first, note a dated timeline) and move file-by-file evidence into detail:\n` +
     hits.map((h) => `  - ${h.id}: ${h.key} is ${h.n} characters`).join('\n'),
   respSettle: (ids, total) =>
-    `⚠ Kanban guard: ${total} card(s) have all their pull requests merged but are still in a non-final status (unsettled): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Run \`node <plugin>/scripts/pr-sync.mjs --settle\` for the full list (card → suggested status), then add --write to settle them.`,
+    `⚠ Kanban guard: ${total} card(s) have all their pull requests merged but are still in a non-final status (unsettled): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Run \`node <plugin>/scripts/pr-sync.mjs --settle\` for the full list (card → suggested status), then add --write to settle them (add --only <ids> to pick some).\n  For a card that should not be settled this round (its pull request only landed half the work), put "settleHold": "reason" on it — it then leaves the list, drops its chip, and this notice stops naming it.`,
   respReopen: (ids, total) =>
     `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
   wipOver: (n, hard) =>
@@ -246,8 +249,11 @@ const en = {
     settleNone: () => 'pr-sync --settle: nothing to settle — every card whose pull requests are all merged is already in a final status.',
     settleHead: (n) => `pr-sync --settle: ${n} card(s) have all their pull requests merged but are not settled yet:`,
     settleRow: (id, from, to, prs) => `  ${id}  ${from} → ${to}  ${prs}`,
-    settleDry: () => 'Dry run: nothing was written. Once the list looks right, add --write to settle — it only changes the status of these cards and, where the card kind has a timeline field (note / notes), appends one dated line to it.',
+    settleDry: (sample) => `Dry run: nothing was written. Once the list looks right, add --write to settle — it only changes the status of these cards and, where the card kind has a timeline field (note / notes), appends one dated line to it.\n  To settle only some of them: --write --only ${sample || '<card-id>'} (comma-separated). If a card should not be settled this round at all (its pull request only landed half the work), put "settleHold": "reason" on the card and it drops out of this list.`,
     settleWrote: (n, files) => `pr-sync --settle --write: settled ${n} card(s) → ${files}`,
+    settleHeld: (ids, n) => `  On hold (${n}): ${ids.join(' ')} — their pull requests are all merged too, but the cards carry settleHold (the reason shows in the grey chip on the card). They are not settled here and the guard stays quiet about them; remove the field to settle one.`,
+    settleOnlyEmpty: () => 'pr-sync --settle --only: no card id given. Write it as --only BL-1 or --only BL-1,D2 (comma-separated); nothing was written.',
+    settleOnlyBad: (ids) => `pr-sync --settle --only: these card ids are not in the list above, so nothing was written: ${ids.join(' ')}\n  Check them against the list; a card carrying settleHold is never in it (remove that field first if you mean to settle it).`,
     settleDryWins: () => 'pr-sync: both --dry-run and --write were given; --dry-run wins — printing only, nothing written.',
     settleReformat: (file) => `pr-sync --settle --write: ${file} is not formatted the way JSON.stringify(…, null, 2) writes it, so it is left alone (rewriting it would touch bytes of other cards). Settle those cards by hand.`,
   },
