@@ -2432,6 +2432,21 @@ console.log('T50 写操作 CLI ddd.mjs')
     ok(rd(one).status === 'ready' && rd(one).note === afterStatus.note, '--no-note:只改 status,时间线一行都不加')
     const rnote = runCli(kb, ['card', 'note', 'BL-1', '上游 PR 开了'])
     ok(rnote.status === 0 && rd(one).note.endsWith(`【${today}】上游 PR 开了`), 'card note 追一行带日期的进展')
+    { // 决策卡没有时间线字段:gen 的 decCard 不渲染 note/notes,往那儿写就是写给谁也看不见的地方
+      const decCard = join(kb, 'cards', 'decisions', 'D3.json')
+      const beforeDec = readFileSync(decCard, 'utf8')
+      const rdn = runCli(kb, ['card', 'note', 'D3', 'ZZ 一句进展'])
+      ok(rdn.status === 1 && /没有时间线字段|no timeline field/.test(rdn.stderr), 'card note 在决策卡上拒写,并说该写 detail')
+      ok(readFileSync(decCard, 'utf8') === beforeDec, '拒写之后决策卡一个字节都没变')
+      const rds = runCli(kb, ['card', 'status', 'D3', 'live'])
+      const after = rd(decCard)
+      ok(rds.status === 0 && after.status === 'live', 'card status 照改决策卡的状态')
+      ok(after.notes === undefined && after.note === undefined, '不顺手塞一个 gen 不渲染的时间线字段进去')
+      ok(/没有时间线字段|no timeline field/.test(rds.stdout), '回执说明白了为什么没有时间线那一行(不是谎称 --no-note)')
+      const rdset = runCli(kb, ['card', 'set', 'D3', 'notes', '硬写'])
+      ok(rdset.status === 0 && /notes/.test(rdset.stderr), '真要硬写 notes 也拦不住,但会警告板上不渲染它')
+      writeFileSync(decCard, beforeDec) // 这张卡后面还要与拆分前的 manifest 深比较,原样放回去
+    }
     ok(rd(join(kb, 'cards', 'backlog', 'BL-C7.json')).note === '【2026-01-01】立卡', '写一张卡不碰别的卡(一卡一文件的整个理由)')
 
     // 链接:去重 + 本仓 PR 链接顺手写 pr

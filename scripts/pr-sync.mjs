@@ -38,7 +38,7 @@ import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { cmpAt } from './relstage.mjs'
 import { KIND_TERMINAL, settleHold, settleOf } from './settle.mjs'
-import { cardsDirOf, scanCardDir, sortCards } from './cards.mjs'
+import { cardsDirOf, NOTE_FIELD, scanCardDir, sortCards } from './cards.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KANBAN = resolveKanbanDir()
@@ -200,7 +200,6 @@ else {
 if (!SETTLE) process.exit(0)
 
 const relPr = new Map(out.prs.map((p) => [p.number, p]))
-const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' } // 决策卡没有时间线字段,只改 status
 const all = []
 const held = [] // 写了 settleHold 的 settle 卡:单列一行,--write 不碰
 for (const r of CARD_ROWS) {

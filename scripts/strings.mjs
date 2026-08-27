@@ -119,7 +119,8 @@ const zh = {
       id 与 order 不许改;不认识的字段只警告不拒。
   card status <id> <status> [--no-note]
       改状态,并在时间线字段末尾追一行「【日期】status → …」(--no-note 关掉这一行)。
-  card note <id> "<text>"           时间线末尾追一行「【日期】text」
+      决策卡没有时间线字段(看板不渲染),只改 status。
+  card note <id> "<text>"           时间线末尾追一行「【日期】text」(决策卡没有这个字段,会拒)
   card link <id> "<title>" <href>   links 追一条(href 去重);指向本仓 PR 的链接顺手写进 pr 字段
   card show <id> [--json]
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
@@ -168,9 +169,11 @@ const zh = {
     setUsage: () => 'ddd card set:写法 card set <id> <字段> <值>;值是数组/对象时加 --json。',
     setDone: (id, field, value, file) => `ddd card set:${id} 的 ${field} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
     statusUsage: () => 'ddd card status:写法 card status <id> <status> [--no-note]。',
-    statusDone: (id, from, to, noteField) => `ddd card status:${id} ${from || '(空)'} → ${to}` + (noteField ? `,并在 ${noteField} 末尾记了一行时间线` : '(--no-note:没记时间线)'),
+    statusDone: (id, from, to, noteField, noTimeline) => `ddd card status:${id} ${from || '(空)'} → ${to}` +
+      (noteField ? `,并在 ${noteField} 末尾记了一行时间线` : noTimeline ? '(决策卡没有时间线字段,只改了 status)' : '(--no-note:没记时间线)'),
     noteUsage: () => 'ddd card note:写法 card note <id> "<一句话进展>"。',
     noteDone: (id, field, line) => `ddd card note:${id} 的 ${field} 追加了「${line}」`,
+    noteNoField: (id) => `ddd card note:${id} 是决策卡,决策卡没有时间线字段 —— 写进去的话看板一个字都不会渲染。要留进展就写 detail(card set ${id} detail "…"),要改结论就写 decision。`,
     linkUsage: () => 'ddd card link:写法 card link <id> "<标题>" <链接>。标题只写这个链接干了什么 —— 状态词(待合 / 已合)看板会自己渲染。',
     linkScheme: (href) => `ddd card link:链接 ${JSON.stringify(href)} 的协议不在白名单。能写的是 http / https / mailto,或者仓库里的相对路径(docs/x.md、demos/y.html、#锚点)。javascript: 这类链接一点就在看板自己的源上跑脚本,不进卡文件。`,
     linkDup: (id, href) => `ddd card link:${id} 上已经有这条链接了,一个字节都没写:${href}`,
@@ -440,7 +443,8 @@ Cards:
       be changed; an unrecognised field only warns.
   card status <id> <status> [--no-note]
       Change the status and append one timeline line "【date】status → …" (--no-note skips it).
-  card note <id> "<text>"           append one timeline line "【date】text"
+      Decision cards have no timeline field (the board does not render one), so only the status changes.
+  card note <id> "<text>"           append one timeline line "【date】text" (refused on decision cards)
   card link <id> "<title>" <href>   append a link (href deduped); a link to this repository's
                                     pull request is written into the pr field as well
   card show <id> [--json]
@@ -491,9 +495,11 @@ kanban.config.json). This command never commits — git add the card files yours
     setUsage: () => 'ddd card set: card set <id> <field> <value>; add --json when the value is an array or object.',
     setDone: (id, field, value, file) => `ddd card set: ${field} of ${id} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
     statusUsage: () => 'ddd card status: card status <id> <status> [--no-note].',
-    statusDone: (id, from, to, noteField) => `ddd card status: ${id} ${from || '(empty)'} → ${to}` + (noteField ? `, with one timeline line appended to ${noteField}` : ' (--no-note: no timeline line)'),
+    statusDone: (id, from, to, noteField, noTimeline) => `ddd card status: ${id} ${from || '(empty)'} → ${to}` +
+      (noteField ? `, with one timeline line appended to ${noteField}` : noTimeline ? ' (decision cards have no timeline field, so only the status changed)' : ' (--no-note: no timeline line)'),
     noteUsage: () => 'ddd card note: card note <id> "<one line of progress>".',
     noteDone: (id, field, line) => `ddd card note: appended "${line}" to ${field} of ${id}`,
+    noteNoField: (id) => `ddd card note: ${id} is a decision card, and decision cards have no timeline field — anything written there is never rendered on the board. For progress use detail (card set ${id} detail "…"); to change the conclusion use decision.`,
     linkUsage: () => 'ddd card link: card link <id> "<title>" <href>. The title says what the link is; the board renders the status (open / merged) itself.',
     linkScheme: (href) => `ddd card link: the scheme in ${JSON.stringify(href)} is not allowed. Use http / https / mailto, or a path relative to the repository (docs/x.md, demos/y.html, #anchor). A javascript: link runs script on the board's own origin the moment someone clicks it, so it does not go into a card.`,
     linkDup: (id, href) => `ddd card link: ${id} already has this link, nothing was written: ${href}`,

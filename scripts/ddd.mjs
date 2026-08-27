@@ -27,7 +27,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
-import { CARD_KINDS, cardsDirOf, cardText, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { CARD_KINDS, cardsDirOf, cardText, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
 
@@ -211,10 +211,8 @@ function checkPr(value) {
 const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'demo', 'repro', 'walkthroughs', 'order']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
-  entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'notes', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
+  entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
 }
-/** 时间线字段:backlog 的 note、决策的 notes(manifest.json 的 tasks 用 notes,同一族) */
-const NOTE_FIELD = { items: 'note', entries: 'notes' }
 /** 形制上就是数组的字段:塞个标量进去,gen 会在 .map 上当场 TypeError,整块板生成不出来 */
 const ARRAY_FIELDS = ['links', 'shots', 'walkthroughs', 'iters', 'refines']
 
@@ -394,11 +392,12 @@ function cmdStatus() {
   checkField(store, 'status', next)
   const from = String(row.card.status || '')
   const card = { ...row.card, status: next }
+  // 决策卡没有时间线字段(gen 不渲染 note/notes),这时候只改 status —— 不硬塞一个没人读的字段
   const nf = NOTE_FIELD[store.k.key]
-  const noted = !flags['no-note']
+  const noted = Boolean(nf) && !flags['no-note']
   if (noted) card[nf] = appendTimeline(card[nf], `【${TODAY}】status → ${next}`)
   const written = writeCard(store, row, card)
-  say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : ''))
+  say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : '', !nf))
 }
 
 function cmdNote() {
@@ -406,6 +405,8 @@ function cmdNote() {
   if (!id || !rest.length) die(S.noteUsage())
   const { store, row } = findCard(id)
   const nf = NOTE_FIELD[store.k.key]
+  // 决策卡上写 note 会落进一个 gen 从不渲染的字段:命令说「记下了」,板上一个字都不出现
+  if (!nf) die(S.noteNoField(id, KIND_NAME[store.k.key]))
   const line = `【${TODAY}】${rest.join(' ')}`
   const card = writeCard(store, row, { ...row.card, [nf]: appendTimeline(row.card[nf], line) })
   say({ ok: true, id, field: nf, line, file: row.where, card }, S.noteDone(id, nf, line))

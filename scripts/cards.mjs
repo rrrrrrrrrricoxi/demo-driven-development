@@ -29,6 +29,13 @@ export const CARD_KINDS = [
  */
 export const cardsDirUnsafe = (s) => /[/\\]/.test(s) || s === '.' || s === '..'
 
+/**
+ * 每类卡的时间线字段(一处定,ddd 与 pr-sync 共用)。
+ * manifest.json 的 tasks 用 notes、backlog 的 items 用 note,决策卡没有 —— gen 的 decCard 不渲染
+ * note/notes 里的任何一个字,往那儿写就是写一个没人读得到的字段,还骗人说「记下了」。
+ */
+export const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' }
+
 /** config.cardsDir 归一:非空字符串才算开,首尾斜杠去掉;其它一切(缺席/false/空串)= 关。
  *  值逃出看板目录时抛 —— 悄悄当「没配」会让 gen 拿不到卡却也不报错,那更难查。 */
 export function cardsDirOf(cfg) {
