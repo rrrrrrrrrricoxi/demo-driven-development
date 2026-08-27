@@ -16,6 +16,25 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 人点名「做个 demo」时不拦,判断仍报一行。分流只免 demo / 立卡 / ★评审的仪式;分支、验证、PR 节奏照旧。**收敛规则**:并排发散不限;串行(评审后再来一轮)第 3 轮起,每轮先答「这轮会改变选择,还是只在磨已选中的?」答不出这轮会改变什么 → 陈述边际递减、建议就地拍板,别重演「logo-20 轮」。边界全文与实证:plugin 根 `docs/scene-fit.md`(拿不准再读,别默认加载)。
 
+## 写卡走 CLI(v0.14.0)
+
+建卡、改状态、记进展、挂链接一律走 `node <plugin>/scripts/ddd.mjs`(零依赖,`--dir` 与 gen 同口径),不再手搓 JSON:
+
+| 要做的事 | 命令 |
+|---|---|
+| 立一张 backlog 卡 | `ddd.mjs card new backlog --title "…" --line C --session dev` —— 号由脚本分配并独占预留;模板里的 `<…>` 是占位,建完就填 |
+| 立一张决策卡 | `ddd.mjs card new decision --title "…"` |
+| 改状态 | `ddd.mjs card status <id> done` —— 默认在时间线末尾追一行「【日期】status → done」(`--no-note` 关) |
+| 记一条进展 | `ddd.mjs card note <id> "上游 PR 开了,等合"` |
+| 挂链接 / 挂 PR | `ddd.mjs card link <id> "这个 PR 干了什么" <链接>` —— 本仓 PR 链接顺手写进 `pr` 字段 |
+| 改一个字段 | `ddd.mjs card set <id> tier 1`;数组/对象加 `--json`,如 `card set <id> shots --json '["bl-c72-filter-jump.png"]'` |
+| 看一张卡 / 一批卡 | `ddd.mjs card show <id>` / `ddd.mjs card list --status ready --session dev` |
+| 这张卡改过几次 | `ddd.mjs card history <id>`(板拆成一卡一文件之后才有) |
+
+**为什么不再手改 JSON**:①卡号原来靠各会话自己算「最大号 +1」,同一晚两条线撞号只是时间问题 —— CLI 用 `openSync(path,'wx')` 独占创建把号预留下来,抢输的那个自己退到下一号;②手写会漏末尾换行、写错 status / 日期形制 / 线别拼错,gen 要么硬失败要么静默渲染成别的样子,CLI 当场拒(`order` 一律不许改,它就是显示顺序);③板拆成一卡一文件之后,写一张卡只动那一张卡的文件,别的会话在途的卡不会被整份重写带走。
+
+**退路**:CLI 说不清的(一次重排一整段结构、批量改、要写它还不认识的形制)直接编辑卡文件 / manifest —— 形制照旧是 2 空格缩进 + 末尾换行,改完让守卫重跑 gen。CLI 从不 commit,`git add` 那几个文件仍是自己的事。
+
 ## 流程:①设计 + demo → ★评审 → ②代码 → ③验证 → ④PR
 
 每个功能一条 feature 分支、一个 PR。顺序不可跳:
@@ -27,24 +46,24 @@ description: Demo-driven development workflow for a project that has the demo-dr
    - **方案 ≥3 或页面长,左侧带固定可导航目录**(`position:fixed`,点击直达 + scrollspy 高亮)。两个实测坑:①守卫注入的返回栏占顶部 44px,目录的 `top` 要让位(参考值 76px);②页底最后一节的 `offsetTop` 可能永远够不到判定线,须加「滚到底 = 点亮末项」的兜底。
    - **多轮 demo 时,卡片的 `demo` 字段(主按钮)必须指向最新一轮**;旧轮留在 `links` 里并标注轮次。旧轮的多个文件可按「合订术」归并成单页存档(同源 iframe 组装,交互零损失,配方见 plugin 根 `docs/demo-binding.md`);被已挂卡 demo 用 iframe 内嵌的子页,守卫自动豁免,不必挂占位链接。
    **建卡时的现场留存(v0.11.4 起为机制)**:
-   - **prompt 里带了截图,就把它留进卡**:图片存进看板的 `shots/`(文件名以卡号打头,如 `bl-c72-filter-jump.png` —— 截图廊会据此自动归组并跳回该卡),卡上加 `"shots": ["bl-c72-filter-jump.png"]`(要配说明就写 `[{"file":"…","caption":"点 chip 后整页横移"}]`)。卡片详情里直接看得到缩略图,点开原图。**理由**:隔一段时间回来翻卡,一句文字描述常唤不回当时看到的东西,一张现场图能。
-   - **bug 卡必须带复现流程**:`"repro"` 字段,单行写字符串,多步写数组 `["打开 X","点 Y","看到 Z(应为 W)"]`。写到「照着点就能重现」的程度——省掉的每一步,都是未来某个人(可能是你自己)重新试错的时间。
+   - **prompt 里带了截图,就把它留进卡**:图片存进看板的 `shots/`(文件名以卡号打头,如 `bl-c72-filter-jump.png` —— 截图廊会据此自动归组并跳回该卡),卡上加 `shots`:`ddd.mjs card set <id> shots --json '["bl-c72-filter-jump.png"]'`(要配说明就写 `[{"file":"…","caption":"点 chip 后整页横移"}]`)。卡片详情里直接看得到缩略图,点开原图。**理由**:隔一段时间回来翻卡,一句文字描述常唤不回当时看到的东西,一张现场图能。
+   - **bug 卡必须带复现流程**:`repro` 字段,单步写字符串 `ddd.mjs card set <id> repro "打开 X 点 Y"`,多步写数组 `ddd.mjs card set <id> repro --json '["打开 X","点 Y","看到 Z(应为 W)"]'`。写到「照着点就能重现」的程度——省掉的每一步,都是未来某个人(可能是你自己)重新试错的时间。
    **正文写法:摘要与细节分家(v0.13.0 起为机制,板上开了 `richText` 时)**:卡正文是会话写给会话看的,一段到底谁都不会读第二遍。分工是死的:
    - `problem` ≤ 2 句 —— 用户看到什么、为什么这是问题。别写查证过程。
    - `approach` **结论先行** —— 1–3 行说清怎么改、改哪、代价。判断放最上面,读的人才可能只读最上面。
-   - `note` 只记决策与进展的时间线,一段一条,`【2026-08-26 更新】` 开头(渲染时自动分节)。
+   - `note` 只记决策与进展的时间线,一段一条,`【2026-08-26 更新】` 开头(渲染时自动分节)。用 `ddd.mjs card note <id> "…"` 追加,日期它自己写。
    - 逐文件证据、灰盒记录、排查全过程 → `"detail"` 字段。它渲染在卡最下面一个默认折叠的「查证细节」块里,想看的人点开,不想看的人不被它挡路。
    - 正文认轻 markdown:`**粗体**`、`` `代码` ``、空行分段、`- ` 与 `1.` 列表、`①…⑩` 列表。**不认**标题、表格、链接语法(链接走 `links[]`)与 HTML。
    - 某个字段过了 800 字而卡上没有 `detail`,守卫会在收工时点名 —— 那是「该拆了」的信号,不是错误。
 2. **★评审**:人审设计 + demo,拍板后才动代码。别默默替用户拍板。
-3. **代码**:实现落地;改 manifest 后跑 `node app/kanban/gen.mjs` 重生成看板。
+3. **代码**:实现落地;卡改完(`ddd.mjs card …`)不必手动跑 gen,收工守卫会重生成看板。
 4. **验证**:定义成功标准并跑到验证(测试 / 构建 / 手工 smoke);"写完了"≠"验证过了"。
    **要人实测的,清单写进 `acceptance-manifest.json`,不再手搭 HTML 页**(v0.12.0,板上开了 `acceptanceTab` 时):一份清单挂一个或多个 PR,`current` 指向正在测的那个;条目写「做什么 / 预期 / 不对的样子 / 为什么」,数据块用 `rows` 二维数组。人在页面上勾,勾完点「复制勾选结果」,把那段 JSON 贴回清单的 `result` —— 勾选结果这才进 git,而不是留在某一台浏览器里。清单正文改了就把 `revision` 加一(旧勾选当场作废)。
 5. **PR**:开 PR 合入;PR 后推进相关卡状态(gh-pr 提醒 hook 会提示)。
-   **开 PR 的同时在卡上写 `pr` 字段**(`230` / `[227, 230]` / `"owner/repo#4"`)—— 卡与实现它的那段工作从此是数据关系,不是散文。
+   **开 PR 的同时把它挂上卡**:`ddd.mjs card link <卡号> "这个 PR 干了什么" <PR 链接>` —— 它挂链接的同时把号写进 `pr` 字段(`230` / `[227, 230]` / 跨仓 `"owner/repo#4"`),卡与实现它的那段工作从此是数据关系,不是散文。
    **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。
    **合完 PR 用 `pr-sync.mjs --settle` 收账**(v0.13.0):它同步之后列出「关联 PR 都合了、卡还停在非终态」的卡与建议 status(backlog / 进度卡 `done`,决策卡 `live`),**默认只打印**;核对无误再加 `--write`(改 status,并在 `note` / `notes` 末尾追一行时间线)。守卫在收工时也会点名这两种卡(待收账 / 已收账但 PR 未合),非阻断。
-   **一张卡跨几轮 PR 时写 `settleHold`**(v0.13.1):这一轮的 PR 只落了一半 / 只落了接口,卡该留在 `ready` —— 在卡上写一句 `"settleHold": "理由"`,它从此不进待收账清单、不出芯片、守卫不催,卡头换成一枚灰芯片「暂不收账」(理由挂 title)。新一轮 PR 开了就把号加进卡的 `pr` 数组;真收账时删掉 `settleHold`。清单上只有几张该收时,用 `--settle --write --only BL-1,D2` 挑着收(点名了清单外的卡号会报错,一个字节都不写)。
+   **一张卡跨几轮 PR 时写 `settleHold`**(v0.13.1):这一轮的 PR 只落了一半 / 只落了接口,卡该留在 `ready` —— `ddd.mjs card set <id> settleHold "理由"`,它从此不进待收账清单、不出芯片、守卫不催,卡头换成一枚灰芯片「暂不收账」(理由挂 title)。新一轮 PR 开了照旧 `card link` 挂上去(号自己并进 `pr` 数组);真收账时把 `settleHold` 从卡文件里删掉。清单上只有几张该收时,用 `--settle --write --only BL-1,D2` 挑着收(点名了清单外的卡号会报错,一个字节都不写)。
    **`links[]` 的标题不写状态词**:「(开而不合)」「(待合)」「(已合并)」这类手写注解一定会过时 —— 板上有了 `release-manifest.json` 之后,指向本仓 PR 的链接自动带真实状态(开着 / 已合 08-26 / 已发 v0.0.3),写过的旧词若与实际不符会被划掉。标题只写这个 PR 干了什么。
 
 **发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。
@@ -54,8 +73,8 @@ description: Demo-driven development workflow for a project that has the demo-dr
 成本大头是"Claude 亲手读了本可由脚本确定性产出的东西"。脚本读正文不算,Claude 读才算。
 
 - **永不读生成物**:`app/kanban/index.html`、`shots.html`、`refs/**` 是 `gen.mjs` 的产物(单文件可达几十万字符)。禁止 Read,禁止 `cat`/`head`/`sed` 绕读。deny 规则会硬拦。
-- **manifest 不整读**:查卡状态 / 某字段一律 `jq` 点查或 `Grep`,不整读(可达数百 KB)。
-- **查证走源头,不碰像素**:卡状态 → `jq` 查 manifest;文档正文 → 读 `docs/` 的 md 源;渲染对不对 → 跑 `gen.mjs` 看报错(守卫已把失败喂回),不 Read `index.html` 肉眼找。
+- **manifest 不整读**:查卡状态 / 某字段一律 `ddd.mjs card show|list`、`jq` 点查或 `Grep`,不整读(可达数百 KB)。
+- **查证走源头,不碰像素**:卡状态 → `ddd.mjs card show <id>`(或 `jq` 点查 manifest);文档正文 → 读 `docs/` 的 md 源;渲染对不对 → 跑 `gen.mjs` 看报错(守卫已把失败喂回),不 Read `index.html` 肉眼找。
 - **`gen.mjs` 大文件**:`Grep` 定位或 `offset`+`limit` 分片读,不整读第二遍。
 - **孤儿报警先核实再动手**:守卫报某 demo 无卡时,先 `grep` 核实文件名是否已在 manifest —— 多会话并行有"落 demo → 补链接"竞态窗口,报警可能已过时,别急着补卡返工。
 

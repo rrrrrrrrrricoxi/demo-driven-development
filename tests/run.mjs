@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。516 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。560 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -9,10 +9,12 @@
 // 发布进度时间线几何(轴按繁忙度加宽 / 刻度不压字 / 泳道封顶 / 带高有上界)、
 // 暂不收账 settleHold(三种卡的灰芯片 + 待收账段/守卫闭嘴 + pr-sync --settle --only 挑着收)、
 // tab 条 nowrap(中文/· 断行点回归锚 + 横向滚动)、
-// 一卡一文件 cardsDir(拆分等价四拍 / 五种硬报错 / 顺序与文件系统无关 / 守卫 / 每卡更新日期降级链)等。
+// 一卡一文件 cardsDir(拆分等价四拍 / 五种硬报错 / 顺序与文件系统无关 / 守卫 / 每卡更新日期降级链)、
+// 写操作 CLI(建卡的号靠 openSync 'wx' 预留 —— 真起两个进程并发验 / 六种校验拒绝 / 时间线 /
+// 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -2202,6 +2204,187 @@ esac
   ok(rd(decCard).status === 'live' && rd(decCard).order !== undefined, '决策卡同样按文件收账,order 字段没被 pr-sync 吃掉')
   const after = runGen(NEW_SCRIPTS, kb)
   ok(after.status === 0, `收账后 gen 仍 exit 0(${after.stderr.slice(0, 200)})`)
+}
+
+// ============ T50 写操作 CLI(建卡独占预留 / 校验 / 时间线 / 链接写 pr / export 同形 / 原子写)============
+console.log('T50 写操作 CLI ddd.mjs')
+{
+  const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  /** 三张 backlog(BL- 一张、BL-C 两张:主流前缀是 BL-C)+ 一张决策 */
+  const seed = (kb) => {
+    const blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+    const bl = rd(blP), dec = rd(decP), cfg = rd(cfgP)
+    bl.tiers = { 1: '核心', 2: '次要' }
+    const item = (id, date, title, status) => ({ id, title, tier: '1', priority: 'med', status, line: 'C', session: 'dev', date, problem: 'p', approach: 'a', note: '【2026-01-01】立卡', links: [] })
+    bl.items = [item('BL-1', '2026-01-01', '甲', 'ready'), item('BL-C7', '2026-02-01', '乙', 'ready'), item('BL-C9', '2026-03-01', '丙', 'blocked')]
+    dec.entries = [{ id: 'D3', code: 'D3', status: 'deciding', line: 'C', session: 'dev', date: '2026-01-01', title: '决策三', question: 'q', decision: 'd', links: [] }]
+    for (const x of [bl, dec]) x.instance.ghRepo = 'o/r'
+    cfg.sessionTags = { dev: { label: 'dev' }, release: { label: 'release' } }
+    cfg.lanes = { ids: ['B', 'C'], default: 'C', titles: { B: 'B', C: 'C' } }
+    wr(blP, bl); wr(decP, dec); wr(cfgP, cfg)
+    return { blP, decP, cfgP }
+  }
+
+  { // ---- 未拆模式:整文件重写也走同一套校验与形制 ----
+    const fx = mkFixture('fx50a', { 'c1.html': demoHtml('c1') })
+    const kb = fx.kb
+    const { blP, decP, cfgP } = seed(kb)
+    const preBl = rd(blP), preDec = rd(decP) // export 的比对基线(拆分前的原 manifest)
+
+    const rn = runCli(kb, ['card', 'new', 'backlog', '--title', '甲二', '--line', 'C', '--session', 'release'])
+    ok(rn.status === 0 && /BL-C10/.test(rn.stdout), `未拆模式建卡取主流前缀的最大号 +1 = BL-C10(${rn.stdout.trim().split('\n')[0]}${rn.stderr})`)
+    const made = rd(blP).items.find((x) => x.id === 'BL-C10')
+    ok(made && made.status === 'ready' && made.tier === '1' && made.priority === 'med' && made.date && /^\d{4}-\d{2}-\d{2}$/.test(made.date),
+      '新卡落进 items 数组,status 取 statuses 第一个、日期是今天')
+    ok(/^<.*>$/.test(made.problem) && /^<.*>$/.test(made.approach), '正文字段是 <…> 占位,等着人填')
+    ok(Object.keys(made).join(',') === 'id,title,status,tier,priority,line,session,date,problem,approach,note,links',
+      `键序规范:id/title 在前、长文居中、links 收尾(实得 ${Object.keys(made).join(',')})`)
+    ok(readFileSync(blP, 'utf8') === JSON.stringify(rd(blP), null, 2) + '\n', '未拆模式整文件重写仍是 2 空格 + 末尾换行')
+    ok(runGen(NEW_SCRIPTS, kb).status === 0, 'CLI 建的卡 gen 认(tier / priority / status 都在合法集里)')
+
+    const rd2 = runCli(kb, ['card', 'new', 'decision', '--title', '决策四'])
+    const dec4 = rd(decP).entries.find((x) => x.id === 'D4')
+    ok(rd2.status === 0 && dec4 && dec4.code === 'D4', '决策卡号固定 D 前缀,code 默认取 id(缺 code 会让 gen 硬失败)')
+
+    const before = readFileSync(blP, 'utf8')
+    const bad = [
+      [['card', 'set', 'BL-C10', 'status', 'nope'], /statuses/],
+      [['card', 'set', 'BL-C10', 'date', '2026-8-1'], /YYYY-MM-DD/],
+      [['card', 'set', 'BL-C10', 'pr', 'xyz'], /owner\/repo#12/],
+      [['card', 'set', 'BL-C10', 'line', 'Z'], /lanes\.ids/],
+      [['card', 'set', 'BL-C10', 'session', 'nobody'], /sessionTags/],
+      [['card', 'set', 'BL-C10', 'order', '3'], /order/],
+    ]
+    for (const [args, re] of bad) {
+      const r = runCli(kb, args)
+      ok(r.status === 1 && re.test(r.stderr), `card set 拒绝:${args[3]} = ${args[4]}`)
+    }
+    ok(readFileSync(blP, 'utf8') === before, '六次拒绝之后 manifest 一个字节都没变')
+
+    const ru = runCli(kb, ['card', 'set', 'BL-C10', 'wombat', '42'])
+    ok(ru.status === 0 && /wombat/.test(ru.stderr) && rd(blP).items.find((x) => x.id === 'BL-C10').wombat === '42',
+      '不认识的字段只警告不拒(板上不渲染它,但人可能正打算加)')
+
+    const rh = runCli(kb, ['card', 'history', 'BL-C10'])
+    ok(rh.status === 1 && /cards-split/.test(rh.stderr), '未拆模式 card history 明说不可用,并指出该怎么办')
+
+    // export 与拆分前的原 manifest 同形:先在未拆模式取一份,拆完再取一份,两份都要对得上
+    const exp0 = JSON.parse(runCli(kb, ['export']).stdout)
+    ok(JSON.stringify(exp0.backlog.items) === JSON.stringify(rd(blP).items) && JSON.stringify(exp0.decisions.entries) === JSON.stringify(rd(decP).entries),
+      'export --json 在未拆模式下等于两份 manifest 的数组本身')
+    ok(JSON.stringify(preBl.instance) === JSON.stringify(exp0.backlog.instance) && Object.keys(exp0.backlog).slice(-1)[0] === 'items',
+      'export 的头与原 manifest 同形,数组仍在最后')
+  }
+
+  { // ---- 拆分模式:一张卡一次原子写,号靠 openSync('wx') 预留 ----
+    const fx = mkFixture('fx50b', { 'c1.html': demoHtml('c1') })
+    const kb = fx.kb
+    const { blP, decP, cfgP } = seed(kb)
+    const preBl = rd(blP), preDec = rd(decP)
+    runGen(NEW_SCRIPTS, kb)
+    ok(runScript('cards-split.mjs', kb).status === 0, 'T50 拆分 exit 0')
+    const blDir = join(kb, 'cards', 'backlog')
+
+    const a = runCli(kb, ['card', 'new', 'backlog', '--title', '拆后一'])
+    const b = runCli(kb, ['card', 'new', 'backlog', '--title', '拆后二'])
+    ok(/BL-C10/.test(a.stdout) && /BL-C11/.test(b.stdout), `连着两次 new 拿到不同号(${a.stdout.trim().split('\n')[0]} / ${b.stdout.trim().split('\n')[0]})`)
+    ok(existsSync(join(blDir, 'BL-C10.json')) && existsSync(join(blDir, 'BL-C11.json')), '两张卡各落成一个文件')
+    ok(rd(join(blDir, 'BL-C10.json')).order === undefined, '手工新卡不写 order(gen 排完即删,缺席就按 id 排在最后)')
+
+    writeFileSync(join(blDir, 'BL-C12.json'), JSON.stringify({ id: 'BL-C12', title: '占位', status: 'ready', tier: '1', priority: 'med', links: [] }, null, 2) + '\n')
+    const c = runCli(kb, ['card', 'new', 'backlog', '--title', '跳号'])
+    ok(/BL-C13/.test(c.stdout), `目标号已被占 → 跳到下一号(${c.stdout.trim().split('\n')[0]})`)
+
+    // 真并发:两个进程同时算出同一个号,'wx' 让抢输的那个退到下一号而不是覆盖
+    const spawnCli = (args) => new Promise((res) => {
+      let out = ''
+      const p = spawn(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb, '--json'])
+      p.stdout.on('data', (d) => { out += d })
+      p.on('close', () => res(out))
+    })
+    const [p1, p2] = await Promise.all([spawnCli(['card', 'new', 'backlog']), spawnCli(['card', 'new', 'backlog'])])
+    const id1 = JSON.parse(p1).id, id2 = JSON.parse(p2).id
+    ok(id1 !== id2 && existsSync(join(blDir, `${id1}.json`)) && existsSync(join(blDir, `${id2}.json`)),
+      `并发两次 new 拿到不同号,两张卡都在(${id1} / ${id2})—— 号是 'wx' 预留出来的,不是算出来的`)
+
+    // 时间线:status 默认附一行,--no-note 关掉;拆分卡的 order 不被写路径吃掉
+    const one = join(blDir, 'BL-1.json')
+    const orderBefore = rd(one).order
+    const rs = runCli(kb, ['card', 'status', 'BL-1', 'done'])
+    const afterStatus = rd(one)
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    ok(rs.status === 0 && afterStatus.status === 'done' && afterStatus.note === `【2026-01-01】立卡\n\n【${today}】status → done`,
+      'card status 改状态并在 note 末尾追一行时间线')
+    ok(afterStatus.order === orderBefore, 'order 原样留着(它是显示顺序,写路径不许动它)')
+    ok(readFileSync(one, 'utf8') === JSON.stringify(afterStatus, null, 2) + '\n', '卡文件仍是 2 空格 + 末尾换行')
+    runCli(kb, ['card', 'status', 'BL-1', 'ready', '--no-note'])
+    ok(rd(one).status === 'ready' && rd(one).note === afterStatus.note, '--no-note:只改 status,时间线一行都不加')
+    const rnote = runCli(kb, ['card', 'note', 'BL-1', '上游 PR 开了'])
+    ok(rnote.status === 0 && rd(one).note.endsWith(`【${today}】上游 PR 开了`), 'card note 追一行带日期的进展')
+    ok(rd(join(kb, 'cards', 'backlog', 'BL-C7.json')).note === '【2026-01-01】立卡', '写一张卡不碰别的卡(一卡一文件的整个理由)')
+
+    // 链接:去重 + 本仓 PR 链接顺手写 pr
+    const rl = runCli(kb, ['card', 'link', 'BL-1', 'PR #7', 'https://github.com/o/r/pull/7'])
+    ok(rl.status === 0 && rd(one).pr === 7 && rd(one).links.some((l) => l.href.endsWith('/pull/7')),
+      'card link 挂链接,并把本仓 PR 号写进 pr 字段(卡头芯片只认这一档)')
+    const rl2 = runCli(kb, ['card', 'link', 'BL-1', '重复', 'https://github.com/o/r/pull/7'])
+    ok(rl2.status === 0 && rd(one).links.filter((l) => l.href.endsWith('/pull/7')).length === 1, '同一个 href 不重复挂')
+    runCli(kb, ['card', 'link', 'BL-1', 'PR #9', 'https://github.com/o/r/pull/9'])
+    ok(JSON.stringify(rd(one).pr) === '[7,9]', '第二个 PR 号并进数组,不顶掉第一个')
+    runCli(kb, ['card', 'link', 'BL-1', '上游', 'https://github.com/other/repo/pull/3'])
+    ok(JSON.stringify(rd(one).pr) === '[7,9]', '别的仓的 PR 链接不写进 pr(板上有旧仓链接,号会撞)')
+
+    // 原子写:目标目录只读 → 报错退出,原文件一个字节不变
+    const shaBefore = sha(one)
+    chmodSync(blDir, 0o500)
+    const rw = runCli(kb, ['card', 'note', 'BL-1', '写不进去'])
+    chmodSync(blDir, 0o700)
+    ok(rw.status === 1 && /EACCES|EPERM/.test(rw.stderr) && sha(one) === shaBefore,
+      '写不进去时原文件一个字节都没变(临时文件 + rename,半截文件落不到卡的位置上)')
+
+    // git 历史:一卡一文件之后每张卡有自己的 log
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'], { cwd: fx.root })
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'cards'], { cwd: fx.root })
+    const rh = runCli(kb, ['card', 'history', 'BL-1'])
+    ok(rh.status === 0 && /cards\/backlog\/BL-1\.json/.test(rh.stdout) && /cards$/m.test(rh.stdout.trim()), 'card history 列出这张卡文件的提交')
+
+    // export:拆分后合出来的一坨,与拆分前的 manifest 深比较相等
+    const exp = JSON.parse(runCli(kb, ['export']).stdout)
+    const strip = (list) => list.map((x) => { const y = { ...x }; delete y.order; return y })
+    ok(JSON.stringify(exp.decisions.entries) === JSON.stringify(preDec.entries),
+      'export 出来的决策数组与拆分前逐字段、逐顺序相同(order 已去掉)')
+    ok(JSON.stringify(Object.keys(exp.backlog)) === JSON.stringify(Object.keys(preBl)),
+      'export 出来的 backlog 头与拆分前同形(items 仍在最后)')
+    ok(JSON.stringify(strip(exp.backlog.items).slice(0, 3).map((x) => x.id)) === JSON.stringify(preBl.items.map((x) => x.id)),
+      'export 的顺序是 order 再 id —— 原来的三张卡还是原来的先后')
+    const outP = join(kb, 'exported.json')
+    runCli(kb, ['export', '--out', outP])
+    ok(readFileSync(outP, 'utf8') === JSON.stringify(exp, null, 2) + '\n', '--out 落盘的与 stdout 的逐字节相同(2 空格 + 末尾换行)')
+    rmSync(outP)
+
+    ok(runGen(NEW_SCRIPTS, kb).status === 0, 'CLI 折腾一轮之后 gen 仍 exit 0')
+  }
+
+  { // ---- wip 联动:建卡之后照守卫的口径数一遍 ready ----
+    const fx = mkFixture('fx50c', { 'c1.html': demoHtml('c1') })
+    const kb = fx.kb
+    const { cfgP } = seed(kb)
+    const cfg = rd(cfgP)
+    cfg.wip = { soft: 0, hard: 0 }
+    wr(cfgP, cfg)
+    const r = runCli(kb, ['card', 'new', 'backlog', '--title', '又一张'])
+    ok(r.status === 0 && /config\.wip\.hard = 0/.test(r.stderr), 'card new 之后 ready 超 hard:stderr 上一句与守卫同款的提醒')
+    ok(!/config\.wip\.hard/.test(r.stdout), '提醒走 stderr,不脏 --json 的管道')
+  }
+
+  { // ---- pr-sync 别名:原样转调,连退出码 ----
+    const fx = mkFixture('fx50d', { 'c1.html': demoHtml('c1') })
+    const r = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), 'pr-sync', '--dir', fx.kb], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent' } })
+    ok(r.status === 1 && /pr-sync/.test(r.stdout + r.stderr), 'ddd pr-sync 转调 pr-sync.mjs(参数与退出码原样)')
+  }
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

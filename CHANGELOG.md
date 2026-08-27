@@ -9,9 +9,33 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
-## [Unreleased]
+## [0.14.0] - 2026-08-27
 
 ### Added
+- **A write CLI**, `scripts/ddd.mjs`, so a session never hand-edits card JSON
+  again. `card new backlog|decision` allocates the next id and *reserves* it —
+  with one file per card it creates the file with `openSync(path, 'wx')`, so
+  two sessions racing for the same number both succeed and the loser steps to
+  the next one. Until now every session computed "highest + 1" for itself and
+  nothing stopped two of them landing on the same number; the night that
+  produced this change had two lines allocating cards minutes apart and missing
+  a collision by luck. `card set` / `card status` / `card note` / `card link`
+  change one thing at a time and check it: the status has to be one the board
+  declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number,
+  `#12` or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session
+  tag in `config.sessionTags`. An unrecognised field is only warned about — the
+  board grows fields faster than this list does — but `order` cannot be touched
+  at all, because it *is* the display order. `card status` appends a dated
+  timeline line by default (`--no-note` to skip), `card link` dedupes by href
+  and writes a link to this repository's pull request into the `pr` field as
+  well. `card show` / `card list` / `card history` read; `export` merges
+  everything back into one object shaped like the manifests; `pr-sync` is the
+  same script under this entry point. Every write goes through a temp file and
+  a rename, keeps the existing key order and only slots *new* keys into place
+  (id and title first, long prose in the middle, `links`/`shots`/`pr` last), and
+  ends with two-space indentation and a trailing newline. Boards that were never
+  split work too — the CLI rewrites the whole manifest there, which is the same
+  race those boards always had, but at least the checks and the shape hold.
 - **One file per card** (`config.cardsDir`, opt-in). Point it at a directory
   name — `"cards"` by convention — and backlog cards are read from
   `<cardsDir>/backlog/<id>.json` and decision cards from
@@ -60,6 +84,13 @@ downgrade would freeze every already-stamped board. See
 - `pr-sync.mjs` reads cards from the card directory when one is configured, so
   the pull-request-to-card reverse lookup and `--settle` keep working after a
   split; `--settle --write` then writes the individual card file.
+- Both skills now show card work as CLI commands rather than JSON to type by
+  hand; editing the JSON is documented as the way out when the CLI cannot say
+  what you mean. The `gh pr` reminder points at `ddd card link` instead of
+  telling you to write a `pr` field.
+- After `card new`, the CLI counts `ready` cards the way the guard does and
+  prints the same warning when the pile is over `config.wip.hard` — better at
+  the moment the card is created than at the end of the session.
 
 ## [0.13.1] - 2026-08-27
 
