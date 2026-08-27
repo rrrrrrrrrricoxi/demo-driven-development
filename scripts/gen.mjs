@@ -3265,7 +3265,7 @@ const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
 const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = LAZY_PANE_OF[id]\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
 const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
 const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
-const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(工具条/搜索/时间筛全幂等重跑)————
+const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(线别/工具条/搜索/时间筛全幂等重跑)————
   const LAZY_PANE_OF = ${JSON.stringify(LAZY_IDMAP).replace(/</g, '\\u003c')}
   const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')}${!ARCH ? '' : `, archive: ${Buffer.byteLength(archivePane, 'utf8')}`} } // 未压缩字节 = 真进度分母
   let curTf = 0
@@ -3281,6 +3281,7 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
   function lazyPending() { return Object.keys(LAZY_BYTES).some((p) => !lazyDone[p]) }
   function ensureAll() { return Promise.all(Object.keys(LAZY_BYTES).map(ensurePane)) }
   function onPaneInjected(name) {
+    syncLineBtns(curLine) // 注入进来的分段立即反映当前线别(不然模板硬写的「全部」亮着,与实际筛选不符)
     if (name === 'decisions') initToolbar({ pane: 'pane-decisions', pre: 'dec', cardSel: '.deccard', dimAttr: 'type' })
     if (name === 'backlog') initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })
     applySearch() // 幂等全文档补 search-hide 戳
@@ -3959,7 +3960,12 @@ const html = `<!doctype html>
   // 线路筛选(A/B/C 纪元):切 .wrap[data-line],纯 CSS 过滤卡/组;记忆选择
   // v0.2(D46):线别控件 = 决策工具条分段 + 文档库 chips,共享同一全局线别状态与 localStorage key
   const wrapEl = document.querySelector('.wrap')
-  const lineBtns = document.querySelectorAll('.lseg [data-line], .dchips [data-line]')
+  // 分段随 parts/*.html 懒注入才进 DOM,故每次现查(几十个节点,零成本)而不缓存静态 NodeList:
+  // 缓存的话注入进来的那份永远停在模板硬写的「全部」高亮上,与实际筛选不符 —— 会说谎。
+  const LINE_BTN_SEL = '.lseg [data-line], .dchips [data-line]'
+  function syncLineBtns(line) {
+    document.querySelectorAll(LINE_BTN_SEL).forEach((b) => b.classList.toggle('on', b.dataset.line === line))
+  }
 
   // pathmap 主从:点节点 → 下方面板显示该步详情(总览页自足,不必往下翻);curIter 记住选中步
   const progPane = document.getElementById('pane-progress')
@@ -3984,7 +3990,7 @@ const html = `<!doctype html>
   function setLine(line) {
     curLine = line // setTime 重算时要拿到当前档
     wrapEl.setAttribute('data-line', line)
-    lineBtns.forEach((b) => b.classList.toggle('on', b.dataset.line === line))
+    syncLineBtns(line)
     // 全局线别 pill(hubbar,所有 tab 可见):线别控件只住在决策工具条/文档库,别的 tab 得有个可见指示,否则筛选像凭空生效
     const lpG = document.getElementById('linepill')
     if (lpG) { lpG.style.display = line === 'all' ? 'none' : ''; lpG.textContent = '线别 ' + line + ' ×' }${LANE.h1RewriteJs}
@@ -4039,7 +4045,11 @@ const html = `<!doctype html>
     toolbars.forEach((tb) => tb.refresh()) // 决策/Backlog 工具条:chips 计数/摘要行/meta/空态跟随所有筛选维度
     docsHubRefresh() // 文档库 Hub:段计数/空段/状态行跟随线别与搜索
   }
-  lineBtns.forEach((b) => b.addEventListener('click', () => setLine(b.dataset.line)))
+  // 事件委托:逐按钮绑定只认初始化那一刻在 DOM 里的按钮,懒注入的分段接不住 —— 挂在 document 上按需命中
+  document.addEventListener('click', (ev) => {
+    const lb = ev.target.closest(LINE_BTN_SEL)
+    if (lb) setLine(lb.dataset.line)
+  })
   const lpBtn = document.getElementById('linepill')
   if (lpBtn) lpBtn.addEventListener('click', () => setLine('all'))
 

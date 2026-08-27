@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。560 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。632 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -11,7 +11,8 @@
 // tab 条 nowrap(中文/· 断行点回归锚 + 横向滚动)、
 // 一卡一文件 cardsDir(拆分等价四拍 / 五种硬报错 / 顺序与文件系统无关 / 守卫 / 每卡更新日期降级链)、
 // 写操作 CLI(建卡的号靠 openSync 'wx' 预留 —— 真起两个进程并发验 / 六种校验拒绝 / 时间线 /
-// 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)等。
+// 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)、
+// 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -2651,6 +2652,52 @@ console.log('T53 更新日期批量取')
   writeFileSync(join(kb, 'shots', 'd1-three.png'), 'z') // untracked
   runGen(NEW_SCRIPTS, kb)
   ok(readFileSync(join(kb, 'shots.html'), 'utf8').includes(`>d1-three.png</span><span class="dt">${todayStr}<`), '没提交过的截图退回文件 mtime')
+}
+
+// ============ T54 线别分段熬得过懒注入(事件委托 + 每次现查;静态 NodeList 是 BL-C105 的根)============
+console.log('T54 线别分段 × 懒注入')
+{
+  const fx54 = mkFixture('fx54', { 's.html': demoHtml('s') })
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const cfgP = join(fx54.kb, 'kanban.config.json')
+  const idxP = join(fx54.kb, 'index.html')
+  const blP = join(fx54.kb, 'backlog-manifest.json')
+  const bl = JSON.parse(readFileSync(blP, 'utf8'))
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', line: 'C', title: '待办乙' }]
+  wr(blP, bl)
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.lanes = { ids: ['B', 'C'], default: 'C', titles: { B: '乙档', C: '丙档' } }
+  cfg.lazyTabs = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx54.kb)
+  ok(r.status === 0, 'lanes + lazyTabs 同开 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  const partB = readFileSync(join(fx54.kb, 'parts/backlog.html'), 'utf8')
+  // 物证:分段整个住在 part 里,且模板给「全部」硬写了 class="on" —— 壳初始化时它压根不在 DOM
+  ok(partB.includes('id="bllineseg"') && /data-line="all" class="on"/.test(partB) && !on.includes('id="bllineseg"'),
+    '线别分段随 parts/backlog.html 才到,壳里没有(模板给「全部」硬写 on)')
+  ok(!/lineBtns/.test(on), '壳内 0 处 lineBtns:不再缓存初始化时的静态 NodeList,也没有逐按钮 addEventListener')
+  ok(/document\.addEventListener\('click', \(ev\) => \{\s*const lb = ev\.target\.closest\(LINE_BTN_SEL\)\s*if \(lb\) setLine\(lb\.dataset\.line\)/.test(on),
+    '线别改事件委托挂在 document 上:懒注入之后进来的分段照样点得动')
+  ok(/function syncLineBtns\(line\) \{\s*document\.querySelectorAll\(LINE_BTN_SEL\)/.test(on) && /\n {4}syncLineBtns\(line\)\n/.test(on),
+    'setLine 的 .on 高亮每次现查(几十个节点),不吃陈旧快照')
+  const inj = (on.match(/function onPaneInjected\(name\) \{[\s\S]*?\n {2}\}/) || [''])[0]
+  ok(/syncLineBtns\(curLine\)/.test(inj), 'onPaneInjected 补一次线别同步:注入进来的分段立即反映当前线别,不让「全部」亮着说谎', inj.slice(0, 160))
+  { // 整壳编译级锚:委托改写不许把整板 JS 打死
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'lanes + lazyTabs 壳内联 JS 可编译')
+  }
+  { // 非懒模式共用同一份 JS:委托同样在,行为不变
+    cfg.lazyTabs = false
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx54.kb)
+    const off = readFileSync(idxP, 'utf8')
+    ok(off.includes('id="bllineseg"') && off.includes('ev.target.closest(LINE_BTN_SEL)') && !/lineBtns/.test(off),
+      '非懒模式:分段就在壳里,同样走委托(一份实现两种形态)')
+  }
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

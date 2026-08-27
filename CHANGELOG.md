@@ -9,6 +9,28 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Fixed
+- With `lazyTabs` on, the lane filter segments ("all / A / B / C") in the
+  backlog and decisions toolbars did nothing when clicked. Those toolbars ride
+  along in `parts/*.html` and only enter the DOM when their fetch resolves, but
+  the shell collected the lane buttons once during startup — a static NodeList
+  from `document.querySelectorAll` — and attached a click listener to each
+  element that existed at that moment. Segments injected later were bound to
+  nothing. The same stale snapshot also drove the `.on` highlight, and the
+  injected markup ships with "all" pre-lit: on a board whose lanes default to
+  C, the toolbar showed "all" as the active filter while the cards on screen
+  were filtered to C. A control that misreports the state of the page is worse
+  than one that is merely inert. Lane clicks now go through a single delegated
+  listener on `document`, the highlight is recomputed by querying the DOM
+  fresh inside `setLine` (a few dozen nodes, no measurable cost), and
+  `onPaneInjected` syncs it the moment a pane lands, alongside the
+  toolbar/search/time-filter catch-up it already ran. The document-library
+  chips live in the shell and were never affected; the archive pane has no
+  toolbar. Behaviour with `lazyTabs` off is unchanged, though the rendered
+  script changes on every board.
+
 ## [0.14.0] - 2026-08-27
 
 ### Added
