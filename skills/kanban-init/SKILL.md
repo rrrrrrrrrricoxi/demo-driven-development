@@ -179,6 +179,32 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
 - **字节冻结**:不配或 `false` 时输出逐字节不变。验收沿既有模式:看板整目录拷到 scratch,用已装的上一版缓存 gen
   与本版 gen 各跑一遍,`cmp` index/shots/parts + 逐文件 `shasum` refs。
 
+## done 卡归档(backlogArchive,v0.13.0:opt-in)
+
+`config.backlogArchive` 缺省关;设 `true` 后 Backlog pane 只列 status ≠ `done` 的卡,done 卡搬进独立的
+「归档」tab(tab 条最末、文档库之后)。**跑久的板 done 会压过在办的卡**,Backlog 变成一条要往下划很远才见到活的长条 ——
+这是它存在的理由。
+
+- **`deferred` 不进归档**:推后是搁置不是完成,留在 Backlog 里(否则「暂时不做」会被当成「做完了」)。
+- **渲染完全相同**:同一张卡的模板、同一个顺序(日期新→旧)。归档 pane 没有自己的工具条 —— 全局搜索 +
+  线别 + 时间筛选够用,再加一排控件是噪音。
+- **计数跟着走**:Backlog tab 徽章 = 非 done 数,归档 tab 徽章 = done 数;Backlog 状态筛选芯片里的 done 一档自动消失。
+- **深链照旧**:`#卡号` 直接落到归档 pane;`lazyTabs` 开着时归档是**第三个 part**(`parts/archive.html`),
+  归档卡在卡号→pane 映射里指向 `archive`,深链跨 part 会先取回再跳。关掉归档时这个 part 的陈迹一并清除。
+- **一期只归 backlog**:决策卡的 `live`/`closed` 不归档(决策是走过的路径,不是待办)。
+- **字节冻结**:不配或 `false` 时输出逐字节不变。
+
+## 积压提醒(wip,v0.13.0:opt-in)
+
+`config.wip` 缺省无;**给一个对象就算开**:`{ "soft": 10, "hard": 20 }`(两个阈值都可省,缺省即 10 / 20)。
+
+- **只数 `ready`**:`blocked` 是等外部、`deferred` 是搁置,都不占「今天能动手」的额度。
+- **两档**:超 `soft` → Backlog tab 一个琥珀点 + pane 顶一条安静的灰条「可做的卡 N 张 · 已超 <soft>」;
+  超 `hard` → 点转红 + 常驻红横幅「可做的卡 N 张 · 超过 <hard> —— 先清一些再立新卡」。
+- **跟着线别走**:配了 lanes 时数的是当前线别下可见的 ready 卡(与 tab 徽章同一把可见性尺子),切线别即重算。
+- **守卫**:收工时全线别 ready 总数超 `hard` → 一条非阻断 notice。它不改任何 manifest,只说一声。
+- **字节冻结**:不配时输出逐字节不变。
+
 ## init 段 token 硬规则(命令式,不是建议)
 
 - **盘点走 `init.mjs scan` 摘要,禁读 demo 正文**:几十个 demo 的正文是几十万 token,摘要只有几十行。脚本读正文不算成本,Claude 亲手读才算。
