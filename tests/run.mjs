@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。381 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。428 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
 // 卡正文轻 markdown(lite 规则逐条 + XSS + 折叠预览 + detail 字段 + 正文长度守卫)、
 // 进度响应(settle/reopen/stale-link/dormant 穷举 + 芯片 + 待收账段 + 守卫 + pr-sync --settle)、
-// done 卡归档(独立 pane + lazy 第三个 part + 深链映射)、积压提醒 wip(三档 + 守卫)等。
+// done 卡归档(独立 pane + lazy 第三个 part + 深链映射)、积压提醒 wip(三档 + 守卫)、
+// 发布进度时间线几何(轴按繁忙度加宽 / 刻度不压字 / 泳道封顶 / 带高有上界)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -1574,6 +1575,164 @@ console.log('T40 积压提醒 wip')
   writeFileSync(cfgP, JSON.stringify(cfg))
   runGen(NEW_SCRIPTS, fx40.kb)
   ok(sha(idxP) === offSha, '撤掉 wip 后与未配基线逐字节相同')
+}
+
+// ============ T41 时间线重做:几何纯函数穷举 + 带的烤入 + 视图切换 ============
+console.log('T41 时间线重做')
+{
+  const { relAxis, relTicks, relBar, relPack, relGrid, relBandH } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+  const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
+  const mkDays = (from, n) => {
+    const out = [], t = Date.parse(from + 'T00:00:00Z')
+    for (let i = 0; i < n; i++) out.push(new Date(t + i * 864e5).toISOString().slice(0, 10))
+    return out
+  }
+  { // 轴:安静日 quiet,有 PR 的日至少 base,挤不下按 ceil(n / lanes) 格加宽
+    const days = mkDays('2026-08-01', 5)
+    const ax = relAxis(days, { '2026-08-02': 1, '2026-08-03': 6, '2026-08-04': 7, '2026-08-05': 41 }, O)
+    ok(ax.w['2026-08-01'] === 5, '安静日 = quiet 5px')
+    ok(ax.w['2026-08-02'] === 14 && ax.w['2026-08-03'] === 14, '1~6 个 PR 的日子 = base 14px(ceil(6/6)*12 撑不过 base)')
+    ok(ax.w['2026-08-04'] === 24, '7 个 PR → ceil(7/6)*12 = 24px')
+    ok(ax.w['2026-08-05'] === 84, '41 个 PR → ceil(41/6)*12 = 84px(横向撑开,不再往下堆)')
+    ok(ax.x['2026-08-01'] === 200 && ax.x['2026-08-02'] === 205 && ax.x['2026-08-03'] === 219, 'x 是宽度的前缀和,从左栏宽起算')
+    ok(ax.W === 200 + 5 + 14 + 14 + 24 + 84 && ax.t0 === days[0] && ax.t1 === days[4], '总宽 = 左栏 + 各日宽之和')
+    ok(relAxis(days, {}, O).W === 200 + 25, '一个 PR 都没有:全是安静日')
+  }
+  { // 刻度:非线性轴上不许压字 —— 相邻两个「写了字」的标签必须 ≥ min px
+    const days = mkDays('2026-06-29', 40) // 06-29 是周一
+    const counts = {}
+    for (const d of days) counts[d] = 0
+    counts['2026-07-14'] = 41 // 制造一段很宽的忙日
+    const ax = relAxis(days, counts, O)
+    const ticks = relTicks(days, ax, { '2026-07-01': 'mo', '2026-07-14': 'tag' }, 48)
+    const lab = ticks.filter((t) => t.txt)
+    let minGap = Infinity
+    for (let i = 1; i < lab.length; i++) minGap = Math.min(minGap, lab[i].x - lab[i - 1].x)
+    ok(ticks.length === 8, `候选 = 6 个周一 + 月初 + tag(实际 ${ticks.length})`)
+    ok(minGap >= 48, `相邻标签最小间距 ${minGap}px ≥ 48px(0.12.0 的等间隔取样正是栽在这里)`)
+    ok(ticks.every((t) => t.k !== 'wk' || t.d === '2026-06-29' || new Date(t.d + 'T00:00:00Z').getUTCDay() === 1), '普通候选只取周一')
+    ok(lab.some((t) => t.d === '2026-07-01') && lab.some((t) => t.d === '2026-07-14'), '月初与 tag 日一定写得上字')
+    ok(ticks.some((t) => !t.txt), '挤不下的候选退成短刻度,不是不画')
+    { // tag 挤掉前一个普通标签:06-29 与 06-30(tag)只差 5px,写字的只能是 tag 那个
+      const d2 = mkDays('2026-06-29', 3)
+      const t2 = relTicks(d2, relAxis(d2, {}, O), { '2026-06-30': 'tag' }, 48)
+      ok(t2.length === 2 && !t2[0].txt && t2[1].txt, 'tag 把挡路的周一标签挤掉(自己写字)')
+    }
+    { // 两个优先刻度贴得太近:也不许压字,后一个退成短刻度
+      const d3 = mkDays('2026-07-01', 3)
+      const t3 = relTicks(d3, relAxis(d3, {}, O), { '2026-07-01': 'mo', '2026-07-02': 'tag' }, 48)
+      ok(t3[0].txt && !t3[1].txt, '两个优先刻度贴太近也不压字(48px 这条线不破)')
+    }
+  }
+  { // 条的几何 + 泳道打包:打包与绘制共用同一份 relBar
+    const days = mkDays('2026-08-01', 10)
+    const ax = relAxis(days, {}, O)
+    ok(relBar(ax, '2026-07-01', '2026-07-20', 10) === null, '整段落在窗口左边:不画')
+    ok(relBar(ax, '2026-08-01', '2026-08-01', 10).w === 10, '当天开当天合:退到 min 宽')
+    ok(relBar(ax, '2026-08-01', '2026-08-03', 10).x0 === 200 && relBar(ax, '2026-08-01', '2026-08-03', 10).w === 14, '跨三天 = 3×5 − 1')
+    ok(relBar(ax, '2026-07-20', '2026-08-02', 10).x0 === 200, '左边越界的截到窗口左沿')
+    const items = [
+      { n: 1, s: '2026-08-01', e: '2026-08-02' },
+      { n: 2, s: '2026-08-01', e: '2026-08-05' },
+      { n: 3, s: '2026-08-06', e: '2026-08-08' }, // 与 1 不重叠 → 回到第 0 条
+    ]
+    const p = relPack(items, ax, O)
+    ok(p.used === 2, `不重叠的排回同一条泳道(用了 ${p.used} 条)`)
+    ok(p.bars.filter((b) => b.n === 3)[0].lane === 0, '3 号回到第 0 条')
+    ok(p.bars.every((b) => b.x === relBar(ax, items.filter((i) => i.n === b.n)[0].s, items.filter((i) => i.n === b.n)[0].e, O.min).x0),
+      '打包用的 x 与画条用的 x 是同一份(estimate/real 两套是上一版撞车的根)')
+    { // 泳道封顶:20 条全重叠的 PR 也只占 6 条泳道 —— 展开后的高度与 PR 数无关
+      const many = []
+      for (let i = 1; i <= 20; i++) many.push({ n: i, s: '2026-08-01', e: '2026-08-09' })
+      const pm = relPack(many, ax, O)
+      ok(pm.used === O.lanes && pm.bars.length === 20, `20 条全重叠 → 封顶 ${pm.used} 条泳道,一条都没丢`)
+      ok(pm.bars.every((b) => b.lane < O.lanes), '没有一条越过泳道上限')
+    }
+  }
+  { // 当天开当天合:按号横排,不再竖着堆
+    const days = mkDays('2026-08-01', 3)
+    const ax = relAxis(days, { '2026-08-02': 13 }, O) // 13 个 → 宽 ceil(13/6)*12 = 36 → 3 列
+    const arr = []
+    for (let i = 1; i <= 13; i++) arr.push({ n: i })
+    const g = relGrid({ '2026-08-02': arr, '2026-07-01': [{ n: 99 }] }, ax, O)
+    ok(g.bars.length === 13, '窗口外的那天整天跳过')
+    ok(g.used === 6, '一天最多 6 条泳道')
+    ok(g.bars.filter((b) => b.n === 7)[0].lane === 0 && g.bars.filter((b) => b.n === 7)[0].x === ax.x['2026-08-02'] + 12,
+      '第 7 个换到第二列、回到第 0 条泳道(横向用起来)')
+    ok(g.bars.every((b) => b.x + b.w <= ax.x['2026-08-02'] + ax.w['2026-08-02'] + 12), '列数由轴宽给足,不会溢出当天的格子')
+  }
+  { // 带高:折叠只有带头;展开有上界
+    ok(relBandH(0, 0, O, false) === 30 && relBandH(6, 6, O, false) === 30, '折叠 = 带头 30px,与 PR 数无关')
+    ok(relBandH(0, 0, O, true) === 36, '展开但两组都空:带头 + 底衬')
+    ok(relBandH(6, 6, O, true) === 224, '展开的上界 = 30 + 2×(14 + 6×13 + 2) + 6 = 224px')
+    ok(relBandH(6, 6, O, true) * 1 + 5 * 30 + 26 < 600, '六条带里展开最深的一条,总高仍 < 600px')
+    ok(6 * 30 + 26 < 220, '六条带全折叠 + 轴 = 206px < 220px')
+  }
+}
+{ // gen 侧:带的烤入 / 视图钮 / 几何内联 / 关档冻结
+  const fx41 = mkFixture('fx41', { 's.html': demoHtml('s') })
+  const cfgP = join(fx41.kb, 'kanban.config.json'), idxP = join(fx41.kb, 'index.html')
+  const relP = join(fx41.kb, 'release-manifest.json')
+  const mP = join(fx41.kb, 'manifest.json'), decP = join(fx41.kb, 'decisions-manifest.json'), blP = join(fx41.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  runGen(NEW_SCRIPTS, fx41.kb)
+  const offSha = sha(idxP)
+  const cfg = rd(cfgP)
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  // 两个版本 + 一条 dev + 一条 test + 一条非主线,日子刻意跨月
+  wr(relP, {
+    stages: REL_MANIFEST.stages,
+    releases: [{ tag: 'v0.0.1', at: '2026-07-14T06:00:00Z' }, { tag: 'v0.0.2', at: '2026-08-20T09:00:00Z' }],
+    prs: [
+      { number: 40, title: '开着的', state: 'open', draft: false, base: 'main', branch: 'f/a', url: 'https://github.com/o/r/pull/40', createdAt: '2026-08-24T01:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+      { number: 39, title: '已合未发', state: 'merged', draft: false, base: 'main', branch: 'f/b', url: 'https://github.com/o/r/pull/39', createdAt: '2026-08-21T01:00:00Z', mergedAt: '2026-08-22T01:00:00Z', closedAt: null, cards: [] },
+      { number: 38, title: '二版的甲', state: 'merged', draft: false, base: 'main', branch: 'f/c', url: 'https://github.com/o/r/pull/38', createdAt: '2026-08-18T01:00:00Z', mergedAt: '2026-08-19T01:00:00Z', closedAt: null, cards: [] },
+      { number: 37, title: '二版的乙', state: 'merged', draft: false, base: 'main', branch: 'f/d', url: 'https://github.com/o/r/pull/37', createdAt: '2026-08-19T01:00:00Z', mergedAt: '2026-08-19T02:00:00Z', closedAt: null, cards: [] },
+      { number: 36, title: '一版的', state: 'merged', draft: false, base: 'main', branch: 'f/e', url: 'https://github.com/o/r/pull/36', createdAt: '2026-07-10T01:00:00Z', mergedAt: '2026-07-12T01:00:00Z', closedAt: null, cards: [] },
+      { number: 35, title: '叠 PR', state: 'open', draft: false, base: 'f/a', branch: 'f/g', url: 'https://github.com/o/r/pull/35', createdAt: '2026-08-23T01:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+    ],
+    syncedAt: '2026-08-26T02:00:00Z',
+  })
+  const r = runGen(NEW_SCRIPTS, fx41.kb)
+  ok(r.status === 0, 'releaseTab:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('data-relv="timeline">时间线') && on.includes('class="on" data-relv="table">表格'),
+    '视图钮文案「时间线 | 表格」,默认表格(密度那版没上)')
+  ok(on.includes('data-relwin="60">近 60 天') && on.includes('data-relwin="all">全部'), '窗口芯片沿用近 60 天 / 全部')
+  ok(!on.includes('reltlsvg') && !on.includes('rect.relb') && !on.includes('id="reltip"'),
+    '旧时间线的 SVG 与浮层一个不留(死代码不留在产物里)')
+  const G = JSON.parse(on.match(/\n {4}var G = (\[[\s\S]*?\])\n/)[1])
+  ok(G.map((g) => g.g).join(',') === 'dev,test,v0.0.2,v0.0.1,other',
+    `带序 = dev → test → 版本(at 降序)→ 其它(实际 ${G.map((g) => g.g).join(',')})`)
+  ok(G.map((g) => g.n).join(',') === '1,1,2,1,1', `每带计数(实际 ${G.map((g) => g.n).join(',')})`)
+  ok(JSON.stringify(G[2].d) === JSON.stringify({ '2026-08-19': 2 }), '日桶按锚点日算:两条都合在 08-19,同一天两个')
+  ok(G[0].d['2026-08-24'] === 1 && !G[0].lo.startsWith('2026-08-19'), '开着的按 createdAt 落桶,不按合并日')
+  ok(G[3].lo === '2026-07-12' && G[3].hi === '2026-07-12', '带的日期跨度也按锚点日')
+  ok(G[2].q === 4 && G[3].q === 3 && G[0].q === 4, '版本带按新旧分档透明度(最新最实),三段自己满档')
+  ok(on.includes('function relAxis') && on.includes('function relPack') && on.includes('function relBandH'),
+    '几何源码原样内联进页面(测试 import 的与页面跑的是同一份)')
+  ok(!/export function/.test(on.split('</head>')[1] || on), '内联时剥掉了 export(壳里不是模块)')
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, '整壳内联 JS 可编译(new Function 不抛)')
+  }
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx41.kb)
+  const off = readFileSync(idxP, 'utf8')
+  // 关档但 manifest 还在:tab 与时间线一个字都不出(芯片状态后缀另有一道门,见 T33)
+  ok(!off.includes('pane-release') && !off.includes('data-relpane="timeline"') && !off.includes('function relAxis'),
+    'releaseTab 关回:pane / 时间线 / 几何源码全不渲染')
+  rmSync(relP)
+  runGen(NEW_SCRIPTS, fx41.kb)
+  ok(sha(idxP) === offSha, '撤掉 manifest 后与冻结基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

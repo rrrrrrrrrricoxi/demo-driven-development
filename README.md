@@ -107,8 +107,13 @@ list only two stages. Pull requests based on another branch, and ones closed
 without merging, are counted separately rather than forced into a stage. The tab
 offers two views of the same data — a table (number, title, stage, status and
 date, cards, branch, acceptance progress; sortable, searchable, released ones
-folded by version) and a timeline (one bar per pull request from opened to
-merged, release tags as vertical lines). The data comes from
+folded by version) and a timeline. The timeline is one band per version plus
+dev, test and the leftovers, around 200px folded; click a band and it expands
+in place, packing its pull requests into at most six shared lanes so the
+expanded height has a ceiling. The date axis is not linear — a quiet day gets a
+few pixels and a day with many pull requests is widened to fit them side by
+side, which is where the old one-row-per-pull-request timeline was spending
+2400px of height for no information. The data comes from
 `release-manifest.json`, written by:
 
 ```
