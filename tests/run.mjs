@@ -2387,6 +2387,19 @@ console.log('T50 写操作 CLI ddd.mjs')
   }
 }
 
+// ============ T51 截图文件名不进 shell(gen 每次收工由守卫自动跑,文件名是外来输入)============
+console.log('T51 截图文件名不进 shell')
+{
+  const fx = mkFixture('fx51', { 'c1.html': demoHtml('c1') })
+  const marker = join(fx.kb, 'PWNED_MARKER')
+  const evil = 'a";touch PWNED_MARKER;".png'
+  writeFileSync(join(fx.kb, 'shots', evil), 'not-a-real-png')
+  const r = runGen(NEW_SCRIPTS, fx.kb)
+  ok(r.status === 0, 'gen 照常跑完(带引号/分号的截图文件名不是错误,只是个文件名)')
+  ok(!existsSync(marker), '文件名里的 `;touch …;` 没有被当成命令执行')
+  ok(readFileSync(join(fx.kb, 'shots.html'), 'utf8').includes('&quot;'), '文件名原样转义后进了截图廊')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

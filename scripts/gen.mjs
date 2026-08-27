@@ -17,7 +17,7 @@
  * 改任一 manifest 或被引用文档后重跑;refs/*.html 与 index.html 都提交进 git。
  */
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs'
-import { execSync, execFileSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { join, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { genStrings } from './strings.mjs'
@@ -1197,10 +1197,13 @@ let SHOT_COUNT = 0 // 提级入口徽章用(tab 行「截图 · N ↗」)
     if (mg) cands.push(mg[1].toUpperCase() + mg[2])
     return cands.find((id) => ALL_CARD_IDS.has(id)) ?? null
   }
-  /* 入库日期取 git 提交日;未跟踪(预览提取件)退回文件 mtime */
+  /* 入库日期取 git 提交日;未跟踪(预览提取件)退回文件 mtime。
+     走 argv 不走 shell:文件名是从目录里读来的,不是我们写的常量 —— 拼进命令串的话,
+     一个叫 `a";touch X;".png` 的截图就是一次以本用户身份执行的任意命令,而守卫每次收工
+     都自动跑 gen。argv 形式没有引号问题,也没有 shell 可言。 */
   const shotDate = (file) => {
     try {
-      const d = execSync(`git log -1 --format=%cs -- "shots/${file}"`, { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+      const d = execFileSync('git', ['log', '-1', '--format=%cs', '--', `shots/${file}`], { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
       if (d) return d
     } catch { /* 非 git 环境退 mtime */ }
     try { return statSync(join(SHOTS_DIR, file)).mtime.toISOString().slice(0, 10) } catch { return '' }
