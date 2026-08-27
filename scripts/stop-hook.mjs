@@ -39,7 +39,7 @@ import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
-import { settleOf } from './settle.mjs'
+import { settleHold, settleOf } from './settle.mjs'
 
 const KANBAN = detect()
 if (!KANBAN) process.exit(0)
@@ -228,7 +228,7 @@ const orphans = demos.filter((f) => !covered.has(f))
         const repo = String((data.instance || {}).ghRepo || '')
         if (!repo) continue
         for (const c of data[k] || []) {
-          if (!c || !c.id) continue
+          if (!c || !c.id || settleHold(c)) continue // settleHold = 人看过了,别再催
           const s = settleOf(c, prsOfCard(c, repo), relPr, repo)
           if (s.kind === 'settle') settle.push(String(c.id))
           else if (s.kind === 'reopen') reopen.push(String(c.id))

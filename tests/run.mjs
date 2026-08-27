@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。428 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。465 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
 // 卡正文轻 markdown(lite 规则逐条 + XSS + 折叠预览 + detail 字段 + 正文长度守卫)、
 // 进度响应(settle/reopen/stale-link/dormant 穷举 + 芯片 + 待收账段 + 守卫 + pr-sync --settle)、
 // done 卡归档(独立 pane + lazy 第三个 part + 深链映射)、积压提醒 wip(三档 + 守卫)、
-// 发布进度时间线几何(轴按繁忙度加宽 / 刻度不压字 / 泳道封顶 / 带高有上界)等。
+// 发布进度时间线几何(轴按繁忙度加宽 / 刻度不压字 / 泳道封顶 / 带高有上界)、
+// 暂不收账 settleHold(三种卡的灰芯片 + 待收账段/守卫闭嘴 + pr-sync --settle --only 挑着收)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -1733,6 +1734,173 @@ console.log('T41 时间线重做')
   rmSync(relP)
   runGen(NEW_SCRIPTS, fx41.kb)
   ok(sha(idxP) === offSha, '撤掉 manifest 后与冻结基线逐字节相同')
+}
+
+// ============ T45 settleHold「暂不收账」(三种卡的芯片 / 待收账段 / 守卫;字段撤回回基线)============
+console.log('T45 settleHold 暂不收账')
+{
+  const fx45 = mkFixture('fx45', { 's.html': demoHtml('s') })
+  const cfgP = join(fx45.kb, 'kanban.config.json'), idxP = join(fx45.kb, 'index.html')
+  const relP = join(fx45.kb, 'release-manifest.json')
+  const mP = join(fx45.kb, 'manifest.json'), decP = join(fx45.kb, 'decisions-manifest.json'), blP = join(fx45.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  const item = (o) => ({ status: 'ready', priority: 'high', tier: '1', title: 't', problem: 'p', approach: 'a', area: 'x', source: 's', ...o })
+  bl.items = [
+    item({ id: 'BL-S', pr: 227 }), // 合了、卡还 ready → 待收账
+    item({ id: 'BL-H', pr: 227 }), // 同上;下面给它写 settleHold
+    item({ id: 'BL-R', status: 'done', pr: 232 }), // 收了、PR 还开着 → 反向
+    item({ id: 'BL-RH', status: 'done', pr: 232 }), // 同上;下面给它写 settleHold
+  ]
+  dec.entries = [{ id: 'D-H', code: 'D-H', status: 'decided', date: '2026-01-01', title: '决策甲', question: 'q', pr: 226 }]
+  mm.iterations = [{ id: 'I1', title: '迭代甲', detail: '' }]
+  mm.tasks = [{ id: 'T-H', iteration: 'I1', status: 'active', title: '任务甲', approach: 'a', pr: 226 }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  wr(relP, REL_MANIFEST)
+  const cfg = rd(cfgP)
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx45.kb)
+  const offSha = sha(idxP) // 一张卡都没写 settleHold 的基线
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('rspchip rsp-hold') && !off.includes('暂不收账'), '没有一张卡写 settleHold:零灰芯片(CSS 片段照旧在,那是门控注入片的常态)')
+  ok(off.includes('<p class="rspsh">待收账 · 4 张卡'), '基线:四张 settle 卡都在待收账段', (off.match(/class="rspsh">[^<]*/) || [])[0])
+
+  // ---- 挂上 settleHold ----
+  const REASON = '这一轮 PR 只落了 <接口> & "壳"'
+  const hold = rd(blP)
+  hold.items[1].settleHold = REASON
+  hold.items[3].settleHold = '卡跨两轮,下一轮才收'
+  wr(blP, hold)
+  const dec2 = rd(decP); dec2.entries[0].settleHold = '决策落地了一半'; wr(decP, dec2)
+  const mm2 = rd(mP); mm2.tasks[0].settleHold = '任务卡同理'; wr(mP, mm2)
+  const r = runGen(NEW_SCRIPTS, fx45.kb)
+  ok(r.status === 0, 'settleHold 在场 gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  const cardOf = (id) => { const i = on.indexOf(`id="${id}"`); return i < 0 ? '' : on.slice(i, on.indexOf('</article>', i)) }
+  ok(cardOf('BL-H').includes('<span class="rspchip rsp-hold" title="这一轮 PR 只落了 &lt;接口&gt; &amp; &quot;壳&quot;">暂不收账</span>'),
+    'backlog 卡:灰芯片「暂不收账」,理由 esc 进 title', (cardOf('BL-H').match(/rsp-hold[^>]*>[^<]*/) || [''])[0])
+  ok(!cardOf('BL-H').includes('rsp-settle'), 'hold 卡不再出「PR 已合 · 待收账」')
+  ok(cardOf('BL-S').includes('rsp-settle'), '同一个 PR 上没写 settleHold 的卡照旧催')
+  ok(cardOf('BL-RH').includes('rsp-hold') && !cardOf('BL-RH').includes('rsp-reopen'), '反向提示同样被 settleHold 按下')
+  ok(cardOf('BL-R').includes('rsp-reopen'), '没写字段的反向卡照旧提示')
+  ok(cardOf('D-H').includes('rsp-hold') && !cardOf('D-H').includes('rsp-settle'), '决策卡:同一枚灰芯片')
+  ok(cardOf('T-H').includes('rsp-hold') && !cardOf('T-H').includes('rsp-settle'), '进度 task 卡:同一枚灰芯片')
+  ok(on.includes('.rsp-part, .rsp-hold {'), '灰芯片与「2/3 已合」同一套安静配色,不引新强调色')
+  ok(on.includes('<p class="rspsh">待收账 · 1 张卡'), '待收账段:hold 的三张卡不占位(4 → 1)', (on.match(/class="rspsh">[^<]*/) || [])[0])
+  {
+    const seg = on.slice(on.indexOf('class="rspsettle"'), on.indexOf('class="relview"'))
+    ok(!seg.includes('#BL-H') && !seg.includes('#D-H') && !seg.includes('#T-H'), 'hold 的三张卡都不进待收账段')
+    ok(seg.includes('href="#BL-S"'), '没 hold 的卡还在段里')
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch { compiled = false } }
+    ok(compiled, 'settleHold 开档整壳内联 JS 可编译')
+  }
+  { // 空串 / 只有空白 = 没写(否则「清空理由」会变成一枚没话说的芯片)
+    const blank = rd(blP)
+    blank.items[1].settleHold = '   '
+    wr(blP, blank)
+    runGen(NEW_SCRIPTS, fx45.kb)
+    const b = readFileSync(idxP, 'utf8')
+    ok(b.slice(b.indexOf('id="BL-H"')).includes('rsp-settle'), '空白理由不算 hold,照旧催收账')
+    wr(blP, hold)
+    runGen(NEW_SCRIPTS, fx45.kb)
+  }
+
+  // ---- 守卫:hold 的卡不点名 ----
+  touch(idxP)
+  const g = runStop(NEW_SCRIPTS, fx45.root)
+  ok(g.status === 0 && /BL-S/.test(g.stdout) && !/BL-H/.test(g.stdout), '守卫:待收账那条不点 hold 的卡', `${g.status} ${g.stdout.slice(0, 400)}`)
+  ok(/BL-R\b/.test(g.stdout) && !/BL-RH/.test(g.stdout), '守卫:反向那条同样不点 hold 的卡')
+  ok(/settleHold/.test(g.stdout), '守卫顺带说明这个字段怎么用')
+  ok(!/"decision":\s*"block"/.test(g.stdout), 'settleHold 相关提示一律不阻断')
+
+  // ---- 撤回字段:逐字节回到基线(T26 模式)----
+  const back = rd(blP); delete back.items[1].settleHold; delete back.items[3].settleHold; wr(blP, back)
+  const decB = rd(decP); delete decB.entries[0].settleHold; wr(decP, decB)
+  const mmB = rd(mP); delete mmB.tasks[0].settleHold; wr(mP, mmB)
+  runGen(NEW_SCRIPTS, fx45.kb)
+  ok(sha(idxP) === offSha, '撤掉 settleHold 后与无字段基线逐字节相同')
+}
+
+// ============ T46 pr-sync --settle --only / settleHold(挑着收;点错卡号一个字节都不写)============
+console.log('T46 pr-sync --settle --only')
+{
+  const fx46 = mkFixture('fx46', { 's.html': demoHtml('s') })
+  const relP = join(fx46.kb, 'release-manifest.json')
+  const mP = join(fx46.kb, 'manifest.json'), decP = join(fx46.kb, 'decisions-manifest.json'), blP = join(fx46.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr2 = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  const item = (o) => ({ status: 'ready', priority: 'high', tier: '1', title: 't', problem: 'p', approach: 'a', area: 'x', source: 's', ...o })
+  bl.items = [
+    item({ id: 'BL-1', pr: 11 }), // 该收
+    item({ id: 'BL-2', pr: 10 }), // 这一轮不收,靠 --only 跳过
+    item({ id: 'BL-3', pr: 10, settleHold: '只落了接口' }), // 长期挂账
+  ]
+  dec.entries = [{ id: 'D1', code: 'D1', status: 'decided', date: '2026-01-01', title: '决策甲', question: 'q', pr: 11, settleHold: '正主在下一轮' }]
+  wr2(mP, mm); wr2(decP, dec); wr2(blP, bl)
+  wr2(relP, { stages: REL_MANIFEST.stages, releases: [], prs: [], syncedAt: null })
+  const ghDir = join(WORK, 'fakegh46')
+  mkdirSync(ghDir, { recursive: true })
+  writeFileSync(join(ghDir, 'gh'), `#!/bin/sh
+case "$1 $2" in
+"pr list") echo '[{"number":10,"title":"乙","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/b","url":"https://github.com/o/r/pull/10","createdAt":"2026-07-10T01:00:00Z","mergedAt":"2026-07-12T01:00:00Z","closedAt":"2026-07-12T01:00:00Z"},
+ {"number":11,"title":"甲","state":"MERGED","isDraft":false,"baseRefName":"main","headRefName":"feat/a","url":"https://github.com/o/r/pull/11","createdAt":"2026-07-18T01:00:00Z","mergedAt":"2026-07-19T01:00:00Z","closedAt":"2026-07-19T01:00:00Z"}]' ;;
+"release list") echo '[]' ;;
+esac
+`)
+  chmodSync(join(ghDir, 'gh'), 0o755)
+  const runSync = (extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', fx46.kb, ...extra],
+    { encoding: 'utf8', env: { ...process.env, PATH: ghDir } })
+  const blBefore = sha(blP), decBefore = sha(decP)
+
+  const rList = runSync(['--settle'])
+  ok(rList.status === 0 && /BL-1\s+ready → done/.test(rList.stdout) && /BL-2\s+ready → done/.test(rList.stdout),
+    '清单列出两张该判的卡', `${rList.status} ${rList.stdout}`)
+  ok(!/^\s*BL-3\s/m.test(rList.stdout) && !/^\s*D1\s/m.test(rList.stdout), '写了 settleHold 的卡不进清单行')
+  ok(/已 hold\(2\)/.test(rList.stdout) && /BL-3/.test(rList.stdout) && /D1/.test(rList.stdout),
+    '它们单列成「已 hold(N)」一行', rList.stdout)
+  ok(/--only/.test(rList.stdout), '干跑输出末尾点明可以 --only 挑着收')
+  ok(sha(blP) === blBefore && sha(decP) === decBefore, '干跑不动卡的 manifest')
+
+  const rBad = runSync(['--settle', '--write', '--only', 'BL-3'])
+  ok(rBad.status === 1 && sha(blP) === blBefore && sha(decP) === decBefore,
+    '--only 点名一张已 hold 的卡 → exit 1,一个字节都不写', `${rBad.status} ${rBad.stderr.slice(0, 200)}`)
+  ok(/BL-3/.test(rBad.stderr) && /settleHold/.test(rBad.stderr), '报错点名那个 id 并说明 hold 的卡本就不在清单里')
+  const rBad2 = runSync(['--settle', '--write', '--only', 'BL-1,BL-9'])
+  ok(rBad2.status === 1 && sha(blP) === blBefore, '清单里混一个不存在的卡号 → 整次拒绝(不做部分收账)', rBad2.stderr.slice(0, 200))
+  const rEmpty = runSync(['--settle', '--write', '--only'])
+  ok(rEmpty.status === 1 && sha(blP) === blBefore, '--only 后面没给卡号 → 报错不写')
+
+  const blText = readFileSync(blP, 'utf8')
+  const rOnly = runSync(['--settle', '--write', '--only', 'BL-1'])
+  ok(rOnly.status === 0, '--settle --write --only BL-1 exit 0', `${rOnly.stdout}${rOnly.stderr}`)
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const want = JSON.parse(blText)
+  want.items[0].status = 'done'
+  want.items[0].note = `【${today} 收账】PR#11 已合(自动)`
+  ok(readFileSync(blP, 'utf8') === JSON.stringify(want, null, 2) + '\n',
+    '只有点名的那张卡被改,BL-2 / BL-3 一个字节都没动')
+  ok(sha(decP) === decBefore, '决策卡整份没被碰(它那张也 hold 着)')
+  ok(/1 张卡|settled 1 card/.test(rOnly.stdout), '收账条数报的是被点名的张数')
+
+  const rRest = runSync(['--settle'])
+  ok(/BL-2\s+ready → done/.test(rRest.stdout) && !/BL-1\s+ready/.test(rRest.stdout), '收完 BL-1 后清单只剩 BL-2')
+  const rOnlyEq = runSync(['--settle', '--write', '--only=BL-2'])
+  ok(rOnlyEq.status === 0 && rd(blP).items[1].status === 'done', '--only=<id> 等号写法同样认')
+  const rDone = runSync(['--settle'])
+  ok(/没有待收账|nothing to settle/.test(rDone.stdout) && /已 hold\(2\)/.test(rDone.stdout),
+    '清单空了也照报「已 hold」—— 挂起的账不能就此消失在视野里', rDone.stdout)
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
