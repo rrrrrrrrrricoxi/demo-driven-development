@@ -2256,6 +2256,23 @@ console.log('T50 写操作 CLI ddd.mjs')
     const rd2 = runCli(kb, ['card', 'new', 'decision', '--title', '决策四'])
     const dec4 = rd(decP).entries.find((x) => x.id === 'D4')
     ok(rd2.status === 0 && dec4 && dec4.code === 'D4', '决策卡号固定 D 前缀,code 默认取 id(缺 code 会让 gen 硬失败)')
+    // --line 缺席时取 config.lanes.default:写 line:"" 的卡在配了 lanes 的板上默认视图里看不见
+    ok(rd(blP).items.find((x) => x.id === 'BL-C10').line === 'C', '--line 缺席的 backlog 卡落在 lanes.default(C)上')
+    ok(dec4.line === 'C', '--line 缺席的决策卡同样落在 lanes.default 上')
+    ok(!/没有 line|no line/.test(rd2.stderr), '取到缺省档就不必再提醒')
+    { // lanes.default 不在 ids 里 → 退 ids[0];--from 显式给空 line → 出一句提醒
+      const cfgNow = rd(cfgP)
+      cfgNow.lanes = { ids: ['B', 'C'], default: 'Z', titles: { B: 'B', C: 'C' } }
+      wr(cfgP, cfgNow)
+      const rf = runCli(kb, ['card', 'new', 'backlog', '--title', '缺省档兜底'])
+      ok(rf.status === 0 && rd(blP).items.find((x) => x.id === 'BL-C11').line === 'B', 'lanes.default 不在 ids 里时退回 ids[0]')
+      const fromP = join(kb, 'from-noline.json')
+      writeFileSync(fromP, JSON.stringify({ line: '' }))
+      const rg = runCli(kb, ['card', 'new', 'backlog', '--title', '显式无档', '--from', fromP])
+      ok(rg.status === 0 && /没有 line|no line/.test(rg.stderr), '--from 显式给空 line:照写,但 stderr 说一句它只在「全部」档出现')
+      cfgNow.lanes = { ids: ['B', 'C'], default: 'C', titles: { B: 'B', C: 'C' } }
+      wr(cfgP, cfgNow)
+    }
 
     const before = readFileSync(blP, 'utf8')
     const bad = [
@@ -2365,6 +2382,13 @@ console.log('T50 写操作 CLI ddd.mjs')
     chmodSync(blDir, 0o700)
     ok(rw.status === 1 && /EACCES|EPERM/.test(rw.stderr) && sha(one) === shaBefore,
       '写不进去时原文件一个字节都没变(临时文件 + rename,半截文件落不到卡的位置上)')
+    { // 建卡也一样:预留不成就什么都不留 —— 留下的 0 字节文件会让 gen 当场硬失败、守卫阻断收工
+      const before = readdirSync(blDir).sort().join(' ')
+      chmodSync(blDir, 0o500)
+      const rn2 = runCli(kb, ['card', 'new', 'backlog', '--title', '建不出来'])
+      chmodSync(blDir, 0o700)
+      ok(rn2.status === 1 && readdirSync(blDir).sort().join(' ') === before, '建卡失败时卡目录里不多一个文件(空占位不留下)')
+    }
 
     // git 历史:一卡一文件之后每张卡有自己的 log
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'], { cwd: fx.root })
