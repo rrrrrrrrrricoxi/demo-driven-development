@@ -121,6 +121,53 @@ stale" are computed in the browser. Run the script after opening or merging a
 pull request, and after tagging a release. Left unset, output is byte-identical
 to a board without the feature.
 
+## Rich text in card bodies (optional)
+
+Card prose is written by one session for the next one to read, so it arrives
+dense: `**bold**`, backticks, numbered findings, dated updates. Set
+`config.richText` to `true` and the long fields of all three card kinds go
+through a small renderer that understands `**bold**`, `` `code` ``,
+blank-line paragraphs, single newlines, `-` and `1.` lists, `①`–`⑩` lists (the
+circled number is kept as the marker), and a `【…】` opening as a dated section
+with a hairline above it. It deliberately does not understand headings, tables,
+link syntax or HTML, and escaping runs before any of it — a card can quote a
+`<script>` tag and it stays text. Fields over 400 characters are baked twice, a
+first-paragraph preview and the full text, with a quiet *expand · N more
+characters* button between them. The same switch enables an optional `detail`
+card field for the long trail of evidence, rendered after every other field as
+a collapsed block. A non-blocking guard notice names cards whose prose runs
+past 800 characters with no `detail` to move it into. Left unset, output is
+byte-identical to a board without the feature.
+
+## Archive tab (optional)
+
+On a board that has been running a while, finished cards outnumber the live
+ones several to one, and the backlog becomes a tab you scroll past rather than
+work from. Set `config.backlogArchive` to `true` and the backlog lists only
+cards that are not `done` — `deferred` stays, being parked rather than finished
+— while the finished ones move to their own tab at the end of the tab bar,
+rendered by the same card renderer in the same order. Badge counts follow, and
+the `done` filter chip drops out of the backlog toolbar. Global search, the
+lane and time filters, and deep links (`#CARD-ID`) reach the archive exactly as
+they reached the backlog. With `lazyTabs` on it becomes a third part file,
+`parts/archive.html`, with its own entry in the card → pane map, so a deep link
+to an archived card still fetches the right part. Left unset, output is
+byte-identical to a board without the feature.
+
+## WIP limits (optional)
+
+Set `config.wip` to an object — `{ "soft": 10, "hard": 20 }`; the object itself
+is the switch, and the two thresholds default to those values. The count is the
+`ready` cards only: `blocked` is waiting on somebody else and `deferred` is
+parked, so neither takes up room in what can be started today. Over `soft`, the
+backlog tab gets an amber dot and the pane a quiet grey line reading how many
+cards are ready; over `hard`, the dot turns red and the line becomes a standing
+banner suggesting the pile be cleared before new cards are added. With lanes
+configured the numbers follow the selected lane, recomputed with the same
+visibility rule that drives the tab badges. A non-blocking guard notice fires
+at stop time when the total across lanes is over `hard`. Left unset, output is
+byte-identical to a board without the feature.
+
 ## License
 
 [MIT](LICENSE)

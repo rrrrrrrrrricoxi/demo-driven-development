@@ -9,7 +9,7 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
-## [Unreleased]
+## [0.13.0] - 2026-08-27
 
 ### Added
 - Optional **rich text for card prose** (`"richText": true` in
@@ -70,6 +70,29 @@ downgrade would freeze every already-stamped board. See
 - `scripts/settle.mjs` — the three judgements as a pure module shared by the
   generator, the guard and `pr-sync`, so there is one definition of "settled"
   rather than three.
+- An optional **archive tab** for finished cards (`"backlogArchive": true` in
+  `kanban.config.json`). On a board that has been running a while, `done` cards
+  outnumber the live ones several to one and the backlog tab becomes a place
+  you scroll past rather than work from. With the switch on, the backlog lists
+  only cards that are not `done` — `deferred` stays, being parked rather than
+  finished — and the finished ones move to their own tab at the end of the tab
+  bar, rendered by the same card renderer in the same order. The badge counts
+  follow, and the `done` filter chip drops out of the backlog toolbar. Global
+  search, the lane and time filters, and deep links (`#CARD-ID`) all reach the
+  archive exactly as they reached the backlog. With `lazyTabs` on, the archive
+  is a third part file (`parts/archive.html`) with its own entry in the card →
+  pane map, so a deep link to an archived card still fetches the right part.
+  Not configured, output is byte-identical.
+- Optional **WIP limits** (`"wip": { "soft": 10, "hard": 20 }` — an object is
+  the switch; the thresholds default to 10 and 20). The count is the `ready`
+  cards only: `blocked` is waiting on somebody else and `deferred` is parked,
+  and neither takes up room in what can be started today. Over `soft`, the
+  backlog tab gets an amber dot and the pane a quiet grey line; over `hard`,
+  the dot turns red and the line becomes a standing banner suggesting the pile
+  be cleared before new cards are added. With lanes configured the numbers
+  follow the selected lane, recomputed with the same visibility rule that
+  drives the tab badges. A non-blocking guard notice fires at stop time when
+  the total (across lanes) is over `hard`.
 
 ### Changed
 - The reminder injected after a `gh pr merge` now points at

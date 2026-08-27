@@ -1470,7 +1470,14 @@ const tbEmpty = (pre) => `
 // ============================================================================
 //  Backlog
 // ============================================================================
-const blCount = b.items.length
+// ———— done 卡归档(v0.13.0,定稿 §8.1;config.backlogArchive:布尔,默认关)————
+// 关 = done 卡照旧留在 Backlog pane,输出逐字节冻结(blMain 就是 b.items 本尊)。
+// 开 = Backlog 只列 status ≠ done(deferred 是搁置不是完成,留下),done 卡整批搬进独立 pane
+// 「归档」——同一张 blCard、同一个顺序,只是换了个门牌;徽章/状态 chips/优先级下拉一并按新口径算。
+const ARCH = cfg.backlogArchive === true
+const ARCH_ST = 'done' // 归档收的状态 id(与 backlog-manifest 模板同名;宿主没这一档 = 归档空)
+const blMain = !ARCH ? b.items : b.items.filter((it) => it.status !== ARCH_ST)
+const blCount = blMain.length
 // 时间降序(2026-07-07 用户定向:打开当页先看到最新卡):date 新的在前,无 date 的按 id 数字倒序垫底
 const numOf = (id) => parseInt(String(id).replace(/^\D+/, ''), 10) || 0
 const byDateDesc = (a, b2) => {
@@ -1479,13 +1486,16 @@ const byDateDesc = (a, b2) => {
   if (da !== db) return db < da ? -1 : 1 // ISO 字符串比较;'' 恒垫底
   return numOf(b2.id) - numOf(a.id)
 }
-const blByStatus = (id) => b.items.filter((it) => it.status === id).sort(byDateDesc)
+const blByStatus = (id) => blMain.filter((it) => it.status === id).sort(byDateDesc)
+// 归档卡:顺序与 Backlog 同一把尺(byDateDesc),关档时是空表
+const archItems = !ARCH ? [] : b.items.filter((it) => it.status === ARCH_ST).sort(byDateDesc)
 
 // Backlog 工具条:状态 chips + 优先级下拉(中文标签+计数)
-const blChips = tbChips(b.groups, b.statuses, BL_STATUS_COLOR, (id) => b.items.filter((it) => it.status === id).length)
+// 归档开着时 done 一档计数为 0 → tbChips 自然不出这枚 chip(定稿 §8.1「筛选芯片去掉 done」)
+const blChips = tbChips(b.groups, b.statuses, BL_STATUS_COLOR, (id) => blMain.filter((it) => it.status === id).length)
 const blDimOpts = [`<option value="all">全部优先级 (${blCount})</option>`]
   .concat(Object.entries(b.priorities).map(([k, v]) => {
-    const n = b.items.filter((it) => it.priority === k).length
+    const n = blMain.filter((it) => it.priority === k).length
     return n ? `<option value="${esc(k)}">${esc(v)} (${n})</option>` : ''
   }))
   .join('')
@@ -1558,11 +1568,8 @@ const blCard = (it) => `
     </div>
   </article>`
 
-const blGroups = b.groups
-  .map((g) => {
-    const items = blByStatus(g.id)
-    if (!items.length) return ''
-    return `
+// 一个状态分区(Backlog 与归档共用;空分区不出段)
+const blSection = (g, items) => !items.length ? '' : `
   <section class="group" id="g-${esc(g.id)}">
     <header class="ghead" style="--c:${escC(BL_STATUS_COLOR[g.id])}">
       <span class="gid">${items.length}</span>
@@ -1571,7 +1578,9 @@ const blGroups = b.groups
     </header>
     <div class="cards">${items.map(blCard).join('')}</div>
   </section>`
-  })
+
+const blGroups = b.groups
+  .map((g) => blSection(g, blByStatus(g.id)))
   .join('')
 
 const blLegend =
@@ -1579,16 +1588,67 @@ const blLegend =
   '<span class="lg sep"></span>' +
   Object.entries(b.tiers).map(([k, v]) => `<span class="lg"><i style="background:${escC(TIER_COLOR[k])}"></i>T${esc(k)} ${esc(v)}</span>`).join('')
 
+// ———— 积压提醒(v0.13.0,定稿 §8.2;config.wip = { soft, hard },给对象即开)————
+// 计数只数 ready(定稿 §8.4-2):blocked 是等外部、deferred 是搁置,都不占「今天能动手」的额度。
+// gen 烤入全线别的档,运行期按当前线别/筛选重算(见 setLine 里的 WIP_SETLINE);未配 = 全空串。
+const WIP = (cfg.wip && typeof cfg.wip === 'object' && !Array.isArray(cfg.wip)) ? cfg.wip : null
+const WIP_SOFT = WIP && Number.isFinite(WIP.soft) ? WIP.soft : 10
+const WIP_HARD = WIP && Number.isFinite(WIP.hard) ? WIP.hard : 20
+const WIP_READY = !WIP ? 0 : b.items.filter((it) => it.status === 'ready').length
+const wipLevel = (n) => (n > WIP_HARD ? 'hard' : n > WIP_SOFT ? 'soft' : '')
+const wipText = (n) => (n > WIP_HARD ? `可做的卡 ${n} 张 · 超过 ${WIP_HARD} —— 先清一些再立新卡` : n > WIP_SOFT ? `可做的卡 ${n} 张 · 已超 ${WIP_SOFT}` : '')
+const WIP_LV0 = !WIP ? '' : wipLevel(WIP_READY) // 烤入档:懒加载未取 pane 时也先说得出话
+const WIP_TAB_CLS = !WIP_LV0 ? '' : ` wip-${WIP_LV0}`
+const WIP_BAR = !WIP ? '' : `
+  <div class="wipbar${WIP_LV0 ? ` wip-${WIP_LV0}` : ''}" id="wipbar"${WIP_LV0 ? '' : ' hidden'}>${esc(wipText(WIP_READY))}</div>`
+
 const backlogPane = `
   <div class="topbar">
     <h1>${esc(b.instance.label || BRAND + ' · Backlog')}</h1>${LANE.blSessHtml}
     <span class="branch">branch: ${esc(b.instance.branch)}</span>
-  </div>
-  ${tbHtml('bl', blChips, blDimOpts, '优先级筛选', tbSessChips('bl', b.items))}
+  </div>${WIP_BAR}
+  ${tbHtml('bl', blChips, blDimOpts, '优先级筛选', tbSessChips('bl', blMain))}
   ${blGroups}
   ${tbEmpty('bl')}
   <div class="legend">${blLegend}</div>
   <p class="stamp">${LANE.blStamp}</p>`
+
+// ———— 归档 pane(ARCH 开才有;lazyTabs 开着时它是第三个 part)————
+// 没有自己的工具条:归档是「翻旧账」的地方,全局搜索 + 线别/时间筛选足够,再加一排控件是噪音。
+const archivePane = !ARCH ? '' : `
+  <div class="topbar">
+    <h1>${esc(b.instance.label || BRAND + ' · Backlog')} · 归档</h1>
+    <span class="branch">branch: ${esc(b.instance.branch)}</span>
+  </div>
+  <p class="archnote">已落地的卡从 Backlog 移到这里。渲染、全局搜索、线别与时间筛选都照旧,深链(<code>#卡号</code>)直接落到这一页。</p>
+  ${b.groups.filter((g) => g.id === ARCH_ST).map((g) => blSection(g, archItems)).join('')}
+  <p class="pane-empty">当前筛选下归档里没有卡片。</p>
+  <div class="legend">${blLegend}</div>
+  <p class="stamp">${LANE.blStamp}</p>`
+
+// 归档 / 积压的门控注入片(两项都关时全为空串,插值点自身不带空白 = 逐字节冻结)
+const ARCH_TAB = !ARCH ? '' : `\n    <button class="tab" data-pane="archive" data-label="归档">归档 · ${archItems.length}</button>`
+const ARCH_PANE_HTML = !ARCH ? '' : `\n  <section class="pane" id="pane-archive"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : archivePane}</section>`
+const ARCH_PANE_ID = !ARCH ? '' : `, 'archive'`
+const ARCH_TF_SEL = !ARCH ? '' : ', #pane-archive .lcard' // 时间筛选对归档同样生效
+const ARCH_GRP = !ARCH ? '' : ` || pane.id === 'pane-archive'` // 线别把归档筛空时收起组头
+// 积压重算:计数 = backlog pane 里可见的 ready 卡(线别 ∧ 时间 ∧ 搜索 ∧ 工具条,与徽章同一 visOk)
+const WIP_SETLINE = !WIP ? '' : `
+    const wipPane = document.getElementById('pane-backlog')
+    if (wipPane && wipPane.dataset.lazyPending === undefined) { // 未取 pane:保持烤入的档,别先归零再跳
+      const wipN = nVis(wipPane, '.bl-ready')
+      const wipLv = wipN > ${WIP_HARD} ? 'hard' : wipN > ${WIP_SOFT} ? 'soft' : ''
+      const wipTab = document.querySelector('.tab[data-pane="backlog"]')
+      if (wipTab) { wipTab.classList.toggle('wip-soft', wipLv === 'soft'); wipTab.classList.toggle('wip-hard', wipLv === 'hard') }
+      const wipEl = document.getElementById('wipbar')
+      if (wipEl) {
+        wipEl.hidden = !wipLv
+        wipEl.classList.toggle('wip-soft', wipLv === 'soft')
+        wipEl.classList.toggle('wip-hard', wipLv === 'hard')
+        wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张 · 超过 ${WIP_HARD} —— 先清一些再立新卡'
+          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张 · 已超 ${WIP_SOFT}' : ''
+      }
+    }`
 
 // ============================================================================
 //  决策 / Demo
@@ -2934,6 +2994,21 @@ const RESP_JS = !RESP ? '' : `
   })()`
 const RESP_INJECTED = !RESP ? '' : `\n    if (window.respDorm) window.respDorm()`
 
+// ———— 归档 / 积压提醒:门控 CSS(两项都关 = 空串)————
+// 琥珀走 warn 一族(与进度响应同源),红走 .accbad 已在用的 #d44c47;暗档由 darkStyle 统一包 light-dark()。
+const ARCH_CSS = !ARCH ? '' : `
+  /* ============ done 卡归档(v0.13.0,config.backlogArchive)============ */
+  .archnote { margin: 0 0 16px; font-size: 12.5px; color: var(--mut); }
+  .archnote code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; font-size: .92em; }`
+const WIP_CSS = !WIP ? '' : `
+  /* ============ 积压提醒(v0.13.0,config.wip)============ */
+  .tab.wip-soft::after, .tab.wip-hard::after { content: ""; display: inline-block; width: 6px; height: 6px;
+     border-radius: 50%; margin-left: 6px; vertical-align: 1px; background: ${tk('warn-ink')}; }
+  .tab.wip-hard::after { background: #d44c47; }
+  .wipbar { margin: 14px 0 0; padding: 8px 13px; border-radius: 9px; font-size: 12.5px; line-height: 1.5;
+     border: 1px solid var(--line); background: var(--bg); color: var(--mut); }
+  .wipbar[hidden] { display: none; }
+  .wipbar.wip-hard { border: 1px solid #d44c47; border-left-width: 3px; background: #fdf3f2; color: #d44c47; font-weight: 600; }`
 
 // ============================================================================
 //  组装 index.html
@@ -2943,6 +3018,7 @@ const LAZY_IDMAP = {}
 if (LAZY) {
   for (const e of dm.entries) LAZY_IDMAP[e.id] = 'decisions'
   for (const it of b.items) LAZY_IDMAP[it.id] = 'backlog'
+  for (const it of archItems) LAZY_IDMAP[it.id] = 'archive' // 归档卡改判到第三个 part(深链跨 part 靠这张表)
 }
 const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
 const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = LAZY_PANE_OF[id]\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
@@ -2950,7 +3026,7 @@ const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
 const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
 const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(工具条/搜索/时间筛全幂等重跑)————
   const LAZY_PANE_OF = ${JSON.stringify(LAZY_IDMAP).replace(/</g, '\\u003c')}
-  const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')} } // 未压缩字节 = 真进度分母
+  const LAZY_BYTES = { decisions: ${Buffer.byteLength(decisionsPane, 'utf8')}, backlog: ${Buffer.byteLength(backlogPane, 'utf8')}${!ARCH ? '' : `, archive: ${Buffer.byteLength(archivePane, 'utf8')}`} } // 未压缩字节 = 真进度分母
   let curTf = 0
   const lazyDone = {}, lazyInflight = {}
   let lazyRx = 0, lazyExp = 0
@@ -3552,7 +3628,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -3573,15 +3649,15 @@ const html = `<!doctype html>
     <button class="tab tab-active" data-pane="progress">进度看板</button>
     ${pm ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
     <button class="tab" data-pane="decisions" data-label="决策/Demo">决策/Demo · ${decCount}</button>
-    <button class="tab" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}${REL_TAB}
-    <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>
+    <button class="tab${WIP_TAB_CLS}" data-pane="backlog" data-label="Backlog">Backlog · ${blCount}</button>${ACC_TAB}${REL_TAB}
+    <button class="tab" data-pane="docs" data-label="文档库">文档库 · ${REF_DOCS.length}</button>${ARCH_TAB}
     <a class="tab tab-shots" href="shots.html" title="验证截图存档(随 PR 入库)">截图 · ${SHOT_COUNT} ↗</a>
   </div>
   <section class="pane pane-active" id="pane-progress">${progressPane}</section>
   ${pm ? `<section class="pane" id="pane-path">${pathPane}</section>` : ''}
   <section class="pane" id="pane-decisions"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : decisionsPane}</section>
   <section class="pane" id="pane-backlog"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : backlogPane}</section>${ACC_PANE_HTML}${REL_PANE_HTML}
-  <section class="pane" id="pane-docs">${docsPane}</section>
+  <section class="pane" id="pane-docs">${docsPane}</section>${ARCH_PANE_HTML}
 </div>
 <script>
   const tabs = document.querySelectorAll('.tab')
@@ -3602,7 +3678,7 @@ const html = `<!doctype html>
     if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}${REL_SHOW}
   }
   tabs.forEach((t) => t.addEventListener('click', () => { show(t.dataset.pane); history.replaceState(null, '', t.dataset.pane === 'progress' ? '#' : '#' + t.dataset.pane) }))
-  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}])
+  const PANES = new Set(['progress', 'path', 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}${ARCH_PANE_ID}])
   function routeHash() {
     const id = decodeURIComponent(location.hash.slice(1))
     if (!id) return
@@ -3685,7 +3761,7 @@ const html = `<!doctype html>
       const vis = [...g.querySelectorAll('.lcard')].filter(visOk).length
       gid.textContent = String(vis) // 无筛选时 vis 即原始总数;有任一维度筛选时是可见数
       const pane = g.closest('.pane')
-      if (pane && (pane.id === 'pane-decisions' || pane.id === 'pane-backlog')) {
+      if (pane && (pane.id === 'pane-decisions' || pane.id === 'pane-backlog'${ARCH_GRP})) {
         g.style.display = vis ? '' : 'none'
       }
     })
@@ -3695,7 +3771,7 @@ const html = `<!doctype html>
     document.querySelectorAll('.tab[data-label]').forEach((t) => {
       const pane = document.getElementById('pane-' + t.dataset.pane)
       ${LAZY_BADGE}if (pane) t.textContent = t.dataset.label + ' · ' + nVis(pane, '.lcard')
-    })
+    })${WIP_SETLINE}
     // 汇总行(决策/Backlog 各一条):总数 + 分状态 chip 重算
     // 进度条按线路重算(与 gen 同口径:separate 不计;非全部档加线路前缀)
     const pbi = document.querySelector('#pane-progress .pbar i')
@@ -3735,7 +3811,7 @@ const html = `<!doctype html>
       const d = new Date(Date.now() - days * 86400000)
       cutoff = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
     }
-    document.querySelectorAll('#pane-decisions .lcard, #pane-backlog .lcard').forEach((c) => {
+    document.querySelectorAll('#pane-decisions .lcard, #pane-backlog .lcard${ARCH_TF_SEL}').forEach((c) => {
       const dd = c.dataset.date || ''
       c.classList.toggle('tf-hide', days > 0 && (!dd || dd < cutoff))
     })
@@ -3985,14 +4061,17 @@ if (LAZY) {
   mkdirSync(PARTS_DIR, { recursive: true })
   writeFileSync(join(PARTS_DIR, 'decisions.html'), decisionsPane)
   writeFileSync(join(PARTS_DIR, 'backlog.html'), backlogPane)
-  console.log(`[gen] lazyTabs:parts/decisions ${(Buffer.byteLength(decisionsPane, 'utf8') / 1024).toFixed(0)}KB + parts/backlog ${(Buffer.byteLength(backlogPane, 'utf8') / 1024).toFixed(0)}KB 已外提,壳留骨架`)
+  // 归档是第三个 part;归档关着时清掉上一轮的陈迹(壳里已无 archive 入口,留着只会误导)
+  if (ARCH) writeFileSync(join(PARTS_DIR, 'archive.html'), archivePane)
+  else { const ap = join(PARTS_DIR, 'archive.html'); if (existsSync(ap)) rmSync(ap) }
+  console.log(`[gen] lazyTabs:parts/decisions ${(Buffer.byteLength(decisionsPane, 'utf8') / 1024).toFixed(0)}KB + parts/backlog ${(Buffer.byteLength(backlogPane, 'utf8') / 1024).toFixed(0)}KB${ARCH ? ` + parts/archive ${(Buffer.byteLength(archivePane, 'utf8') / 1024).toFixed(0)}KB` : ''} 已外提,壳留骨架`)
 } else if (existsSync(PARTS_DIR)) {
-  // 只清己产的两个文件;目录非空(有别人的东西)绝不整删
-  for (const f of ['decisions.html', 'backlog.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
+  // 只清己产的三个文件;目录非空(有别人的东西)绝不整删
+  for (const f of ['decisions.html', 'backlog.html', 'archive.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
   try { if (readdirSync(PARTS_DIR).length === 0) rmSync(PARTS_DIR, { recursive: true }) } catch {}
 }
 console.log(
-  `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${blCount} 条` +
+  `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${b.items.length} 条` +
     `(${b.groups.map((g) => `${b.statuses[g.id]} ${b.items.filter((it) => it.status === g.id).length}`).join(' / ')})` +
-    ` · 决策/Demo ${dm.entries.length} 条`,
+    `${ARCH ? `,其中 ${archItems.length} 张已归档` : ''} · 决策/Demo ${dm.entries.length} 条`,
 )

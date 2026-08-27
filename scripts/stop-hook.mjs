@@ -240,6 +240,23 @@ const orphans = demos.filter((f) => !covered.has(f))
   }
 }
 
+// ---- ⑥ 积压审计(v0.13.0,只在 config.wip 配了对象时跑):ready 超 hard 就说一声 ----
+// 与卡上的横幅同一口径(只数 ready),但守卫看的是全线别的总数 —— 分线别的账在页面上看。
+{
+  let wip = null
+  try {
+    const c = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8'))
+    if (c.wip && typeof c.wip === 'object' && !Array.isArray(c.wip)) wip = c.wip
+  } catch {}
+  if (wip) {
+    const hard = Number.isFinite(wip.hard) ? wip.hard : 20
+    let items = []
+    try { items = JSON.parse(readFileSync(join(KANBAN, 'backlog-manifest.json'), 'utf8')).items || [] } catch {}
+    const n = items.filter((it) => it && it.status === 'ready').length
+    if (n > hard) notices.push(S.wipOver(n, hard))
+  }
+}
+
 if (orphans.length === 0) {
   if (notices.length) console.log(JSON.stringify({ systemMessage: notices.join('\n') }))
   process.exit(0)

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。343 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。381 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
 // 卡正文轻 markdown(lite 规则逐条 + XSS + 折叠预览 + detail 字段 + 正文长度守卫)、
-// 进度响应(settle/reopen/stale-link/dormant 穷举 + 芯片 + 待收账段 + 守卫 + pr-sync --settle)等。
+// 进度响应(settle/reopen/stale-link/dormant 穷举 + 芯片 + 待收账段 + 守卫 + pr-sync --settle)、
+// done 卡归档(独立 pane + lazy 第三个 part + 深链映射)、积压提醒 wip(三档 + 守卫)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -1424,6 +1425,155 @@ esac
   const rOdd = runSync(['--settle', '--write'])
   ok(rOdd.status === 0 && sha(blP) === oddSha && /排版|formatted/.test(rOdd.stderr),
     '非标准排版的 manifest 拒绝改写,原文一字不动', `${rOdd.status} ${rOdd.stderr.slice(0, 160)}`)
+}
+
+// ============ T39 done 卡归档(opt-in;未配/false = 字节冻结,开 = 独立 pane + lazy 第三个 part)============
+console.log('T39 done 卡归档')
+{
+  const fx39 = mkFixture('fx39', { 's.html': demoHtml('s') })
+  const cfgP = join(fx39.kb, 'kanban.config.json')
+  const idxP = join(fx39.kb, 'index.html')
+  const blP = join(fx39.kb, 'backlog-manifest.json')
+  const bl = JSON.parse(readFileSync(blP, 'utf8'))
+  bl.tiers = { 1: '核心' } // 模板词表为空,补一档供卡引用
+  bl.items = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', date: '2026-02-01', title: '待办甲' },
+    { id: 'BL-2', status: 'deferred', priority: 'med', tier: '1', date: '2026-02-02', title: '推后乙' },
+    { id: 'BL-3', status: 'done', priority: 'low', tier: '1', date: '2026-01-03', title: '旧账丙' },
+    { id: 'BL-4', status: 'done', priority: 'low', tier: '1', date: '2026-01-04', title: '旧账丁' },
+  ]
+  writeFileSync(blP, JSON.stringify(bl))
+  // pane 切片:pane 里嵌着 <section class="group">,不能按 </section> 切;按下一个 pane 的锚点切
+  const slice = (html, from, to) => {
+    const i = html.indexOf(`id="pane-${from}"`)
+    const j = to ? html.indexOf(`id="pane-${to}"`) : html.length
+    return i < 0 ? '' : html.slice(i, j > i ? j : html.length)
+  }
+  runGen(NEW_SCRIPTS, fx39.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('pane-archive') && off.includes('Backlog · 4'), '未配 backlogArchive:无归档 pane,Backlog 徽章 = 全部卡')
+  ok(slice(off, 'backlog', 'docs').includes('id="BL-3"'), '未配时 done 卡照旧住在 Backlog')
+  const offSha = sha(idxP)
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.backlogArchive = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx39.kb)
+  ok(sha(idxP) === offSha, 'backlogArchive:false 与未配逐字节相同(冻结)')
+  cfg.backlogArchive = true
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  const r = runGen(NEW_SCRIPTS, fx39.kb)
+  ok(r.status === 0, 'backlogArchive:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(on.includes('data-pane="archive"') && on.includes('归档 · 2'), '归档 tab 在场,徽章 = done 卡数')
+  ok(on.indexOf('data-pane="archive"') > on.indexOf('data-pane="docs"'), '归档 tab 排在文档库之后(tab 条最末)')
+  ok(on.includes('Backlog · 2'), 'Backlog 徽章 = 非 done 数')
+  const blPane = slice(on, 'backlog', 'docs'), arPane = slice(on, 'archive')
+  ok(blPane.includes('id="BL-1"') && blPane.includes('id="BL-2"'), 'Backlog 留下 ready 与 deferred(搁置不是完成)')
+  ok(!blPane.includes('id="BL-3"') && !blPane.includes('id="BL-4"'), 'Backlog 不再列 done 卡')
+  ok(arPane.includes('id="BL-3"') && arPane.includes('id="BL-4"'), '归档 pane 收下两张 done 卡')
+  ok(arPane.indexOf('id="BL-4"') < arPane.indexOf('id="BL-3"'), '归档顺序仍是日期新→旧(与 Backlog 同一把尺)')
+  ok(!blPane.includes('data-k="done"'), 'Backlog 状态筛选芯片去掉 done')
+  ok(on.includes(", 'archive'])") && on.includes('#pane-archive .lcard'), '归档进 PANES(深链 #archive)+ 时间筛选选择器')
+  ok(on.includes("pane.id === 'pane-archive'"), '线别筛空归档时组头一并收起')
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/)
+    let compiled = true
+    try { new Function(sc[1]) } catch (e) { compiled = false }
+    ok(compiled, 'ON 整壳内联 JS 可编译(new Function 不抛)')
+  }
+  // ---- lazyTabs 同开:归档 = 第三个 part ----
+  cfg.lazyTabs = true
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx39.kb)
+  const lz = readFileSync(idxP, 'utf8')
+  const partA = readFileSync(join(fx39.kb, 'parts/archive.html'), 'utf8')
+  ok(partA.includes('id="BL-3"') && partA.includes('id="BL-4"'), 'parts/archive.html 落盘且含归档卡正文')
+  ok(!lz.includes('id="BL-3"') && !lz.includes('id="BL-4"'), '壳 index 不再含归档卡正文')
+  ok(lz.includes('"BL-3":"archive"') && lz.includes('"BL-1":"backlog"'), 'LAZY_PANE_OF:归档卡改判到 archive part(深链跨 part)')
+  {
+    const bd = lz.match(/archive: (\d+)/)
+    ok(bd && Number(bd[1]) === Buffer.byteLength(partA, 'utf8'), 'LAZY_BYTES.archive 与 parts 实际字节一致')
+  }
+  {
+    const sc = lz.match(/<script>([\s\S]*?)<\/script>/)
+    let compiled = true
+    try { new Function(sc[1]) } catch (e) { compiled = false }
+    ok(compiled, 'lazy + 归档同开的壳 JS 可编译')
+  }
+  // ---- 只关归档、lazy 还开着:第三个 part 的陈迹清掉(壳里已无入口)----
+  cfg.backlogArchive = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx39.kb)
+  ok(!existsSync(join(fx39.kb, 'parts/archive.html')) && existsSync(join(fx39.kb, 'parts/backlog.html')),
+    '关掉归档:parts/archive.html 清除,另两个 part 不受影响')
+  // ---- 全关回:parts 目录连同归档一起清干净,index 回基线 ----
+  cfg.lazyTabs = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx39.kb)
+  ok(!existsSync(join(fx39.kb, 'parts')), '关回后 parts/ 目录清除(清理白名单认得 archive.html)')
+  ok(sha(idxP) === offSha, '关回后 index 与冻结基线逐字节相同')
+}
+
+// ============ T40 积压提醒 wip(对象即开;三档文案 + 守卫 notice;未配 = 字节冻结)============
+console.log('T40 积压提醒 wip')
+{
+  const fx40 = mkFixture('fx40', { 's.html': demoHtml('s') })
+  const cfgP = join(fx40.kb, 'kanban.config.json')
+  const idxP = join(fx40.kb, 'index.html')
+  const blP = join(fx40.kb, 'backlog-manifest.json')
+  const bl = JSON.parse(readFileSync(blP, 'utf8'))
+  bl.tiers = { 1: '核心' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', date: '2026-02-01', title: '甲' },
+    { id: 'BL-2', status: 'ready', priority: 'high', tier: '1', date: '2026-02-02', title: '乙' },
+    { id: 'BL-3', status: 'ready', priority: 'high', tier: '1', date: '2026-02-03', title: '丙' },
+    { id: 'BL-4', status: 'blocked', priority: 'low', tier: '1', date: '2026-02-04', title: '丁' },
+    { id: 'BL-5', status: 'deferred', priority: 'low', tier: '1', date: '2026-02-05', title: '戊' },
+  ]
+  writeFileSync(blP, JSON.stringify(bl))
+  runGen(NEW_SCRIPTS, fx40.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('wipbar') && !off.includes('wip-soft'), '未配 wip:无横幅、无琥珀点')
+  const offSha = sha(idxP)
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  const gen = (wip) => { cfg.wip = wip; writeFileSync(cfgP, JSON.stringify(cfg)); const rr = runGen(NEW_SCRIPTS, fx40.kb); return { rr, html: readFileSync(idxP, 'utf8') } }
+  { // 空对象即开,阈值走缺省 10 / 20 —— 3 张 ready 谁也没超
+    const { rr, html } = gen({})
+    ok(rr.status === 0 && html.includes('id="wipbar"') && html.includes('id="wipbar" hidden'), '空对象即开;缺省 10/20 下 3 张 ready 不出横幅', rr.stderr)
+    ok(!html.includes('class="tab wip-'), '未超 soft:Backlog tab 不带点')
+    ok(html.includes('wipN > 20 ?') && html.includes('wipN > 10 ?'), '缺省阈值 10/20 烤进运行期重算')
+  }
+  { // 超 soft:灰条 + 琥珀点
+    const { html } = gen({ soft: 2, hard: 10 })
+    ok(html.includes('可做的卡 3 张 · 已超 2'), '超 soft:灰条文案')
+    ok(html.includes('<div class="wipbar wip-soft" id="wipbar">'), '超 soft:横幅带 wip-soft 且不 hidden')
+    ok(html.includes('class="tab wip-soft" data-pane="backlog"'), '超 soft:Backlog tab 带琥珀点')
+  }
+  { // 超 hard:红横幅 + 红点
+    const { html } = gen({ soft: 1, hard: 2 })
+    ok(html.includes('可做的卡 3 张 · 超过 2 —— 先清一些再立新卡'), '超 hard:红横幅文案')
+    ok(html.includes('class="tab wip-hard" data-pane="backlog"'), '超 hard:Backlog tab 带红点')
+    ok(html.includes('.wipbar.wip-hard'), '红档 CSS 随开关注入')
+    const sc = html.match(/<script>([\s\S]*?)<\/script>/)
+    let compiled = true
+    try { new Function(sc[1]) } catch (e) { compiled = false }
+    ok(compiled, 'wip 开档整壳内联 JS 可编译')
+    // 守卫:总 ready 超 hard → 一条非阻断 notice
+    const r = runStop(NEW_SCRIPTS, fx40.root)
+    ok(r.status === 0, '积压审计不阻断收工(exit 0)', `${r.status} ${r.stderr.slice(0, 200)}`)
+    ok(r.stdout.includes('ready)的卡有 3 张') && r.stdout.includes('config.wip.hard = 2'), '守卫点名 ready 数与 hard 阈值')
+  }
+  { // 没超 hard 就不该有 notice
+    gen({ soft: 1, hard: 9 })
+    touch(join(fx40.kb, 'index.html'))
+    const r = runStop(NEW_SCRIPTS, fx40.root)
+    ok(!r.stdout.includes('config.wip.hard'), '没超 hard:守卫一声不吭')
+  }
+  // 撤掉 wip → 回冻结基线
+  delete cfg.wip
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx40.kb)
+  ok(sha(idxP) === offSha, '撤掉 wip 后与未配基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
