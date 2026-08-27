@@ -2549,6 +2549,53 @@ console.log('T52 链接协议白名单')
   ok(!readFileSync(blP, 'utf8').includes('javascript:alert(1)'), '拒绝之后卡文件里没有这条链接')
 }
 
+// ============ T53 文档 / 截图的更新日期批量取(一条 git log,不是一篇一条命令)============
+console.log('T53 更新日期批量取')
+{
+  const fx = mkFixture('fx53', { 'c1.html': demoHtml('c1') })
+  const kb = fx.kb, root = fx.root
+  const git = (args, when) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+    cwd: root,
+    env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
+  })
+  mkdirSync(join(root, 'docs'), { recursive: true })
+  writeFileSync(join(root, 'docs', 'a.md'), '# 甲\n\n一段。\n')
+  writeFileSync(join(root, 'docs', 'b.md'), '# 乙\n\n一段。\n')
+  writeFileSync(join(kb, 'shots', 'd1-one.png'), 'x')
+  writeFileSync(join(kb, 'shots', 'd1-two.png'), 'y')
+  const cfgP = join(kb, 'kanban.config.json')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.docs = [
+    { path: 'docs/a.md', out: 'a.html', baseDir: 'docs', title: '甲', category: '设计与决策' },
+    { path: 'docs/b.md', out: 'b.html', baseDir: 'docs', title: '乙', category: '设计与决策' },
+    { path: 'docs/c.md', out: 'c.html', baseDir: 'docs', title: '丙(未提交)', category: '设计与决策' },
+  ]
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  git(['add', 'docs/a.md', 'app/kanban/shots/d1-one.png'], '2026-03-01T10:00:00+00:00')
+  git(['commit', '-q', '-m', '甲'], '2026-03-01T10:00:00+00:00')
+  git(['add', 'docs/b.md', 'app/kanban/shots/d1-two.png'], '2026-04-02T10:00:00+00:00')
+  git(['commit', '-q', '-m', '乙'], '2026-04-02T10:00:00+00:00')
+  writeFileSync(join(root, 'docs', 'a.md'), '# 甲\n\n改过。\n') // 再改一次:取的是最后一次,不是第一次
+  git(['add', 'docs/a.md'], '2026-05-03T10:00:00+00:00')
+  git(['commit', '-q', '-m', '甲二'], '2026-05-03T10:00:00+00:00')
+  writeFileSync(join(root, 'docs', 'c.md'), '# 丙\n\n还没提交。\n') // untracked → 退 mtime
+
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'gen exit 0', r.stderr)
+  const idx = readFileSync(join(kb, 'index.html'), 'utf8')
+  ok(idx.includes('data-doc="a.html" data-line="" data-updated="2026-05-03"'), '文档取的是最后一次提交日,不是第一次')
+  ok(idx.includes('data-doc="b.html" data-line="" data-updated="2026-04-02"'), '同一批 git log 里另一篇文档各归各的日期')
+  const today = new Date()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  ok(idx.includes(`data-doc="c.html" data-line="" data-updated="${todayStr}"`), '没提交过的文档退回文件 mtime(降级链没断)')
+  const shots = readFileSync(join(kb, 'shots.html'), 'utf8')
+  ok(shots.includes('>d1-one.png</span><span class="dt">2026-03-01<'), '截图取自己那次提交日')
+  ok(shots.includes('>d1-two.png</span><span class="dt">2026-04-02<'), '同一批里另一张截图各归各的日期')
+  writeFileSync(join(kb, 'shots', 'd1-three.png'), 'z') // untracked
+  runGen(NEW_SCRIPTS, kb)
+  ok(readFileSync(join(kb, 'shots.html'), 'utf8').includes(`>d1-three.png</span><span class="dt">${todayStr}<`), '没提交过的截图退回文件 mtime')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

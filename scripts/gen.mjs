@@ -183,12 +183,29 @@ function segKeyOfCat(cat) {
   return seg.key
 }
 
-// 文档更新时间(真源 = git log 最后提交日;untracked/无 git 退回文件 mtime;都拿不到则空)—— gen 期取好嵌入
+// 文档更新时间(真源 = git log 最后提交日;untracked/无 git 退回文件 mtime;都拿不到则空)—— gen 期取好嵌入。
+// 一条 git log 批量取全部文档的最后提交日,不是一篇一条命令 —— 与 v0.14.0 的每卡更新日期同一招。
+// 一个进程 fork 一次约 34ms,而守卫每次收工都跑 gen:55 篇文档就是 1.9s 的纯等待,还随文档数线性长。
+const DOC_COMMITTED = new Map() // repo-root 相对路径 → 'YYYY-MM-DD'
+{
+  const paths = [...new Set((cfg.docs || []).map((d) => d && d.path).filter((x) => typeof x === 'string' && x))]
+  if (paths.length) {
+    try {
+      const out = execFileSync('git', ['log', '--format=%ad', '--date=short', '--name-only', '--', ...paths],
+        { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+      let day = ''
+      for (const raw of out.split('\n')) {
+        const line = raw.trim()
+        if (!line) continue
+        if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+        if (day && !DOC_COMMITTED.has(line)) DOC_COMMITTED.set(line, day) // git log 是新→旧,第一次见到即最后一次改动
+      }
+    } catch { /* 无 git / 命令失败 → 整批退 mtime */ }
+  }
+}
 function docUpdated(relPath) {
-  try {
-    const out = execFileSync('git', ['log', '-1', '--format=%ad', '--date=short', '--', relPath], { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
-    if (out) return out
-  } catch { /* 无 git / 命令失败 */ }
+  const day = DOC_COMMITTED.get(relPath)
+  if (day) return day
   try { return statSync(join(REPO_ROOT, relPath)).mtime.toISOString().slice(0, 10) } catch { return '' }
 }
 
@@ -1216,14 +1233,24 @@ let SHOT_COUNT = 0 // 提级入口徽章用(tab 行「截图 · N ↗」)
     return cands.find((id) => ALL_CARD_IDS.has(id)) ?? null
   }
   /* 入库日期取 git 提交日;未跟踪(预览提取件)退回文件 mtime。
-     走 argv 不走 shell:文件名是从目录里读来的,不是我们写的常量 —— 拼进命令串的话,
-     一个叫 `a";touch X;".png` 的截图就是一次以本用户身份执行的任意命令,而守卫每次收工
-     都自动跑 gen。argv 形式没有引号问题,也没有 shell 可言。 */
+     一条 git log 扫整个 shots/,不是一张截图一条命令 —— 43 张在真仓上是 3.4s 对 53ms。
+     走 argv 不走 shell:文件名是从目录里读来的,不是我们写的常量。 */
+  const SHOT_COMMITTED = new Map() // 'shots/<文件名>' → 'YYYY-MM-DD'
+  try {
+    const out = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', 'shots'],
+      { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+    let day = ''
+    for (const raw of out.split('\n')) {
+      const line = raw.trim()
+      if (!line) continue
+      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+      const k = line.split('/').slice(-2).join('/') // git 的路径相对仓根,不相对看板目录,故只认末两段
+      if (day && !SHOT_COMMITTED.has(k)) SHOT_COMMITTED.set(k, day)
+    }
+  } catch { /* 非 git 环境 → 整批退 mtime */ }
   const shotDate = (file) => {
-    try {
-      const d = execFileSync('git', ['log', '-1', '--format=%cs', '--', `shots/${file}`], { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
-      if (d) return d
-    } catch { /* 非 git 环境退 mtime */ }
+    const day = SHOT_COMMITTED.get(`shots/${file}`)
+    if (day) return day
     try { return statSync(join(SHOTS_DIR, file)).mtime.toISOString().slice(0, 10) } catch { return '' }
   }
   let shotFiles = []
