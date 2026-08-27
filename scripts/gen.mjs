@@ -1759,8 +1759,11 @@ const WIP_SETLINE = !WIP ? '' : `
         wipEl.hidden = !wipLv
         wipEl.classList.toggle('wip-soft', wipLv === 'soft')
         wipEl.classList.toggle('wip-hard', wipLv === 'hard')
-        wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张 · 超过 ${WIP_HARD} —— 先清一些再立新卡'
-          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张 · 已超 ${WIP_SOFT}' : ''
+        // 当前筛选只数得到一部分卡时,把全板数一并说出来(定稿 §8.2「并给总数」):
+        // 守卫那条 notice 用的是全板数,两处各报一个数会读起来像在说两块板。
+        const wipAll = wipN === ${WIP_READY} ? '' : '(全板 ${WIP_READY})'
+        wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
+          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 已超 ${WIP_SOFT}' : ''
       }
     }`
 

@@ -1609,6 +1609,17 @@ console.log('T40 积压提醒 wip')
     ok(r.status === 0, '积压审计不阻断收工(exit 0)', `${r.status} ${r.stderr.slice(0, 200)}`)
     ok(r.stdout.includes('ready)的卡有 3 张') && r.stdout.includes('config.wip.hard = 2'), '守卫点名 ready 数与 hard 阈值')
   }
+  { // 线别/时间筛选下横幅要给两个数:当前筛选可见数 + 全板数(守卫那条 notice 用的正是全板数)
+    const { html } = gen({ soft: 1, hard: 9 })
+    const lines = html.split('\n')
+    const at = lines.findIndex((l) => l.includes('const wipAll = wipN ==='))
+    ok(at > 0, '横幅重算里烤进了全板数那一句')
+    const run = new Function('wipN', 'wipLv', 'wipEl', lines.slice(at, at + 3).join('\n') + '\nreturn wipEl.textContent')
+    ok(run(3, 'soft', {}) === '可做的卡 3 张 · 已超 1', '没筛掉任何卡:文案与从前一字不差')
+    ok(run(2, 'soft', {}) === '可做的卡 2 张(全板 3) · 已超 1', '筛掉一部分:可见数之外补一段全板数')
+    ok(run(2, 'hard', {}) === '可做的卡 2 张(全板 3) · 超过 9 —— 先清一些再立新卡', '红档同样两个数')
+    ok(run(3, '', {}) === '', '没超阈值仍是空串(横幅自己 hidden)')
+  }
   { // 没超 hard 就不该有 notice
     gen({ soft: 1, hard: 9 })
     touch(join(fx40.kb, 'index.html'))
