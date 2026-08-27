@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // PR / 版本同步(v0.12.0)。gh → release-manifest.json,给「发布进度」tab 与卡头芯片后缀供数。
 //
-//   node scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run] [--settle [--write] [--only <id>[,<id>…]]]
+//   node scripts/pr-sync.mjs [--dir <kanbanDir>] [--dry-run] [--limit N] [--release-limit N]
+//                             [--settle [--write] [--only <id>[,<id>…]]]
 //
 // 为什么是独立脚本而不是 hook:gen 必须零网络零时间(测试床里没有 gh、没有 remote),
 // 「现在几点、GitHub 上是什么状态」只能由一个人/工作流显式触发的脚本落进数据里。
 // 开/合 PR 之后、发版打完 tag 之后各跑一次即可(ddd-workflow ③⑤)。
 //
 // 写什么、不写什么:
-//   prs[]     全量重写(gh 是真源),number 降序;cards 由 prlink.prsOfCard 反查三份 manifest
+//   prs[]     按号合并(gh 返回的号照它重写,没返回的老 PR 原样留着),number 降序;
+//             cards 一律由 prlink.prsOfCard 反查三份 manifest
 //   releases[] 只追加 gh 上有、文件里没有的 tag;已有条目的 note / 人手写的 prs 一律保留
 //   syncedAt  当前 ISO(脚本可以用时间,gen 不行)
 //   stages / $comment 原样不动 —— 那是人写的口径
@@ -55,6 +57,18 @@ const ONLY = (() => {
 })()
 const OUT = join(KANBAN, 'release-manifest.json')
 const die = (msg) => { console.error(msg); process.exit(1) }
+// --limit N:一次向 gh 要多少个 PR / 多少个 release。gh 自己没有「全部」这档,只能给个数;
+// 拿满了就说明还有更旧的没拿到 —— 见下面的截断提醒。
+const numFlag = (name, dflt) => {
+  const i = ARGV.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`))
+  if (i < 0) return dflt
+  const raw = ARGV[i].startsWith(`--${name}=`) ? ARGV[i].slice(name.length + 3) : ARGV[i + 1]
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1) die(S.badLimit(name, String(raw)))
+  return n
+}
+const PR_LIMIT = numFlag('limit', 1000)
+const REL_LIMIT = numFlag('release-limit', 200)
 
 // ---- 仓与主线:三份 manifest 各存一份 instance(现状),取第一个非空 ----
 const readJson = (p) => { try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null } }
@@ -93,9 +107,9 @@ const gh = (args, what) => {
   try { return JSON.parse(r.stdout) }
   catch (e) { die(S.ghBadJson(what, e.message)) }
 }
-const ghPrs = gh(['pr', 'list', '--repo', REPO, '--state', 'all', '--limit', '500',
+const ghPrs = gh(['pr', 'list', '--repo', REPO, '--state', 'all', '--limit', String(PR_LIMIT),
   '--json', 'number,title,state,isDraft,baseRefName,headRefName,url,createdAt,mergedAt,closedAt'], `gh pr list --repo ${REPO}`)
-const ghRels = gh(['release', 'list', '--repo', REPO, '--limit', '100', '--json', 'tagName,publishedAt'], `gh release list --repo ${REPO}`)
+const ghRels = gh(['release', 'list', '--repo', REPO, '--limit', String(REL_LIMIT), '--json', 'tagName,publishedAt'], `gh release list --repo ${REPO}`)
 
 // ---- 现有文件(缺则从模板起;坏 JSON 拒绝覆盖:人手写的 note/prs 可能就在里面)----
 let out
@@ -118,7 +132,7 @@ for (const r of ghRels) {
 // at 升序(区间归属靠它;gh 给的顺序不保证)。比时刻不比字面:人手写的 at 常带 +08:00,gh 给的是 Z。
 out.releases.sort((a, b) => cmpAt((a || {}).at, (b || {}).at))
 
-// ---- prs:全量重写(gh 是真源)----
+// ---- prs:按号合并(gh 是它返回的那些号的真源;它没返回的老 PR 原样留着)----
 const MAIN = inst('branch')
 const CARDS = CARD_ROWS.map((r) => r.card).filter(Boolean)
 const cardsOfPr = new Map()
@@ -128,7 +142,12 @@ for (const c of CARDS) for (const p of prsOfCard(c, REPO)) {
   const list = cardsOfPr.get(p.num)
   if (!list.includes(String(c.id))) list.push(String(c.id))
 }
-out.prs = ghPrs
+// gh 拿满了 limit = 还有更旧的 PR 没拿到。这一趟本身不会丢东西(下面按号合并,gh 没返回的原样留着),
+// 但表上那些行从此不再刷新状态,得让人知道该加 --limit。
+const prTruncated = ghPrs.length >= PR_LIMIT
+const relTruncated = ghRels.length >= REL_LIMIT
+const prevPrs = Array.isArray(out.prs) ? out.prs.filter((p) => p && Number.isFinite(Number(p.number))) : []
+const fresh = ghPrs
   .filter((p) => p && p.number != null)
   .map((p) => ({
     number: Number(p.number),
@@ -143,7 +162,14 @@ out.prs = ghPrs
     closedAt: p.closedAt ? String(p.closedAt) : null,
     cards: cardsOfPr.get(Number(p.number)) || [],
   }))
-  .sort((a, b) => b.number - a.number)
+// gh 是真源,但只对它这趟返回的那些号是真源:没返回的(超出 limit 的老 PR)原样留着 ——
+// 全量覆盖会把它们从表上抹掉,深链 #pr-N 跟着死,卡上的 PR 芯片也没了状态词。
+{
+  const got = new Set(fresh.map((p) => p.number))
+  // cards 始终由板反查,不从旧文件继承 —— 留下来的是 gh 这趟没提到的号,不是没人管的号
+  const kept = prevPrs.filter((p) => !got.has(Number(p.number))).map((p) => ({ ...p, cards: cardsOfPr.get(Number(p.number)) || [] }))
+  out.prs = [...fresh, ...kept].sort((a, b) => Number(b.number) - Number(a.number))
+}
 
 // ---- 版本区间自动填 prs:人手写过的不覆盖(显式列表是人的裁量,机器不该抹掉)----
 // 归属 = mergedAt 在上一版打 tag 时刻(不含)与本版打 tag 时刻(含)之间,且 base 是主线。
@@ -160,6 +186,9 @@ for (const r of out.releases) {
 }
 
 out.syncedAt = new Date().toISOString()
+
+if (prTruncated) console.error(S.prTruncated(ghPrs.length, 'limit'))
+if (relTruncated) console.error(S.relTruncated(ghRels.length, 'release-limit'))
 
 if (DRY) console.log(S.dry(out.prs.length, out.releases.length, added))
 else {

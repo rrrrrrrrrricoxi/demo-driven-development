@@ -1056,6 +1056,29 @@ esac
   const rNo = runSync(noGhDir)
   ok(rNo.status === 1 && sha(relP) === afterSha, 'PATH 里没有 gh → exit 1 且文件一个字节都没动', `${rNo.status} ${rNo.stderr.slice(0, 120)}`)
   ok(/找不到 gh 命令|gh command was not found/.test(rNo.stderr), 'stderr 是「找不到 gh」那条(不是 gh 跑起来又失败那条)', rNo.stderr.slice(0, 120))
+
+  { // --limit:gh 只有「要多少个」没有「全部」;拿满了要说一句,而且这趟没返回的老 PR 不许从表上抹掉
+    const limDir = join(WORK, 'fakegh-limit')
+    mkdirSync(limDir, { recursive: true })
+    writeFileSync(join(limDir, 'gh'), `#!${process.execPath}
+const a = process.argv.slice(2)
+if (a[0] === 'release') { console.log('[]'); process.exit(0) }
+const lim = Number(a[a.indexOf('--limit') + 1])
+const prs = [12, 11, 10, 9].map((n) => ({ number: n, title: 'gh-' + n, state: 'OPEN', isDraft: false, baseRefName: 'main', headRefName: 'f' + n, url: 'https://github.com/o/r/pull/' + n, createdAt: '2026-08-20T01:00:00Z', mergedAt: null, closedAt: null }))
+console.log(JSON.stringify(prs.slice(0, lim)))
+`)
+    chmodSync(join(limDir, 'gh'), 0o755)
+    const rBad = runSync(limDir, ['--limit', 'x'])
+    ok(rBad.status === 1 && /正整数|positive integer/.test(rBad.stderr), '--limit 要正整数,给别的就拒跑')
+    const rLim = runSync(limDir, ['--limit', '2'])
+    const o2 = rd(relP)
+    ok(rLim.status === 0, 'pr-sync --limit 2 exit 0', rLim.stderr)
+    ok(o2.prs.map((p) => p.number).join(',') === '12,11,10,9', 'gh 只给了两个,另两个老 PR 原样留在表上(不是被删掉)', o2.prs.map((p) => p.number).join(','))
+    ok(o2.prs[0].title === 'gh-12' && o2.prs[3].title === '丁', 'gh 返回的那两个照它重写,没返回的两个保持原样')
+    ok(/给满了|as many as it was asked for/.test(rLim.stderr), '拿满 limit 时 stderr 明说这趟截断了,并指出该加 --limit')
+    const rFull = runSync(limDir, ['--limit', '10'])
+    ok(!/给满了|as many as it was asked for/.test(rFull.stderr), '没拿满就不吵')
+  }
 }
 
 // ============ T35 richText 卡正文轻 markdown + 折叠 + detail(opt-in;关档逐字节冻结)============
