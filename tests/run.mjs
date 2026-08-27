@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。632 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。647 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -12,7 +12,8 @@
 // 一卡一文件 cardsDir(拆分等价四拍 / 五种硬报错 / 顺序与文件系统无关 / 守卫 / 每卡更新日期降级链)、
 // 写操作 CLI(建卡的号靠 openSync 'wx' 预留 —— 真起两个进程并发验 / 六种校验拒绝 / 时间线 /
 // 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)、
-// 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)等。
+// 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)、
+// 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -2698,6 +2699,78 @@ console.log('T54 线别分段 × 懒注入')
     ok(off.includes('id="bllineseg"') && off.includes('ev.target.closest(LINE_BTN_SEL)') && !/lineBtns/.test(off),
       '非懒模式:分段就在壳里,同样走委托(一份实现两种形态)')
   }
+}
+
+// ============ T55 左侧竖向 tab 导航 tabRail(opt-in;关档逐字节冻结;清单与 tab 条同一份)============
+console.log('T55 左侧竖向 tab 导航 tabRail')
+{
+  const fx55 = mkFixture('fx55', { 's.html': demoHtml('s') })
+  const cfgP = join(fx55.kb, 'kanban.config.json'), idxP = join(fx55.kb, 'index.html')
+  const blP = join(fx55.kb, 'backlog-manifest.json')
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const bl = JSON.parse(readFileSync(blP, 'utf8'))
+  bl.tiers = { 1: '核心' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', date: '2026-02-01', title: '待办甲' },
+    { id: 'BL-2', status: 'done', priority: 'low', tier: '1', date: '2026-01-03', title: '旧账乙' },
+  ]
+  wr(blP, bl)
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, fx55.kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('tabrail') && !off.includes('railitem'), '未配 tabRail:壳里零 rail 痕迹')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.tabRail = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx55.kb)
+  ok(sha(idxP) === offSha, 'tabRail:false 与未配逐字节相同(冻结)')
+
+  cfg.tabRail = true
+  cfg.backlogArchive = true // 顺手证明可选 tab(归档)也自动进 rail —— 清单是解析出来的,不是抄的
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx55.kb)
+  ok(r.status === 0, 'tabRail:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  const nav = (on.match(/<nav class="tabrail"[\s\S]*?<\/nav>/) || [''])[0]
+  const tabbar = (on.match(/<div class="tabbar">[\s\S]*?<\/div>/) || [''])[0]
+  ok(count(on, 'class="tabrail"') === 1 && /^<nav class="tabrail" hidden aria-label="/.test(nav),
+    'rail 恰一条,初始 hidden 且有 aria-label', nav.slice(0, 80))
+  const nTab = (tabbar.match(/class="tab[ "]/g) || []).length // [ "] 挡开外层容器的 class="tabbar"
+  ok(count(nav, 'class="railitem') === nTab && nTab > 3,
+    'rail 项数 = tab 条项数(含截图那个出站链接)', `${count(nav, 'class="railitem')} vs ${nTab}`)
+  const panesOf = (s) => [...s.matchAll(/data-pane="([^"]+)"/g)].map((m) => m[1]).join(',')
+  ok(panesOf(nav) === panesOf(tabbar) && panesOf(nav).includes('archive'),
+    'data-pane 集合与顺序同 tab 条一致(归档这类可选 tab 一并在内)', `${panesOf(nav)} vs ${panesOf(tabbar)}`)
+  ok(count(nav, 'class="railitem on"') === 1 && /class="railitem on" data-pane="progress"/.test(nav),
+    '初始高亮恰一项,且是 tab 条上 tab-active 的那一个')
+  ok(/<a class="railitem" href="shots\.html">/.test(nav) && !/<a class="railitem"[^>]*data-pane/.test(nav),
+    '截图那项烤成无 data-pane 的出站链接(点它照旧跳走,不当 tab 切)')
+  ok(/tabs\.forEach\(\(t\) => t\.classList\.toggle\('tab-active'[^\n]*\n\s*document\.querySelectorAll\('\.railitem\[data-pane\]'\)\.forEach\(\(r\) => r\.classList\.toggle\('on'/.test(on),
+    "show() 里跟着一句 rail 高亮同步(幂等,深链/懒加载都走同一条路)")
+  ok(/setLine[\s\S]{0,4000}?\.railitem\[data-pane\][\s\S]{0,200}?r\.textContent = t\.textContent/.test(on),
+    'setLine 重算 tab 徽章后,rail 文案直接抄 tab 按钮的现值(一份口径)')
+  ok(on.includes("typeof IntersectionObserver !== 'function'") && on.includes("matchMedia('(min-width: 1200px)')") &&
+    on.includes('e.boundingClientRect.top < 0'),
+    'IO 缺席则静默不显示;窄屏永不显示;只认向上滑出视口')
+  // rail 的 CSS 是样式表最后一段(TABRAIL_CSS 挂在尾链末端),从它的段头切到 </style> 即整段
+  const railCss = on.slice(on.indexOf('/* ============ 左侧竖向 tab 导航'), on.indexOf('</style>'))
+  ok(railCss.includes('.tabrail { display: none; }') && railCss.includes('@media (min-width: 1200px)') &&
+    railCss.includes('.tabrail:not([hidden])') && railCss.includes('top: calc(var(--hubh, 41px) + 8px)'),
+    'CSS:默认不显示,显示规则整个包在宽屏媒体查询里,top 跟 --hubh(hubbar 实高)走')
+  ok(!/#[0-9a-fA-F]{3}/.test(railCss) && railCss.length > 200,
+    'rail CSS 零硬编码色值:只用既有 var(),暗档跟着同一条 light-dark 链走', railCss.length + ' 字符')
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  cfg.tabRail = false
+  cfg.backlogArchive = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx55.kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

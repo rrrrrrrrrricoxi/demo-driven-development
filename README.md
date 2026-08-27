@@ -256,6 +256,20 @@ was and exits non-zero. `cards-join.mjs` is the way back, with the same check.
 Upgrade every session before splitting — an older `gen` cannot see the card
 directory. Left unset, output is byte-identical to a board without the feature.
 
+## Left tab rail (optional)
+
+Set `config.tabRail` to `true` and, once the tab bar has scrolled off the top,
+a narrow vertical copy of it appears in the left margin: same labels, same
+count badges, the current tab highlighted, one click to switch. It lives in the
+page margin rather than in the content column, so it does not compete with the
+acceptance pane's section index or the doc library's own left navigation. The
+list is not a second copy to keep in sync — it is parsed out of the tab bar at
+generation time, so a tab added or removed shows up in both places at once, and
+the badges are copied from the tab buttons whenever a filter recomputes them.
+Below 1200px there is no margin to put it in, so it never appears; without
+`IntersectionObserver` it stays silent as well. Left unset, output is
+byte-identical to a board without the feature.
+
 ## Card CLI
 
 ```
