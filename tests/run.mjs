@@ -2089,6 +2089,53 @@ const { stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
     runGen(NEW_SCRIPTS, kb)
   }
 }
+{ // ⑥ 卡目录逃出看板目录 + 落盘中途失败要整块回滚
+  const fx48d = mkFixture('fx48d', { 'c1.html': demoHtml('c1') })
+  const kb = fx48d.kb
+  const cfgP = join(kb, 'kanban.config.json'), blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP), dec = rd(decP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  bl.items = [{ id: 'BL-1', status: st, priority: pri, tier: '1', date: '2026-01-01', title: '甲' }]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策一' }]
+  wr(blP, bl); wr(decP, dec)
+  runGen(NEW_SCRIPTS, kb)
+  const beforeBoard = sha(join(kb, 'index.html'))
+  const beforeBl = readFileSync(blP, 'utf8'), beforeDec = readFileSync(decP, 'utf8'), beforeCfg = readFileSync(cfgP, 'utf8')
+
+  { // --cards-dir 带路径:整批卡会落到看板目录外,而拆分自带的字节校验照样过(gen 读同一个路径)
+    for (const v of ['../../OUTSIDE', 'a/b', '..', '.']) {
+      const r = runScript('cards-split.mjs', kb, ['--cards-dir', v])
+      ok(r.status === 1 && /纯目录名|plain directory name/.test(r.stderr), `cards-split 拒绝 --cards-dir ${v}`)
+    }
+    ok(!existsSync(join(kb, '..', '..', 'OUTSIDE')) && readFileSync(blP, 'utf8') === beforeBl, '拒绝之后看板目录外没长出东西,头文件一个字节都没变')
+  }
+  { // 配里写死的逃逸值:gen 硬报错点名它,守卫不因此崩掉
+    wr(cfgP, { ...rd(cfgP), cardsDir: '../../OUTSIDE' })
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /OUTSIDE/.test(r.stderr), '硬报错:kanban.config.json 里的 cardsDir 逃出看板目录')
+    const stop = runStop(NEW_SCRIPTS, fx48d.root)
+    ok(stop.status !== null && /OUTSIDE/.test(stop.stderr + stop.stdout), '守卫把 gen 的这句原样喂回去,自己不崩', String(stop.status))
+    writeFileSync(cfgP, beforeCfg)
+    runGen(NEW_SCRIPTS, kb)
+  }
+  { // 落盘中途 EACCES:先建一个只读的 cards/decisions(空目录,过得了「必须是空的」那一关)
+    const decDir = join(kb, 'cards', 'decisions')
+    mkdirSync(decDir, { recursive: true })
+    chmodSync(decDir, 0o555)
+    const r = runScript('cards-split.mjs', kb)
+    chmodSync(decDir, 0o755)
+    ok(r.status === 1 && /回滚|rolled back/.test(r.stderr), `落盘失败时报的是「已回滚」,不是 Node 堆栈(${(r.stderr || '').split('\n')[0].slice(0, 60)})`)
+    ok(readFileSync(blP, 'utf8') === beforeBl && readFileSync(decP, 'utf8') === beforeDec && readFileSync(cfgP, 'utf8') === beforeCfg,
+      '两份头文件与 config 原样写回(items / entries / cardsDir 都在原位)')
+    ok(!existsSync(join(kb, 'cards', 'backlog')), '已经写下去的那半批卡文件也收走了')
+    ok(runGen(NEW_SCRIPTS, kb).status === 0 && sha(join(kb, 'index.html')) === beforeBoard, '回滚后 gen 照跑,产物与动手前逐字节相同')
+    rmSync(join(kb, 'cards'), { recursive: true, force: true })
+  }
+}
+
 { // 守卫:新鲜度盯卡文件 + 孤儿语料纳入卡文件正文 + 积压/正文审计不因拆分失明
   const fx48c = mkFixture('fx48c', { 'c1.html': demoHtml('c1') })
   const kb = fx48c.kb

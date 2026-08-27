@@ -90,7 +90,8 @@ const readJsonAt = (p, what) => {
   catch (e) { die(S.readFailed(what, e.message)) }
 }
 const CFG = readJsonAt(join(KANBAN, 'kanban.config.json'), 'kanban.config.json')
-const CARDS_DIR = cardsDirOf(CFG)
+let CARDS_DIR
+try { CARDS_DIR = cardsDirOf(CFG) } catch (e) { die(e.message) }
 const KIND_OF = { backlog: CARD_KINDS[0], decision: CARD_KINDS[1], decisions: CARD_KINDS[1] }
 const KIND_NAME = { items: 'backlog', entries: 'decision' }
 

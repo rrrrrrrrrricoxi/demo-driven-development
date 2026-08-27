@@ -70,7 +70,8 @@ if (!REPO) die(S.noRepo())
 // ---- 卡从哪读、往哪写(v0.14.0 一卡一文件)----
 // 配了 cardsDir:backlog/decisions 的卡各自一个文件(instance 仍在头文件里,上面那段不受影响);
 // 没配:照旧从头文件的数组里读。下面的「PR → 卡」反查与 --settle 只认这一张表。
-const CARDS_DIR = cardsDirOf(readJson(join(KANBAN, 'kanban.config.json')) || {})
+let CARDS_DIR
+try { CARDS_DIR = cardsDirOf(readJson(join(KANBAN, 'kanban.config.json')) || {}) } catch (e) { die(e.message) }
 const SUB_OF = { items: 'backlog', entries: 'decisions' }
 const CARD_ROWS = [] // { f: 相对看板目录的文件, key: 数组名('' = 整个文件就是这张卡), kind, card }
 for (const x of MANIFESTS) {

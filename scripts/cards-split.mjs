@@ -21,7 +21,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings } from './strings.mjs'
-import { CARD_KINDS, cardsDirOf, cardText } from './cards.mjs'
+import { CARD_KINDS, cardsDirOf, cardsDirUnsafe, cardText } from './cards.mjs'
 import { atomicWrite, jsonText, makeUndo, readJson, runGen, snapDiff, snapshot } from './cards-lib.mjs'
 
 const KANBAN = resolveKanbanDir()
@@ -31,10 +31,14 @@ const DRY = ARGV.includes('--dry-run')
 const argAt = ARGV.indexOf('--cards-dir')
 const CARDS_DIR = argAt >= 0 && ARGV[argAt + 1] ? ARGV[argAt + 1].replace(/^\/+|\/+$/g, '') : 'cards'
 const die = (msg) => { console.error(msg); process.exit(1) }
+// 目录名先验:--cards-dir ../../X 会把整批卡写到看板目录外,而拆分自带的逐字节校验照样通过
+// (gen 读的是同一个逃出去的路径),于是工具报「迁移成功」,提交进 git 的板却一张卡都没有。
+if (cardsDirUnsafe(CARDS_DIR)) die(S.cardsDirUnsafe(CARDS_DIR))
 
 const cfgPath = join(KANBAN, 'kanban.config.json')
 const cfg = readJson(cfgPath)
-const already = cardsDirOf(cfg)
+let already
+try { already = cardsDirOf(cfg) } catch (e) { die(e.message) }
 if (already) die(S.alreadySplit(already))
 
 // ---- 读两份头文件,校验 id 能当文件名、不重复 ----
@@ -80,16 +84,25 @@ for (const p of plan) {
 const before = snapshot(KANBAN)
 
 // ---- 落盘 ----
+// 整段包住:落盘中途任何一个 I/O 错(目录只读、盘满、被别人占着)都会把这块板留在半迁移态 ——
+// 头文件的数组已经删了、卡还没搬完、config 也还没写 —— gen 从此 `b.items is not iterable`,
+// 人拿到的是一段 Node 堆栈。undo 本来就记着回去的路,这里用上它。
 const undo = makeUndo()
-for (const p of plan) {
-  undo.mkdir(p.dir)
-  for (const c of p.cards) undo.write(join(p.dir, `${c.id}.json`), c.text)
-  undo.keep(p.path)
-  delete p.head[p.kind.key]
-  atomicWrite(p.path, jsonText(p.head))
+try {
+  for (const p of plan) {
+    undo.mkdir(p.dir)
+    for (const c of p.cards) undo.write(join(p.dir, `${c.id}.json`), c.text)
+    undo.keep(p.path)
+    delete p.head[p.kind.key]
+    atomicWrite(p.path, jsonText(p.head))
+  }
+  undo.keep(cfgPath)
+  atomicWrite(cfgPath, jsonText({ ...cfg, cardsDir: CARDS_DIR }))
+} catch (e) {
+  undo.rollback()
+  runGen(KANBAN)
+  die(S.writeFailed(e.message))
 }
-undo.keep(cfgPath)
-atomicWrite(cfgPath, jsonText({ ...cfg, cardsDir: CARDS_DIR }))
 
 // ---- 验:再跑一遍 gen,产物必须逐字节相同(除新增的每卡「更新」时间戳)----
 {

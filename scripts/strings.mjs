@@ -97,6 +97,8 @@ const zh = {
       '产物与拆分前逐字节相同(除新增的每卡「更新」时间戳)。请把整批改动作为一个 commit 提交,message 写明是 rename 性质。',
     joinDone: (total, files) => `cards-join:${total} 张卡合回 ${files};卡文件与目录已删除,kanban.config.json 去掉了 cardsDir。产物与合并前逐字节相同。`,
     baselineFailed: (err) => `跑不出「改动前」的基准产物(gen.mjs 先失败了),一个字节都没写:\n${err}`,
+    cardsDirUnsafe: (v) => `卡目录名 ${JSON.stringify(v)} 不能用:它得是看板目录下的一个纯目录名(不含 / 或 \\,也不是 . / ..)。带路径的值会把整批卡写到看板目录外面 —— gen 与 CLI 都跟着走,看着一切正常,而提交进 git 的看板里一张卡都没有。`,
+    writeFailed: (err) => `落盘中途出错,已回滚(看板与动手前一模一样),一张卡都没搬:\n${err}`,
   },
   cli: {
     usage: () => `ddd —— 看板写操作 CLI(v0.14.0,零依赖)
@@ -409,6 +411,8 @@ const en = {
       'The generated output is byte-for-byte identical to before the split (apart from the new per-card "updated" stamps). Commit the whole batch as one commit and say in the message that it is a rename.',
     joinDone: (total, files) => `cards-join: ${total} card(s) joined back into ${files}; the card files and directories are gone and cardsDir was removed from kanban.config.json. The generated output is byte-for-byte identical to before the join.`,
     baselineFailed: (err) => `Could not produce the "before" baseline (gen.mjs failed first); nothing was written:\n${err}`,
+    cardsDirUnsafe: (v) => `The card directory name ${JSON.stringify(v)} cannot be used: it must be a plain directory name inside the kanban directory (no / or \\, and not . or ..). A value with a path in it writes the whole card store outside the kanban directory — gen and the CLI follow it and everything looks fine, while the board committed to git contains no cards at all.`,
+    writeFailed: (err) => `Something failed part-way through writing; rolled back (the board is exactly as it was) and no card was moved:\n${err}`,
   },
   cli: {
     usage: () => `ddd — the kanban write CLI (v0.14.0, no dependencies)

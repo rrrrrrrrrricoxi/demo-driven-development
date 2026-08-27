@@ -19,7 +19,8 @@ const die = (msg) => { console.error(msg); process.exit(1) }
 
 const cfgPath = join(KANBAN, 'kanban.config.json')
 const cfg = readJson(cfgPath)
-const CARDS_DIR = cardsDirOf(cfg)
+let CARDS_DIR
+try { CARDS_DIR = cardsDirOf(cfg) } catch (e) { die(e.message) }
 if (!CARDS_DIR) die(S.notSplit())
 
 const plan = []
@@ -47,21 +48,26 @@ if (DRY) {
 }
 const before = snapshot(KANBAN)
 
+// 与 cards-split 同一条纪律:落盘中途出错就把整块板原样写回,别留下半合并态
 const undo = makeUndo()
-for (const p of plan) {
-  undo.keep(p.path)
-  p.head[p.kind.key] = p.cards
-  atomicWrite(p.path, jsonText(p.head))
-  for (const f of p.files) undo.drop(join(p.dir, f))
-  undo.dropDir(p.dir)
-}
-// 卡目录本身:两个子目录都空了才删得掉(里面若还有别的东西,留着)
-undo.dropDir(join(KANBAN, CARDS_DIR))
-undo.keep(cfgPath)
-{
+try {
+  for (const p of plan) {
+    undo.keep(p.path)
+    p.head[p.kind.key] = p.cards
+    atomicWrite(p.path, jsonText(p.head))
+    for (const f of p.files) undo.drop(join(p.dir, f))
+    undo.dropDir(p.dir)
+  }
+  // 卡目录本身:两个子目录都空了才删得掉(里面若还有别的东西,留着)
+  undo.dropDir(join(KANBAN, CARDS_DIR))
+  undo.keep(cfgPath)
   const next = { ...cfg }
   delete next.cardsDir
   atomicWrite(cfgPath, jsonText(next))
+} catch (e) {
+  undo.rollback()
+  runGen(KANBAN)
+  die(S.writeFailed(e.message))
 }
 
 {
