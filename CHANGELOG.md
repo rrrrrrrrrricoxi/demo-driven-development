@@ -9,6 +9,24 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.1] - 2026-08-27
+
+### Fixed
+- **Clicking the left tab rail landed one screen too far down.** The rail exists
+  only while the tab bar is off the top of the viewport, and the click scrolled
+  to the top of the target pane — which puts the tab bar just above the fold.
+  So the bar was out of sight and the rail, having done its job, hid itself:
+  both ways back were gone at once and the reader had no idea where they were.
+  The click now scrolls to the *tab bar* instead, parking it against the bottom
+  edge of the sticky hub bar. The tab bar is visible, the rail steps aside by
+  its own rule, and the pane starts right below. A lazily loaded pane needs no
+  second scroll after its content arrives, because everything injected sits
+  below the tab bar and does not move it. The `IntersectionObserver` now states
+  its threshold of `0` explicitly, so "the tab bar is showing even a sliver"
+  counts as in-viewport, and the rail is no longer pulled out from under a
+  keyboard user: while `:focus-visible` focus is inside it, it stays put.
+  Rail items also pick up the hover treatment on keyboard focus.
+
 ## [0.15.0] - 2026-08-27
 
 ### Added
