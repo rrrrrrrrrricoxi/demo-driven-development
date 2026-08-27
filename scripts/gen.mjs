@@ -17,7 +17,7 @@
  * 改任一 manifest 或被引用文档后重跑;refs/*.html 与 index.html 都提交进 git。
  */
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs'
-import { execSync, execFileSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { join, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { genStrings } from './strings.mjs'
@@ -183,12 +183,29 @@ function segKeyOfCat(cat) {
   return seg.key
 }
 
-// 文档更新时间(真源 = git log 最后提交日;untracked/无 git 退回文件 mtime;都拿不到则空)—— gen 期取好嵌入
+// 文档更新时间(真源 = git log 最后提交日;untracked/无 git 退回文件 mtime;都拿不到则空)—— gen 期取好嵌入。
+// 一条 git log 批量取全部文档的最后提交日,不是一篇一条命令 —— 与 v0.14.0 的每卡更新日期同一招。
+// 一个进程 fork 一次约 34ms,而守卫每次收工都跑 gen:55 篇文档就是 1.9s 的纯等待,还随文档数线性长。
+const DOC_COMMITTED = new Map() // repo-root 相对路径 → 'YYYY-MM-DD'
+{
+  const paths = [...new Set((cfg.docs || []).map((d) => d && d.path).filter((x) => typeof x === 'string' && x))]
+  if (paths.length) {
+    try {
+      const out = execFileSync('git', ['log', '--format=%ad', '--date=short', '--name-only', '--', ...paths],
+        { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+      let day = ''
+      for (const raw of out.split('\n')) {
+        const line = raw.trim()
+        if (!line) continue
+        if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+        if (day && !DOC_COMMITTED.has(line)) DOC_COMMITTED.set(line, day) // git log 是新→旧,第一次见到即最后一次改动
+      }
+    } catch { /* 无 git / 命令失败 → 整批退 mtime */ }
+  }
+}
 function docUpdated(relPath) {
-  try {
-    const out = execFileSync('git', ['log', '-1', '--format=%ad', '--date=short', '--', relPath], { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
-    if (out) return out
-  } catch { /* 无 git / 命令失败 */ }
+  const day = DOC_COMMITTED.get(relPath)
+  if (day) return day
   try { return statSync(join(REPO_ROOT, relPath)).mtime.toISOString().slice(0, 10) } catch { return '' }
 }
 
@@ -570,6 +587,24 @@ function resolveRepoPath(baseDir, href) {
   return stack.join('/')
 }
 
+// ———— href 的 scheme 白名单 ————
+// manifest 与卡里的链接是仓库里的数据,但「仓库里的数据」不等于「可以当代码执行」:
+// javascript: 的链接一点就在看板自己的源上跑脚本,而验收清单的勾选状态全存在这个源的
+// localStorage 里。esc() 挡得住属性逃逸,挡不住 scheme —— 这里挡。
+// 相对路径不带 scheme(refs/… 、demos/… 、#锚点),一律原样放行。
+const HREF_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const HREF_ALLOW = /^(?:https?|mailto):/i
+const hrefWarned = new Set()
+function safeHref(href) {
+  const raw = String(href ?? '')
+  if (!HREF_SCHEME.test(raw) || HREF_ALLOW.test(raw)) return raw
+  if (!hrefWarned.has(raw)) {
+    hrefWarned.add(raw)
+    console.warn(`[gen] ⚠ 链接 ${JSON.stringify(raw.slice(0, 80))} 的协议不在白名单(http / https / mailto),已渲染成不可点 —— 改掉它或写成相对路径`)
+  }
+  return '#'
+}
+
 // 卡片 link(相对 kanban/)→ 渲染页 / GitHub blob / 原样。
 function cardLink(href) {
   const raw = String(href || '')
@@ -580,7 +615,7 @@ function cardLink(href) {
   const repoPath = resolveRepoPath(KANBAN_REL, path)
   if (RENDERED[repoPath]) return { href: 'refs/' + RENDERED[repoPath] + frag }
   if (CODE_EXT.test(repoPath)) return { href: GH_BLOB + repoPath + frag, ext: true }
-  return { href: raw }
+  return { href: safeHref(raw) }
 }
 const linkA = (l) => {
   const r = cardLink(l.href)
@@ -1197,12 +1232,25 @@ let SHOT_COUNT = 0 // 提级入口徽章用(tab 行「截图 · N ↗」)
     if (mg) cands.push(mg[1].toUpperCase() + mg[2])
     return cands.find((id) => ALL_CARD_IDS.has(id)) ?? null
   }
-  /* 入库日期取 git 提交日;未跟踪(预览提取件)退回文件 mtime */
+  /* 入库日期取 git 提交日;未跟踪(预览提取件)退回文件 mtime。
+     一条 git log 扫整个 shots/,不是一张截图一条命令 —— 43 张在真仓上是 3.4s 对 53ms。
+     走 argv 不走 shell:文件名是从目录里读来的,不是我们写的常量。 */
+  const SHOT_COMMITTED = new Map() // 'shots/<文件名>' → 'YYYY-MM-DD'
+  try {
+    const out = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', 'shots'],
+      { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+    let day = ''
+    for (const raw of out.split('\n')) {
+      const line = raw.trim()
+      if (!line) continue
+      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+      const k = line.split('/').slice(-2).join('/') // git 的路径相对仓根,不相对看板目录,故只认末两段
+      if (day && !SHOT_COMMITTED.has(k)) SHOT_COMMITTED.set(k, day)
+    }
+  } catch { /* 非 git 环境 → 整批退 mtime */ }
   const shotDate = (file) => {
-    try {
-      const d = execSync(`git log -1 --format=%cs -- "shots/${file}"`, { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
-      if (d) return d
-    } catch { /* 非 git 环境退 mtime */ }
+    const day = SHOT_COMMITTED.get(`shots/${file}`)
+    if (day) return day
     try { return statSync(join(SHOTS_DIR, file)).mtime.toISOString().slice(0, 10) } catch { return '' }
   }
   let shotFiles = []
@@ -1576,7 +1624,7 @@ const shotsBlock = (list, label) => {
     if (!file) return ''
     const href = file.includes('/') ? file : 'shots/' + file
     const cap = typeof s === 'string' ? '' : (s && s.caption) || ''
-    return `<a href="${esc(href)}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(href)}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
+    return `<a href="${esc(safeHref(href))}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(safeHref(href))}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
   }).join('')
   return cells ? `\n        <dt>${esc(label)}</dt><dd><div class="wtshots">${cells}</div></dd>` : ''
 }
@@ -1598,7 +1646,7 @@ const wtBlock = (list) =>
       <div class="wtshots">${(w.shots || [])
         .map(
           (s) =>
-            `<a href="${esc(s.file)}" target="_blank" rel="noopener" title="${esc(s.caption || '')}"><img src="${esc(s.file)}" loading="lazy" alt="${esc(s.caption || '')}"><span>${esc(s.caption || '')}</span></a>`,
+            `<a href="${esc(safeHref(s.file))}" target="_blank" rel="noopener" title="${esc(s.caption || '')}"><img src="${esc(safeHref(s.file))}" loading="lazy" alt="${esc(s.caption || '')}"><span>${esc(s.caption || '')}</span></a>`,
         )
         .join('')}</div>
     </div>`,
@@ -1711,8 +1759,11 @@ const WIP_SETLINE = !WIP ? '' : `
         wipEl.hidden = !wipLv
         wipEl.classList.toggle('wip-soft', wipLv === 'soft')
         wipEl.classList.toggle('wip-hard', wipLv === 'hard')
-        wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张 · 超过 ${WIP_HARD} —— 先清一些再立新卡'
-          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张 · 已超 ${WIP_SOFT}' : ''
+        // 当前筛选只数得到一部分卡时,把全板数一并说出来(定稿 §8.2「并给总数」):
+        // 守卫那条 notice 用的是全板数,两处各报一个数会读起来像在说两块板。
+        const wipAll = wipN === ${WIP_READY} ? '' : '(全板 ${WIP_READY})'
+        wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
+          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 已超 ${WIP_SOFT}' : ''
       }
     }`
 
@@ -1775,9 +1826,9 @@ const decCard = (e) => {
       </div>` : ''}
       ${wtBlock(e.walkthroughs)}
       <div class="row links">
-        ${e.demo ? `<a class="demolink" href="${esc(e.demo)}">▶ 打开 demo</a>` : ''}
+        ${e.demo ? `<a class="demolink" href="${esc(safeHref(e.demo))}">▶ 打开 demo</a>` : ''}
         ${e.designDoc ? linkA({ title: '设计文档', href: e.designDoc }) : ''}
-        ${e.route && e.routeLive ? `<a href="${esc(liveUrl(e.route))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
+        ${e.route && e.routeLive ? `<a href="${esc(safeHref(liveUrl(e.route)))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
         ${(e.links || []).map(linkA).join('')}
       </div>${detailBlock(e)}
     </div>
@@ -1884,7 +1935,7 @@ function buildPathPane() {
   const demoNodes = pm.demos
     .map(
       (d) => `
-    <a class="demonode${d.flagship ? ' flag' : ''}" href="${esc(demoBase + d.file)}" target="_blank" rel="noopener" title="${esc(d.bet)}">
+    <a class="demonode${d.flagship ? ' flag' : ''}" href="${esc(safeHref(demoBase + d.file))}" target="_blank" rel="noopener" title="${esc(d.bet)}">
       <span class="dn-id">${esc(d.id)}</span>
       <span class="dn-name">${esc(d.name)}</span>
       <span class="dn-bet">${esc(d.bet)}</span>
@@ -2203,7 +2254,7 @@ const accCurHtml = (() => {
   return `
   <section class="acccur">
     <header class="acchd">${l.nums.map(accPrChip).join('')}<b>${esc(l.title || l.key)}</b></header>
-    <div class="accenv">${row('地址', env.url ? `<a href="${esc(env.url)}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
+    <div class="accenv">${row('地址', env.url ? `<a href="${esc(safeHref(env.url))}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
     </div>
     <div class="accprog" data-accprog="${esc(l.key)}">
       <span class="acctxt">已试 <b class="accdone">0</b> / <span class="acctot">${l.items.length}</span></span>
@@ -2211,7 +2262,7 @@ const accCurHtml = (() => {
       <button type="button" class="accbtn" data-acccopy="${esc(l.key)}">复制勾选结果</button>
     </div>${cards.length ? `
     <div class="accrel"><span class="acclbl">关联卡</span>${cards.map((c) => `<a class="acccard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}${c.st ? ` · ${esc(c.st)}` : ''}</a>`).join('')}</div>` : ''}${docs.length ? `
-    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(d.href)}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
+    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(safeHref(d.href))}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
     <p class="accqueue">排队中:${accQueueLists.map((q) => `<a href="#acc-${esc(q.key)}">${q.nums.map((n) => `#${n}`).join(' / ')} · ${esc(q.title || q.key)}(${q.items.length} 条)</a>`).join('')}</p>` : ''}
   </section>`
 })()
@@ -2225,7 +2276,7 @@ const acceptancePane = !ACC ? '' : `
   </details>` : ''}${accDoneLists.length ? `
   <details class="accfold"><summary>已验收 <span class="mut">${accDoneLists.length} 份清单${accDoneLists.some((l) => l.result && l.result.at) ? ` · 最近 ${esc(accDoneLists.map((l) => (l.result || {}).at || '').sort().pop())}` : ''}</span></summary>${accDoneLists.map(accListHtml).join('')}
   </details>` : ''}${accNoListPrs.length ? `
-  <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(p.u)}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
+  <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(safeHref(p.u))}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
   </div>` : ''}
   <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code> — 条目正文改完重跑生成;勾选进度只在这台浏览器,「复制勾选结果」产出的 JSON 贴回清单的 <code>result</code> 才进 git。</p>`
 
@@ -2597,7 +2648,7 @@ const relRowHtml = (r) => {
   const cur = ACC && Number(acm.current) === r.n
   return `
             <tr class="relr" id="pr-${r.n}" data-relnum="${r.n}">
-              <td class="rc-n"><a href="${esc(p.url || prUrl({ repo: PR_REPO, num: r.n }))}" target="_blank" rel="noopener">#${r.n}</a></td>
+              <td class="rc-n"><a href="${esc(safeHref(p.url || prUrl({ repo: PR_REPO, num: r.n })))}" target="_blank" rel="noopener">#${r.n}</a></td>
               <td class="rc-t">${esc(p.title || '')}${cur ? '<span class="relnow">验收中</span>' : ''}</td>
               <td class="rc-s"><span class="relsg s-${r.sg.id}">${esc(relStageText(r))}</span></td>
               <td class="rc-d">${esc(relStatusText(r))}</td>

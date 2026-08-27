@@ -21,13 +21,13 @@
 // 不碰别人的卡);没配 = 从头文件的数组读、整文件重写(竞态照旧,这是未拆板的既有代价)。
 //
 // 不做:交互式 TUI、批量编辑、自动 commit —— commit 仍由会话按纪律做。
-import { closeSync, openSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
-import { CARD_KINDS, cardsDirOf, cardText, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { CARD_KINDS, cardsDirOf, cardText, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
 
@@ -90,7 +90,8 @@ const readJsonAt = (p, what) => {
   catch (e) { die(S.readFailed(what, e.message)) }
 }
 const CFG = readJsonAt(join(KANBAN, 'kanban.config.json'), 'kanban.config.json')
-const CARDS_DIR = cardsDirOf(CFG)
+let CARDS_DIR
+try { CARDS_DIR = cardsDirOf(CFG) } catch (e) { die(e.message) }
 const KIND_OF = { backlog: CARD_KINDS[0], decision: CARD_KINDS[1], decisions: CARD_KINDS[1] }
 const KIND_NAME = { items: 'backlog', entries: 'decision' }
 
@@ -167,6 +168,17 @@ function writeCard(store, row, card) {
 
 // ---- 取值与校验 ----------------------------------------------------------
 const laneIds = () => (CFG.lanes && Array.isArray(CFG.lanes.ids) ? CFG.lanes.ids.map(String) : null)
+/**
+ * 建卡时 --line 缺席取哪一档:配了 lanes 就取 config.lanes.default(它不在 ids 里就取 ids[0])。
+ * 写 line:"" 的卡在配了 lanes 的板上默认视图里根本不出现 —— 建了张自己看不见的卡,比不建更糟。
+ * 没配 lanes 时恒空:那种板本来就没有线别这回事。
+ */
+function defaultLine() {
+  const ids = laneIds()
+  if (!ids || !ids.length) return ''
+  const d = String((CFG.lanes && CFG.lanes.default) ?? '')
+  return ids.includes(d) ? d : ids[0]
+}
 const sessionIds = () => {
   const t = CFG.sessionTags
   if (!t || typeof t !== 'object' || Array.isArray(t)) return null
@@ -199,14 +211,18 @@ function checkPr(value) {
 const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'demo', 'repro', 'walkthroughs', 'order']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
-  entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'notes', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
+  entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
 }
-/** 时间线字段:backlog 的 note、决策的 notes(manifest.json 的 tasks 用 notes,同一族) */
-const NOTE_FIELD = { items: 'note', entries: 'notes' }
+/** 形制上就是数组的字段:塞个标量进去,gen 会在 .map 上当场 TypeError,整块板生成不出来 */
+const ARRAY_FIELDS = ['links', 'shots', 'walkthroughs', 'iters', 'refines']
 
 /** 一处校验,set / status / new 共用 —— 三条路写同一批字段,校验分三份迟早对不上 */
 function checkField(store, field, value) {
   if (field === 'order') die(S.orderLocked())
+  // id 是文件名(拆分模式)/ 全板唯一键(未拆),改它就是把卡的身份改掉:gen 下一跑就硬失败,
+  // 而 loadKind 见到坏卡即 die,连用来改回来的这条命令也一起锁死。所以这里一个字节都不写。
+  if (field === 'id') die(S.idLocked())
+  if (ARRAY_FIELDS.includes(field) && !Array.isArray(value)) die(S.arrayField(field))
   if (field === 'status') { const all = statusIds(store.head); if (!all.includes(String(value))) die(S.statusBad(String(value), all)) }
   if (field === 'date' && !DATE_RE.test(String(value))) die(S.dateBad(String(value)))
   if (field === 'line') checkTokens(value, laneIds(), S.lineBad)
@@ -252,17 +268,28 @@ function cmdNew() {
       made = { id, file: k.manifest, card: next }
       break
     }
-    // 独占创建:抢输的那个拿到 EEXIST,自己退到下一号 —— 号是「预留」出来的,不是「算」出来的
+    // 独占创建:抢输的那个拿到 EEXIST,自己退到下一号 —— 号是「预留」出来的,不是「算」出来的。
+    // 内容先备好再开文件,写不成就把预留收走:'wx' 与写入之间留下的 0 字节文件,gen 读到就是
+    // 「不是合法 JSON」硬失败、守卫跟着阻断收工,而人根本不知道该去哪找这个文件。
     const path = join(store.dir, `${id}.json`)
+    const next = normalizeCard(withId(card, id), [])
+    const text = cardText(next)
     let fd
     try { fd = openSync(path, 'wx') }
     catch (e) { if (e.code === 'EEXIST') continue; return die(S.writeFailed(`${store.rel}/${id}.json`, e.message)) }
-    const next = normalizeCard(withId(card, id), [])
-    try { writeFileSync(fd, cardText(next)) } catch (e) { die(S.writeFailed(`${store.rel}/${id}.json`, e.message)) } finally { closeSync(fd) }
+    try { writeFileSync(fd, text) }
+    catch (e) {
+      try { closeSync(fd) } catch {}
+      try { rmSync(path) } catch {} // 预留的空文件不留在卡目录里
+      die(S.writeFailed(`${store.rel}/${id}.json`, e.message))
+    }
+    closeSync(fd)
     made = { id, file: `${store.rel}/${id}.json`, card: next }
   }
   if (!made) die(S.newExhausted(prefix))
   say({ ok: true, id: made.id, kind: KIND_NAME[k.key], file: made.file, card: made.card }, S.newDone(made.id, made.file))
+  // --from 显式给了空 line 时模板的缺省档补不上 —— 那张卡只在「全部」档出现,说一句
+  if (laneIds() && !String(made.card.line || '').trim()) console.error(S.newNoLine())
   warnWip(k, made.card)
 }
 
@@ -279,7 +306,7 @@ function backlogTemplate(head) {
     status: firstStatus(head),
     tier: tiers[0],
     priority: pri[Math.floor(pri.length / 2)] || pri[0] || '', // 三档时正中那档;默认高优先级是给自己挖坑
-    line: flags.line || '',
+    line: flags.line || defaultLine(),
     session: flags.session || '',
     date: TODAY,
     problem: S.tplProblem(),
@@ -295,7 +322,7 @@ function decisionTemplate(head) {
     code: '',
     title: flags.title || S.tplTitle(),
     status: firstStatus(head),
-    line: flags.line || '',
+    line: flags.line || defaultLine(),
     session: flags.session || '',
     date: TODAY,
     question: S.tplQuestion(),
@@ -365,11 +392,12 @@ function cmdStatus() {
   checkField(store, 'status', next)
   const from = String(row.card.status || '')
   const card = { ...row.card, status: next }
+  // 决策卡没有时间线字段(gen 不渲染 note/notes),这时候只改 status —— 不硬塞一个没人读的字段
   const nf = NOTE_FIELD[store.k.key]
-  const noted = !flags['no-note']
+  const noted = Boolean(nf) && !flags['no-note']
   if (noted) card[nf] = appendTimeline(card[nf], `【${TODAY}】status → ${next}`)
   const written = writeCard(store, row, card)
-  say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : ''))
+  say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : '', !nf))
 }
 
 function cmdNote() {
@@ -377,14 +405,21 @@ function cmdNote() {
   if (!id || !rest.length) die(S.noteUsage())
   const { store, row } = findCard(id)
   const nf = NOTE_FIELD[store.k.key]
+  // 决策卡上写 note 会落进一个 gen 从不渲染的字段:命令说「记下了」,板上一个字都不出现
+  if (!nf) die(S.noteNoField(id, KIND_NAME[store.k.key]))
   const line = `【${TODAY}】${rest.join(' ')}`
   const card = writeCard(store, row, { ...row.card, [nf]: appendTimeline(row.card[nf], line) })
   say({ ok: true, id, field: nf, line, file: row.where, card }, S.noteDone(id, nf, line))
 }
 
+/** 只有这几个 scheme 能进 links —— gen 那边同一条白名单,坏值在这儿就该被拦下,别等渲染 */
+const HREF_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const HREF_ALLOW = /^(?:https?|mailto):/i
+
 function cmdLink() {
   const [id, title, href] = pos.slice(2)
   if (!id || !title || !href) die(S.linkUsage())
+  if (HREF_SCHEME.test(href) && !HREF_ALLOW.test(href)) die(S.linkScheme(href))
   const { store, row } = findCard(id)
   const links = Array.isArray(row.card.links) ? [...row.card.links] : []
   const dup = links.some((l) => l && String(l.href) === href)

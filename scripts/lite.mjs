@@ -73,6 +73,10 @@ export function lite(md) {
 /**
  * 折叠预览(定稿 §3.2):从第一段起按段落边界累到 ≤ n 字。
  * → { head, rest };rest = 原文字符数 − 预览字符数,0 表示不必折叠(全文即预览)。
+ *
+ * 「≤ n」对第一段同样作数:首段自己就超 n 时没有可用的段落边界,与「整篇一段」是同一种情形,
+ * 一律不拆,留给 gen 的高度折叠(clampScan)。否则同样长度的两个字段会一个折成两行、
+ * 另一个整篇铺开 —— 因为 gen 见到预览/全文两份就把高度折叠让掉了。
  */
 export function litePreview(md, n = 400) {
   const src = String(md ?? '')
@@ -88,5 +92,6 @@ export function litePreview(md, n = 400) {
   // 全取了 = 没什么可藏的(段分隔归一化会让 head 比原文短几个字符,别为这几个字生出一个空折叠)
   if (!take.length || take.length === paras.length) return { head: src, rest: 0 }
   const head = take.join('\n\n')
+  if (head.length > n) return { head: src, rest: 0 } // 首段自己就超了:没有 ≤ n 的段落边界可切
   return { head, rest: Math.max(0, src.length - head.length) }
 }

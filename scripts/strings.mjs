@@ -58,6 +58,9 @@ const zh = {
     ghFailed: (what, err) => `pr-sync:${what} 失败(gh 未登录 / 无权访问该仓 / 网络不通都会这样):${err}\n本次一个字节都没写,修好后重跑。`,
     ghBadJson: (what, err) => `pr-sync:${what} 的输出不是合法 JSON(gh 版本太旧?需要支持 --json 的 gh 2.x):${err}\n本次一个字节都没写。`,
     manifestBad: (err) => `pr-sync:release-manifest.json 存在但不是合法 JSON,拒绝覆盖(人手写的 note/prs 可能就在里面):${err}`,
+    badLimit: (name, v) => `pr-sync:--${name} 要跟一个正整数(给的是 ${JSON.stringify(v)})。`,
+    prTruncated: (n, flag) => `⚠ pr-sync:gh 一次就给满了 ${n} 个 PR —— 比这更旧的这趟没取到,它们在 release-manifest.json 里原样留着,但状态不再刷新。要全量:--${flag} <更大的数>。`,
+    relTruncated: (n, flag) => `⚠ pr-sync:gh 一次就给满了 ${n} 个 release —— 比这更旧的 tag 这趟没取到。要全量:--${flag} <更大的数>。`,
     done: (prs, rels, added, file) => `pr-sync:${prs} 个 PR · ${rels} 个版本(新增 ${added})→ ${file}`,
     dry: (prs, rels, added) => `pr-sync --dry-run:将写入 ${prs} 个 PR · ${rels} 个版本(新增 ${added});未写文件。`,
     settleNone: () => 'pr-sync --settle:没有待收账的卡 —— 关联 PR 都合了的卡,status 都已经在终态了。',
@@ -97,6 +100,8 @@ const zh = {
       '产物与拆分前逐字节相同(除新增的每卡「更新」时间戳)。请把整批改动作为一个 commit 提交,message 写明是 rename 性质。',
     joinDone: (total, files) => `cards-join:${total} 张卡合回 ${files};卡文件与目录已删除,kanban.config.json 去掉了 cardsDir。产物与合并前逐字节相同。`,
     baselineFailed: (err) => `跑不出「改动前」的基准产物(gen.mjs 先失败了),一个字节都没写:\n${err}`,
+    cardsDirUnsafe: (v) => `卡目录名 ${JSON.stringify(v)} 不能用:它得是看板目录下的一个纯目录名(不含 / 或 \\,也不是 . / ..)。带路径的值会把整批卡写到看板目录外面 —— gen 与 CLI 都跟着走,看着一切正常,而提交进 git 的看板里一张卡都没有。`,
+    writeFailed: (err) => `落盘中途出错,已回滚(看板与动手前一模一样),一张卡都没搬:\n${err}`,
   },
   cli: {
     usage: () => `ddd —— 看板写操作 CLI(v0.14.0,零依赖)
@@ -110,10 +115,12 @@ const zh = {
   card set <id> <field> <value> [--json]
       改一个字段。--json:值按 JSON 解析(要写数组/对象用它,顺带把结果也打成 JSON)。
       校验:status ∈ 该类卡的 statuses、date 形如 YYYY-MM-DD、pr 形如 12 / "#12" / "owner/repo#12"、
-      line ∈ config.lanes.ids、session ∈ config.sessionTags;order 不许改;不认识的字段只警告不拒。
+      line ∈ config.lanes.ids、session ∈ config.sessionTags;links/shots 这类数组字段要 --json;
+      id 与 order 不许改;不认识的字段只警告不拒。
   card status <id> <status> [--no-note]
       改状态,并在时间线字段末尾追一行「【日期】status → …」(--no-note 关掉这一行)。
-  card note <id> "<text>"           时间线末尾追一行「【日期】text」
+      决策卡没有时间线字段(看板不渲染),只改 status。
+  card note <id> "<text>"           时间线末尾追一行「【日期】text」(决策卡没有这个字段,会拒)
   card link <id> "<title>" <href>   links 追一条(href 去重);指向本仓 PR 的链接顺手写进 pr 字段
   card show <id> [--json]
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
@@ -138,6 +145,8 @@ const zh = {
     cardIdMismatch: (rel, id) => `ddd:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,本次一个字节都没写 —— 文件名就是卡号(一个真源)。`,
     cardNotFound: (id) => `ddd:板上没有卡号「${id}」。用 card list 核一遍(拆成一卡一文件之后,文件名就是卡号)。`,
     orderLocked: () => 'ddd:order 是拆分时记下的原数组下标(它就是显示顺序),不许用 CLI 改 —— 真要挪位置,直接编辑卡文件并说明理由。',
+    idLocked: () => 'ddd:id 是这张卡的身份 —— 一卡一文件时它就是文件名,改了之后 gen 立刻硬失败(文件名与 id 对不上),而 CLI 见到坏卡也拒跑,连改回来的那条命令都用不了。要换卡号:用 card new 建新卡把内容搬过去,或者停下 gen、手工把文件与 id 一起改。本次一个字节都没写。',
+    arrayField: (field) => `ddd:${field} 的形制是数组,给的是标量 —— gen 会在渲染它的时候 TypeError,整块板生成不出来。写法:--json '[…]',例如 card set <id> ${field} --json '[]'。本次一个字节都没写。`,
     statusBad: (v, list) => `ddd:status「${v}」不在这类卡的 statuses 里。可用:${list.join(' / ')}`,
     dateBad: (v) => `ddd:日期「${v}」形制不对,要 YYYY-MM-DD(板上按字符串比大小,补零不能省)。`,
     lineBad: (v, list) => `ddd:线别「${v}」不在 config.lanes.ids 里。可用:${list.join(' / ')}(多线共享写成空格分隔,如 "B C")`,
@@ -150,6 +159,7 @@ const zh = {
     noTiers: () => 'ddd card new backlog:这块板的 backlog-manifest.json 里 tiers 是空的,而 gen 硬要求每张卡的 tier 在 tiers 里 —— 先定义至少一个工作类型再建卡。',
     newExhausted: (prefix) => `ddd card new:从当前最大号往后 1000 个「${prefix}N」都被占了,没往下试。先看看卡目录里是不是有一批空占位文件。`,
     newDone: (id, file) => `ddd card new:${id} → ${file}\n  模板里的 <…> 是占位,用 card set 填掉(至少 title / problem / approach)。`,
+    newNoLine: () => '⚠ ddd card new:这张卡没有 line —— 配了 lanes 的板上,它只在「全部」档出现,默认视图里看不见。用 card set <id> line <档> 补上。',
     tplTitle: () => '<一句话说清这张卡要解决什么>',
     tplProblem: () => '<用户看到什么、为什么这是问题;≤ 2 句,别写查证过程>',
     tplApproach: () => '<怎么改、改哪、代价;结论先行,1–3 行>',
@@ -159,10 +169,13 @@ const zh = {
     setUsage: () => 'ddd card set:写法 card set <id> <字段> <值>;值是数组/对象时加 --json。',
     setDone: (id, field, value, file) => `ddd card set:${id} 的 ${field} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
     statusUsage: () => 'ddd card status:写法 card status <id> <status> [--no-note]。',
-    statusDone: (id, from, to, noteField) => `ddd card status:${id} ${from || '(空)'} → ${to}` + (noteField ? `,并在 ${noteField} 末尾记了一行时间线` : '(--no-note:没记时间线)'),
+    statusDone: (id, from, to, noteField, noTimeline) => `ddd card status:${id} ${from || '(空)'} → ${to}` +
+      (noteField ? `,并在 ${noteField} 末尾记了一行时间线` : noTimeline ? '(决策卡没有时间线字段,只改了 status)' : '(--no-note:没记时间线)'),
     noteUsage: () => 'ddd card note:写法 card note <id> "<一句话进展>"。',
     noteDone: (id, field, line) => `ddd card note:${id} 的 ${field} 追加了「${line}」`,
+    noteNoField: (id) => `ddd card note:${id} 是决策卡,决策卡没有时间线字段 —— 写进去的话看板一个字都不会渲染。要留进展就写 detail(card set ${id} detail "…"),要改结论就写 decision。`,
     linkUsage: () => 'ddd card link:写法 card link <id> "<标题>" <链接>。标题只写这个链接干了什么 —— 状态词(待合 / 已合)看板会自己渲染。',
+    linkScheme: (href) => `ddd card link:链接 ${JSON.stringify(href)} 的协议不在白名单。能写的是 http / https / mailto,或者仓库里的相对路径(docs/x.md、demos/y.html、#锚点)。javascript: 这类链接一点就在看板自己的源上跑脚本,不进卡文件。`,
     linkDup: (id, href) => `ddd card link:${id} 上已经有这条链接了,一个字节都没写:${href}`,
     linkDone: (id, href, pr) => `ddd card link:${id} + ${href}` + (pr ? `;顺手把 PR #${pr} 写进了 pr 字段(卡头芯片只认这一档)` : ''),
     showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
@@ -366,6 +379,9 @@ const en = {
     ghFailed: (what, err) => `pr-sync: ${what} failed (not logged in, no access to the repository, or no network all look like this): ${err}\nNothing was written; fix it and re-run.`,
     ghBadJson: (what, err) => `pr-sync: the output of ${what} is not valid JSON (a gh old enough to lack --json?; gh 2.x is required): ${err}\nNothing was written.`,
     manifestBad: (err) => `pr-sync: release-manifest.json exists but is not valid JSON, refusing to overwrite it (hand-written notes and prs may be in there): ${err}`,
+    badLimit: (name, v) => `pr-sync: --${name} needs a positive integer (got ${JSON.stringify(v)}).`,
+    prTruncated: (n, flag) => `⚠ pr-sync: gh returned exactly ${n} pull requests, i.e. as many as it was asked for — anything older was not fetched this run. Those entries stay in release-manifest.json as they were, but their status no longer refreshes. For all of them: --${flag} <a larger number>.`,
+    relTruncated: (n, flag) => `⚠ pr-sync: gh returned exactly ${n} releases, i.e. as many as it was asked for — older tags were not fetched this run. For all of them: --${flag} <a larger number>.`,
     done: (prs, rels, added, file) => `pr-sync: ${prs} pull request(s) · ${rels} release(s) (${added} new) → ${file}`,
     dry: (prs, rels, added) => `pr-sync --dry-run: would write ${prs} pull request(s) · ${rels} release(s) (${added} new); nothing written.`,
     settleNone: () => 'pr-sync --settle: nothing to settle — every card whose pull requests are all merged is already in a final status.',
@@ -405,6 +421,8 @@ const en = {
       'The generated output is byte-for-byte identical to before the split (apart from the new per-card "updated" stamps). Commit the whole batch as one commit and say in the message that it is a rename.',
     joinDone: (total, files) => `cards-join: ${total} card(s) joined back into ${files}; the card files and directories are gone and cardsDir was removed from kanban.config.json. The generated output is byte-for-byte identical to before the join.`,
     baselineFailed: (err) => `Could not produce the "before" baseline (gen.mjs failed first); nothing was written:\n${err}`,
+    cardsDirUnsafe: (v) => `The card directory name ${JSON.stringify(v)} cannot be used: it must be a plain directory name inside the kanban directory (no / or \\, and not . or ..). A value with a path in it writes the whole card store outside the kanban directory — gen and the CLI follow it and everything looks fine, while the board committed to git contains no cards at all.`,
+    writeFailed: (err) => `Something failed part-way through writing; rolled back (the board is exactly as it was) and no card was moved:\n${err}`,
   },
   cli: {
     usage: () => `ddd — the kanban write CLI (v0.14.0, no dependencies)
@@ -421,10 +439,12 @@ Cards:
       report comes back as JSON too).
       Checked: status is one of that card kind's statuses, date looks like YYYY-MM-DD, pr looks
       like 12 / "#12" / "owner/repo#12", line is in config.lanes.ids, session is in
-      config.sessionTags. "order" cannot be changed; an unrecognised field only warns.
+      config.sessionTags. Array fields such as links/shots need --json. "id" and "order" cannot
+      be changed; an unrecognised field only warns.
   card status <id> <status> [--no-note]
       Change the status and append one timeline line "【date】status → …" (--no-note skips it).
-  card note <id> "<text>"           append one timeline line "【date】text"
+      Decision cards have no timeline field (the board does not render one), so only the status changes.
+  card note <id> "<text>"           append one timeline line "【date】text" (refused on decision cards)
   card link <id> "<title>" <href>   append a link (href deduped); a link to this repository's
                                     pull request is written into the pr field as well
   card show <id> [--json]
@@ -451,6 +471,8 @@ kanban.config.json). This command never commits — git add the card files yours
     cardIdMismatch: (rel, id) => `ddd: card file ${rel} does not match the id "${id}" inside it; nothing was written — the filename is the card id (one source of truth).`,
     cardNotFound: (id) => `ddd: no card "${id}" on this board. Check with card list (with one file per card, the filename is the id).`,
     orderLocked: () => 'ddd: "order" is the original array index recorded by the split (it is the display order) and the CLI will not change it. To really move a card, edit its file and say why.',
+    idLocked: () => 'ddd: "id" is the card\'s identity — with one file per card it is the filename. Change it and the next gen fails hard (filename does not match the id), and the CLI refuses to run on a board with a bad card, so even the command that would change it back is locked out. To renumber a card: create a new one with card new and move the content, or stop gen and change the file and the id together by hand. Nothing was written.',
+    arrayField: (field) => `ddd: ${field} is an array field and a scalar was given — gen throws a TypeError while rendering it and the whole board fails to build. Write it as --json '[…]', e.g. card set <id> ${field} --json '[]'. Nothing was written.`,
     statusBad: (v, list) => `ddd: status "${v}" is not one of this card kind's statuses. Available: ${list.join(' / ')}`,
     dateBad: (v) => `ddd: the date "${v}" is malformed; it must be YYYY-MM-DD (the board compares them as strings, so the zero padding matters).`,
     lineBad: (v, list) => `ddd: lane "${v}" is not in config.lanes.ids. Available: ${list.join(' / ')} (a card on several lanes is space-separated, e.g. "B C")`,
@@ -463,6 +485,7 @@ kanban.config.json). This command never commits — git add the card files yours
     noTiers: () => 'ddd card new backlog: tiers is empty in backlog-manifest.json, and gen requires every card\'s tier to be one of them — define at least one kind of work before creating cards.',
     newExhausted: (prefix) => `ddd card new: the next 1000 "${prefix}N" after the current highest are all taken, so it stopped trying. Look for a batch of empty placeholder files in the card directory.`,
     newDone: (id, file) => `ddd card new: ${id} → ${file}\n  The <…> in the template are placeholders; fill them in with card set (at least title / problem / approach).`,
+    newNoLine: () => '⚠ ddd card new: this card has no line — on a board with lanes it only shows under "all", so the default view will not show it. Set one with card set <id> line <lane>.',
     tplTitle: () => '<one line saying what this card is for>',
     tplProblem: () => '<what the user sees and why it is a problem; 2 sentences at most, no investigation notes>',
     tplApproach: () => '<what to change, where, and at what cost; conclusion first, 1-3 lines>',
@@ -472,10 +495,13 @@ kanban.config.json). This command never commits — git add the card files yours
     setUsage: () => 'ddd card set: card set <id> <field> <value>; add --json when the value is an array or object.',
     setDone: (id, field, value, file) => `ddd card set: ${field} of ${id} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
     statusUsage: () => 'ddd card status: card status <id> <status> [--no-note].',
-    statusDone: (id, from, to, noteField) => `ddd card status: ${id} ${from || '(empty)'} → ${to}` + (noteField ? `, with one timeline line appended to ${noteField}` : ' (--no-note: no timeline line)'),
+    statusDone: (id, from, to, noteField, noTimeline) => `ddd card status: ${id} ${from || '(empty)'} → ${to}` +
+      (noteField ? `, with one timeline line appended to ${noteField}` : noTimeline ? ' (decision cards have no timeline field, so only the status changed)' : ' (--no-note: no timeline line)'),
     noteUsage: () => 'ddd card note: card note <id> "<one line of progress>".',
     noteDone: (id, field, line) => `ddd card note: appended "${line}" to ${field} of ${id}`,
+    noteNoField: (id) => `ddd card note: ${id} is a decision card, and decision cards have no timeline field — anything written there is never rendered on the board. For progress use detail (card set ${id} detail "…"); to change the conclusion use decision.`,
     linkUsage: () => 'ddd card link: card link <id> "<title>" <href>. The title says what the link is; the board renders the status (open / merged) itself.',
+    linkScheme: (href) => `ddd card link: the scheme in ${JSON.stringify(href)} is not allowed. Use http / https / mailto, or a path relative to the repository (docs/x.md, demos/y.html, #anchor). A javascript: link runs script on the board's own origin the moment someone clicks it, so it does not go into a card.`,
     linkDup: (id, href) => `ddd card link: ${id} already has this link, nothing was written: ${href}`,
     linkDone: (id, href, pr) => `ddd card link: ${id} + ${href}` + (pr ? `; pull request #${pr} went into the pr field too (the chip on the card only reads that one)` : ''),
     showUsage: () => 'ddd card show: card show <id> [--json].',

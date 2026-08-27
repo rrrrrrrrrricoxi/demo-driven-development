@@ -1056,6 +1056,29 @@ esac
   const rNo = runSync(noGhDir)
   ok(rNo.status === 1 && sha(relP) === afterSha, 'PATH 里没有 gh → exit 1 且文件一个字节都没动', `${rNo.status} ${rNo.stderr.slice(0, 120)}`)
   ok(/找不到 gh 命令|gh command was not found/.test(rNo.stderr), 'stderr 是「找不到 gh」那条(不是 gh 跑起来又失败那条)', rNo.stderr.slice(0, 120))
+
+  { // --limit:gh 只有「要多少个」没有「全部」;拿满了要说一句,而且这趟没返回的老 PR 不许从表上抹掉
+    const limDir = join(WORK, 'fakegh-limit')
+    mkdirSync(limDir, { recursive: true })
+    writeFileSync(join(limDir, 'gh'), `#!${process.execPath}
+const a = process.argv.slice(2)
+if (a[0] === 'release') { console.log('[]'); process.exit(0) }
+const lim = Number(a[a.indexOf('--limit') + 1])
+const prs = [12, 11, 10, 9].map((n) => ({ number: n, title: 'gh-' + n, state: 'OPEN', isDraft: false, baseRefName: 'main', headRefName: 'f' + n, url: 'https://github.com/o/r/pull/' + n, createdAt: '2026-08-20T01:00:00Z', mergedAt: null, closedAt: null }))
+console.log(JSON.stringify(prs.slice(0, lim)))
+`)
+    chmodSync(join(limDir, 'gh'), 0o755)
+    const rBad = runSync(limDir, ['--limit', 'x'])
+    ok(rBad.status === 1 && /正整数|positive integer/.test(rBad.stderr), '--limit 要正整数,给别的就拒跑')
+    const rLim = runSync(limDir, ['--limit', '2'])
+    const o2 = rd(relP)
+    ok(rLim.status === 0, 'pr-sync --limit 2 exit 0', rLim.stderr)
+    ok(o2.prs.map((p) => p.number).join(',') === '12,11,10,9', 'gh 只给了两个,另两个老 PR 原样留在表上(不是被删掉)', o2.prs.map((p) => p.number).join(','))
+    ok(o2.prs[0].title === 'gh-12' && o2.prs[3].title === '丁', 'gh 返回的那两个照它重写,没返回的两个保持原样')
+    ok(/给满了|as many as it was asked for/.test(rLim.stderr), '拿满 limit 时 stderr 明说这趟截断了,并指出该加 --limit')
+    const rFull = runSync(limDir, ['--limit', '10'])
+    ok(!/给满了|as many as it was asked for/.test(rFull.stderr), '没拿满就不吵')
+  }
 }
 
 // ============ T35 richText 卡正文轻 markdown + 折叠 + detail(opt-in;关档逐字节冻结)============
@@ -1092,6 +1115,9 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   const pv = litePreview('a'.repeat(100) + '\n\n' + 'b'.repeat(500), 400)
   ok(pv.head === 'a'.repeat(100) && pv.rest === 502, '预览按段落边界截:只取第一段;rest = 原文字符数 − 预览字符数', JSON.stringify(pv))
   ok(litePreview('c'.repeat(3000), 400).rest === 0, '单段巨长文没有段落边界可切 → 不拆,留给高度折叠')
+  ok(litePreview('a'.repeat(794) + '\n\n' + 'b'.repeat(81), 400).rest === 0,
+    '首段自己就超 n:同样没有 ≤ n 的段落边界可切 → 不拆(否则预览到 2n 字,还把高度折叠一并让掉)')
+  ok(litePreview('a'.repeat(400) + '\n\n' + 'b'.repeat(81), 400).rest === 83, '首段正好 n 字仍然切得动')
   ok(litePreview('短', 400).rest === 0 && litePreview('', 400).rest === 0, '短文本 / 空文本不折叠')
 
   // ---- gen 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
@@ -1106,8 +1132,11 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   wr(decP, dec)
   const bl = rd(blP)
   bl.tiers = { 1: '核心' }
+  const LONGHEAD = 'x'.repeat(700) + '\n\n尾段' // 首段自己就超 400:没有 ≤ 400 的段落边界可切
   bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: 'c',
-    problem: 'p', approach: LONG, note: '【2026-01-01】一行', area: 'x', source: 's' }]
+    problem: 'p', approach: LONG, note: '【2026-01-01】一行', area: 'x', source: 's' },
+  { id: 'BL-2', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: 'd',
+    problem: 'p', approach: LONGHEAD, area: 'x', source: 's' }]
   wr(blP, bl)
   runGen(NEW_SCRIPTS, fx35.kb)
   const offSha = sha(idxP)
@@ -1130,6 +1159,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   ok(on.includes('<div class="tsec"><p>【2026-01-01】一行</p></div>'), '【日期】段包进 .tsec')
   ok(on.includes('<div class="lite lpre">') && on.includes('<div class="lite lfull" hidden>') &&
     /class="litemore" data-rest="\d+">展开 · 还有 \d+ 字</.test(on), '超 400 字的字段烤成预览 + 全文两份 + 展开钮')
+  ok(count(on, '<div class="lite lpre">') === 1 && on.includes('<div class="lite"><p>' + 'x'.repeat(700)),
+    '首段自己就超 400 的字段不烤预览:整篇一份,交给高度折叠 —— 与「整篇一段」同一种处置')
   ok(on.includes('<div class="notes">') && !on.includes('<p class="notes">'), 'notes 容器换成 <div>(<p> 里塞不进 <p>/<ul>,解析器会当场闭合)')
   ok(on.includes('dd.demonote, div.notes') && on.includes("if (el.querySelector('.lfull'))"), 'clampScan 认 div.notes,并给拆过两份的字段让路(两套折叠不叠加)')
   ok(on.includes('<dd class="lsrc"><span class="bbadge src"><p>用户 <b>口述</b></p></span></dd>'), '决策卡 source 补渲染成同款小徽章(0.12.0 前是死数据)')
@@ -1506,6 +1537,15 @@ console.log('T39 done 卡归档')
     try { new Function(sc[1]) } catch (e) { compiled = false }
     ok(compiled, 'lazy + 归档同开的壳 JS 可编译')
   }
+  // ---- 守卫的缺件自愈认第三个 part:archive.html 被删掉也要重跑 ----
+  // 深链 #BL-3(已归档)与「归档」tab 都只活在这个 part 里;index 是新的,守卫不重跑就永远补不回来。
+  for (const part of ['decisions.html', 'backlog.html', 'archive.html']) {
+    const pp = join(fx39.kb, 'parts', part)
+    touch(idxP) // index 是最新的 —— 只有「缺件」这一条能触发重跑,新鲜度那条不许帮忙
+    rmSync(pp)
+    const rs = runStop(NEW_SCRIPTS, fx39.root)
+    ok(rs.status === 0 && existsSync(pp), `守卫发现 parts/${part} 缺件 → 重跑 gen 补回(exit ${rs.status})`, rs.stderr)
+  }
   // ---- 只关归档、lazy 还开着:第三个 part 的陈迹清掉(壳里已无入口)----
   cfg.backlogArchive = false
   writeFileSync(cfgP, JSON.stringify(cfg))
@@ -1568,6 +1608,17 @@ console.log('T40 积压提醒 wip')
     const r = runStop(NEW_SCRIPTS, fx40.root)
     ok(r.status === 0, '积压审计不阻断收工(exit 0)', `${r.status} ${r.stderr.slice(0, 200)}`)
     ok(r.stdout.includes('ready)的卡有 3 张') && r.stdout.includes('config.wip.hard = 2'), '守卫点名 ready 数与 hard 阈值')
+  }
+  { // 线别/时间筛选下横幅要给两个数:当前筛选可见数 + 全板数(守卫那条 notice 用的正是全板数)
+    const { html } = gen({ soft: 1, hard: 9 })
+    const lines = html.split('\n')
+    const at = lines.findIndex((l) => l.includes('const wipAll = wipN ==='))
+    ok(at > 0, '横幅重算里烤进了全板数那一句')
+    const run = new Function('wipN', 'wipLv', 'wipEl', lines.slice(at, at + 3).join('\n') + '\nreturn wipEl.textContent')
+    ok(run(3, 'soft', {}) === '可做的卡 3 张 · 已超 1', '没筛掉任何卡:文案与从前一字不差')
+    ok(run(2, 'soft', {}) === '可做的卡 2 张(全板 3) · 已超 1', '筛掉一部分:可见数之外补一段全板数')
+    ok(run(2, 'hard', {}) === '可做的卡 2 张(全板 3) · 超过 9 —— 先清一些再立新卡', '红档同样两个数')
+    ok(run(3, '', {}) === '', '没超阈值仍是空串(横幅自己 hidden)')
   }
   { // 没超 hard 就不该有 notice
     gen({ soft: 1, hard: 9 })
@@ -2080,6 +2131,53 @@ const { stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
     runGen(NEW_SCRIPTS, kb)
   }
 }
+{ // ⑥ 卡目录逃出看板目录 + 落盘中途失败要整块回滚
+  const fx48d = mkFixture('fx48d', { 'c1.html': demoHtml('c1') })
+  const kb = fx48d.kb
+  const cfgP = join(kb, 'kanban.config.json'), blP = join(kb, 'backlog-manifest.json'), decP = join(kb, 'decisions-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP), dec = rd(decP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  bl.items = [{ id: 'BL-1', status: st, priority: pri, tier: '1', date: '2026-01-01', title: '甲' }]
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: '决策一' }]
+  wr(blP, bl); wr(decP, dec)
+  runGen(NEW_SCRIPTS, kb)
+  const beforeBoard = sha(join(kb, 'index.html'))
+  const beforeBl = readFileSync(blP, 'utf8'), beforeDec = readFileSync(decP, 'utf8'), beforeCfg = readFileSync(cfgP, 'utf8')
+
+  { // --cards-dir 带路径:整批卡会落到看板目录外,而拆分自带的字节校验照样过(gen 读同一个路径)
+    for (const v of ['../../OUTSIDE', 'a/b', '..', '.']) {
+      const r = runScript('cards-split.mjs', kb, ['--cards-dir', v])
+      ok(r.status === 1 && /纯目录名|plain directory name/.test(r.stderr), `cards-split 拒绝 --cards-dir ${v}`)
+    }
+    ok(!existsSync(join(kb, '..', '..', 'OUTSIDE')) && readFileSync(blP, 'utf8') === beforeBl, '拒绝之后看板目录外没长出东西,头文件一个字节都没变')
+  }
+  { // 配里写死的逃逸值:gen 硬报错点名它,守卫不因此崩掉
+    wr(cfgP, { ...rd(cfgP), cardsDir: '../../OUTSIDE' })
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /OUTSIDE/.test(r.stderr), '硬报错:kanban.config.json 里的 cardsDir 逃出看板目录')
+    const stop = runStop(NEW_SCRIPTS, fx48d.root)
+    ok(stop.status !== null && /OUTSIDE/.test(stop.stderr + stop.stdout), '守卫把 gen 的这句原样喂回去,自己不崩', String(stop.status))
+    writeFileSync(cfgP, beforeCfg)
+    runGen(NEW_SCRIPTS, kb)
+  }
+  { // 落盘中途 EACCES:先建一个只读的 cards/decisions(空目录,过得了「必须是空的」那一关)
+    const decDir = join(kb, 'cards', 'decisions')
+    mkdirSync(decDir, { recursive: true })
+    chmodSync(decDir, 0o555)
+    const r = runScript('cards-split.mjs', kb)
+    chmodSync(decDir, 0o755)
+    ok(r.status === 1 && /回滚|rolled back/.test(r.stderr), `落盘失败时报的是「已回滚」,不是 Node 堆栈(${(r.stderr || '').split('\n')[0].slice(0, 60)})`)
+    ok(readFileSync(blP, 'utf8') === beforeBl && readFileSync(decP, 'utf8') === beforeDec && readFileSync(cfgP, 'utf8') === beforeCfg,
+      '两份头文件与 config 原样写回(items / entries / cardsDir 都在原位)')
+    ok(!existsSync(join(kb, 'cards', 'backlog')), '已经写下去的那半批卡文件也收走了')
+    ok(runGen(NEW_SCRIPTS, kb).status === 0 && sha(join(kb, 'index.html')) === beforeBoard, '回滚后 gen 照跑,产物与动手前逐字节相同')
+    rmSync(join(kb, 'cards'), { recursive: true, force: true })
+  }
+}
+
 { // 守卫:新鲜度盯卡文件 + 孤儿语料纳入卡文件正文 + 积压/正文审计不因拆分失明
   const fx48c = mkFixture('fx48c', { 'c1.html': demoHtml('c1') })
   const kb = fx48c.kb
@@ -2247,6 +2345,23 @@ console.log('T50 写操作 CLI ddd.mjs')
     const rd2 = runCli(kb, ['card', 'new', 'decision', '--title', '决策四'])
     const dec4 = rd(decP).entries.find((x) => x.id === 'D4')
     ok(rd2.status === 0 && dec4 && dec4.code === 'D4', '决策卡号固定 D 前缀,code 默认取 id(缺 code 会让 gen 硬失败)')
+    // --line 缺席时取 config.lanes.default:写 line:"" 的卡在配了 lanes 的板上默认视图里看不见
+    ok(rd(blP).items.find((x) => x.id === 'BL-C10').line === 'C', '--line 缺席的 backlog 卡落在 lanes.default(C)上')
+    ok(dec4.line === 'C', '--line 缺席的决策卡同样落在 lanes.default 上')
+    ok(!/没有 line|no line/.test(rd2.stderr), '取到缺省档就不必再提醒')
+    { // lanes.default 不在 ids 里 → 退 ids[0];--from 显式给空 line → 出一句提醒
+      const cfgNow = rd(cfgP)
+      cfgNow.lanes = { ids: ['B', 'C'], default: 'Z', titles: { B: 'B', C: 'C' } }
+      wr(cfgP, cfgNow)
+      const rf = runCli(kb, ['card', 'new', 'backlog', '--title', '缺省档兜底'])
+      ok(rf.status === 0 && rd(blP).items.find((x) => x.id === 'BL-C11').line === 'B', 'lanes.default 不在 ids 里时退回 ids[0]')
+      const fromP = join(kb, 'from-noline.json')
+      writeFileSync(fromP, JSON.stringify({ line: '' }))
+      const rg = runCli(kb, ['card', 'new', 'backlog', '--title', '显式无档', '--from', fromP])
+      ok(rg.status === 0 && /没有 line|no line/.test(rg.stderr), '--from 显式给空 line:照写,但 stderr 说一句它只在「全部」档出现')
+      cfgNow.lanes = { ids: ['B', 'C'], default: 'C', titles: { B: 'B', C: 'C' } }
+      wr(cfgP, cfgNow)
+    }
 
     const before = readFileSync(blP, 'utf8')
     const bad = [
@@ -2256,12 +2371,24 @@ console.log('T50 写操作 CLI ddd.mjs')
       [['card', 'set', 'BL-C10', 'line', 'Z'], /lanes\.ids/],
       [['card', 'set', 'BL-C10', 'session', 'nobody'], /sessionTags/],
       [['card', 'set', 'BL-C10', 'order', '3'], /order/],
+      // id 改了 = 卡的身份没了:拆分后文件名与 id 对不上,gen 硬失败,CLI 也跟着拒跑
+      [['card', 'set', 'BL-C10', 'id', 'BL-C900'], /card new|新建|建新卡/],
+      [['card', 'set', 'BL-C10', 'id', 'BL-C9'], /card new|新建|建新卡/],
+      // 数组字段给标量:gen 会在 .map 上 TypeError
+      [['card', 'set', 'BL-C10', 'links', 'foo'], /--json/],
+      [['card', 'set', 'BL-C10', 'shots', 'a.png'], /--json/],
+      [['card', 'set', 'BL-C10', 'walkthroughs', 'x'], /--json/],
+      [['card', 'set', 'BL-C10', 'links', '--json', '"foo"'], /--json/],
     ]
     for (const [args, re] of bad) {
       const r = runCli(kb, args)
-      ok(r.status === 1 && re.test(r.stderr), `card set 拒绝:${args[3]} = ${args[4]}`)
+      ok(r.status === 1 && re.test(r.stderr), `card set 拒绝:${args[3]} = ${args.slice(4).join(' ')}`)
     }
-    ok(readFileSync(blP, 'utf8') === before, '六次拒绝之后 manifest 一个字节都没变')
+    ok(readFileSync(blP, 'utf8') === before, `${bad.length} 次拒绝之后 manifest 一个字节都没变`)
+    { // 数组给数组照收
+      const rok = runCli(kb, ['card', 'set', 'BL-C10', 'shots', '--json', '["a.png"]'])
+      ok(rok.status === 0 && Array.isArray(rd(blP).items.find((x) => x.id === 'BL-C10').shots), 'shots 给数组照收')
+    }
 
     const ru = runCli(kb, ['card', 'set', 'BL-C10', 'wombat', '42'])
     ok(ru.status === 0 && /wombat/.test(ru.stderr) && rd(blP).items.find((x) => x.id === 'BL-C10').wombat === '42',
@@ -2324,6 +2451,21 @@ console.log('T50 写操作 CLI ddd.mjs')
     ok(rd(one).status === 'ready' && rd(one).note === afterStatus.note, '--no-note:只改 status,时间线一行都不加')
     const rnote = runCli(kb, ['card', 'note', 'BL-1', '上游 PR 开了'])
     ok(rnote.status === 0 && rd(one).note.endsWith(`【${today}】上游 PR 开了`), 'card note 追一行带日期的进展')
+    { // 决策卡没有时间线字段:gen 的 decCard 不渲染 note/notes,往那儿写就是写给谁也看不见的地方
+      const decCard = join(kb, 'cards', 'decisions', 'D3.json')
+      const beforeDec = readFileSync(decCard, 'utf8')
+      const rdn = runCli(kb, ['card', 'note', 'D3', 'ZZ 一句进展'])
+      ok(rdn.status === 1 && /没有时间线字段|no timeline field/.test(rdn.stderr), 'card note 在决策卡上拒写,并说该写 detail')
+      ok(readFileSync(decCard, 'utf8') === beforeDec, '拒写之后决策卡一个字节都没变')
+      const rds = runCli(kb, ['card', 'status', 'D3', 'live'])
+      const after = rd(decCard)
+      ok(rds.status === 0 && after.status === 'live', 'card status 照改决策卡的状态')
+      ok(after.notes === undefined && after.note === undefined, '不顺手塞一个 gen 不渲染的时间线字段进去')
+      ok(/没有时间线字段|no timeline field/.test(rds.stdout), '回执说明白了为什么没有时间线那一行(不是谎称 --no-note)')
+      const rdset = runCli(kb, ['card', 'set', 'D3', 'notes', '硬写'])
+      ok(rdset.status === 0 && /notes/.test(rdset.stderr), '真要硬写 notes 也拦不住,但会警告板上不渲染它')
+      writeFileSync(decCard, beforeDec) // 这张卡后面还要与拆分前的 manifest 深比较,原样放回去
+    }
     ok(rd(join(kb, 'cards', 'backlog', 'BL-C7.json')).note === '【2026-01-01】立卡', '写一张卡不碰别的卡(一卡一文件的整个理由)')
 
     // 链接:去重 + 本仓 PR 链接顺手写 pr
@@ -2344,6 +2486,13 @@ console.log('T50 写操作 CLI ddd.mjs')
     chmodSync(blDir, 0o700)
     ok(rw.status === 1 && /EACCES|EPERM/.test(rw.stderr) && sha(one) === shaBefore,
       '写不进去时原文件一个字节都没变(临时文件 + rename,半截文件落不到卡的位置上)')
+    { // 建卡也一样:预留不成就什么都不留 —— 留下的 0 字节文件会让 gen 当场硬失败、守卫阻断收工
+      const before = readdirSync(blDir).sort().join(' ')
+      chmodSync(blDir, 0o500)
+      const rn2 = runCli(kb, ['card', 'new', 'backlog', '--title', '建不出来'])
+      chmodSync(blDir, 0o700)
+      ok(rn2.status === 1 && readdirSync(blDir).sort().join(' ') === before, '建卡失败时卡目录里不多一个文件(空占位不留下)')
+    }
 
     // git 历史:一卡一文件之后每张卡有自己的 log
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'], { cwd: fx.root })
@@ -2385,6 +2534,123 @@ console.log('T50 写操作 CLI ddd.mjs')
     const r = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), 'pr-sync', '--dir', fx.kb], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent' } })
     ok(r.status === 1 && /pr-sync/.test(r.stdout + r.stderr), 'ddd pr-sync 转调 pr-sync.mjs(参数与退出码原样)')
   }
+}
+
+// ============ T51 截图文件名不进 shell(gen 每次收工由守卫自动跑,文件名是外来输入)============
+console.log('T51 截图文件名不进 shell')
+{
+  const fx = mkFixture('fx51', { 'c1.html': demoHtml('c1') })
+  const marker = join(fx.kb, 'PWNED_MARKER')
+  const evil = 'a";touch PWNED_MARKER;".png'
+  writeFileSync(join(fx.kb, 'shots', evil), 'not-a-real-png')
+  const r = runGen(NEW_SCRIPTS, fx.kb)
+  ok(r.status === 0, 'gen 照常跑完(带引号/分号的截图文件名不是错误,只是个文件名)')
+  ok(!existsSync(marker), '文件名里的 `;touch …;` 没有被当成命令执行')
+  ok(readFileSync(join(fx.kb, 'shots.html'), 'utf8').includes('&quot;'), '文件名原样转义后进了截图廊')
+}
+
+// ============ T52 href 只认 http/https/mailto 与相对路径(esc 挡逃逸,挡不住 scheme)============
+console.log('T52 链接协议白名单')
+{
+  const fx = mkFixture('fx52', { 'c1.html': demoHtml('c1') })
+  const kb = fx.kb
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+  const bl = rd(blP)
+  bl.tiers = { 1: '核心' }
+  bl.instance.ghRepo = 'o/r'
+  bl.items = [{
+    id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1',
+    date: '2026-01-01', title: '甲',
+    links: [
+      { title: '坏的', href: 'javascript:alert(9)//"><img src=y onerror=alert(2)>' },
+      { title: '也坏', href: 'data:text/html,<script>alert(1)</script>' },
+      { title: '好的', href: 'https://example.com/x' },
+      { title: '相对', href: 'demos/c1.html' },
+      { title: '锚点', href: '#BL-1' },
+      { title: '邮件', href: 'mailto:a@b.c' },
+    ],
+  }]
+  wr(blP, bl)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'gen 照常跑完(坏链接不是硬失败,是渲染成不可点)', r.stderr)
+  ok(/协议不在白名单|not allowed/.test(r.stderr), 'stderr 点名说了哪个链接被拦下')
+  const idx = readFileSync(join(kb, 'index.html'), 'utf8')
+  ok(!idx.includes('href="javascript:') && !idx.includes('href="data:'), 'javascript: / data: 都没落进 href')
+  ok(idx.includes('href="https://example.com/x"') && idx.includes('href="demos/c1.html"') && idx.includes('href="#BL-1"') && idx.includes('href="mailto:a@b.c"'),
+    'http(s) / 相对路径 / 锚点 / mailto 原样放行')
+
+  // 发布进度表的 PR url 同样过白名单
+  const cfg = rd(cfgP)
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  for (const f of ['manifest.json', 'decisions-manifest.json', 'backlog-manifest.json']) {
+    const o = rd(join(kb, f))
+    o.instance.ghRepo = 'o/r'; o.instance.branch = 'main'
+    wr(join(kb, f), o)
+  }
+  wr(join(kb, 'release-manifest.json'), {
+    instance: { ghRepo: 'o/r', branch: 'main' },
+    stages: [{ id: 'dev', label: 'dev' }, { id: 'test', label: 'test' }, { id: 'prod', label: 'prod' }],
+    releases: [],
+    prs: [{ number: 7, title: 't', state: 'open', draft: false, base: 'main', branch: 'b', url: 'javascript:alert(7)', createdAt: '2026-01-01T00:00:00Z', mergedAt: null, closedAt: null, cards: [] }],
+  })
+  const r2 = runGen(NEW_SCRIPTS, kb)
+  const idx2 = r2.status === 0 ? readFileSync(join(kb, 'index.html'), 'utf8') : ''
+  ok(r2.status === 0 && !idx2.includes('href="javascript:alert(7)"'), 'release-manifest 里手写的 PR url 也过同一条白名单', r2.stderr.slice(0, 160))
+
+  // CLI 在坏值进卡文件之前就拦下
+  const rc = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), 'card', 'link', 'BL-1', '坏的', 'javascript:alert(1)', '--dir', kb], { encoding: 'utf8' })
+  ok(rc.status === 1 && /白名单|not allowed/.test(rc.stderr), 'ddd card link 拒绝 javascript: 链接')
+  ok(!readFileSync(blP, 'utf8').includes('javascript:alert(1)'), '拒绝之后卡文件里没有这条链接')
+}
+
+// ============ T53 文档 / 截图的更新日期批量取(一条 git log,不是一篇一条命令)============
+console.log('T53 更新日期批量取')
+{
+  const fx = mkFixture('fx53', { 'c1.html': demoHtml('c1') })
+  const kb = fx.kb, root = fx.root
+  const git = (args, when) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+    cwd: root,
+    env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
+  })
+  mkdirSync(join(root, 'docs'), { recursive: true })
+  writeFileSync(join(root, 'docs', 'a.md'), '# 甲\n\n一段。\n')
+  writeFileSync(join(root, 'docs', 'b.md'), '# 乙\n\n一段。\n')
+  writeFileSync(join(kb, 'shots', 'd1-one.png'), 'x')
+  writeFileSync(join(kb, 'shots', 'd1-two.png'), 'y')
+  const cfgP = join(kb, 'kanban.config.json')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.docs = [
+    { path: 'docs/a.md', out: 'a.html', baseDir: 'docs', title: '甲', category: '设计与决策' },
+    { path: 'docs/b.md', out: 'b.html', baseDir: 'docs', title: '乙', category: '设计与决策' },
+    { path: 'docs/c.md', out: 'c.html', baseDir: 'docs', title: '丙(未提交)', category: '设计与决策' },
+  ]
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  git(['add', 'docs/a.md', 'app/kanban/shots/d1-one.png'], '2026-03-01T10:00:00+00:00')
+  git(['commit', '-q', '-m', '甲'], '2026-03-01T10:00:00+00:00')
+  git(['add', 'docs/b.md', 'app/kanban/shots/d1-two.png'], '2026-04-02T10:00:00+00:00')
+  git(['commit', '-q', '-m', '乙'], '2026-04-02T10:00:00+00:00')
+  writeFileSync(join(root, 'docs', 'a.md'), '# 甲\n\n改过。\n') // 再改一次:取的是最后一次,不是第一次
+  git(['add', 'docs/a.md'], '2026-05-03T10:00:00+00:00')
+  git(['commit', '-q', '-m', '甲二'], '2026-05-03T10:00:00+00:00')
+  writeFileSync(join(root, 'docs', 'c.md'), '# 丙\n\n还没提交。\n') // untracked → 退 mtime
+
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'gen exit 0', r.stderr)
+  const idx = readFileSync(join(kb, 'index.html'), 'utf8')
+  ok(idx.includes('data-doc="a.html" data-line="" data-updated="2026-05-03"'), '文档取的是最后一次提交日,不是第一次')
+  ok(idx.includes('data-doc="b.html" data-line="" data-updated="2026-04-02"'), '同一批 git log 里另一篇文档各归各的日期')
+  const today = new Date()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  ok(idx.includes(`data-doc="c.html" data-line="" data-updated="${todayStr}"`), '没提交过的文档退回文件 mtime(降级链没断)')
+  const shots = readFileSync(join(kb, 'shots.html'), 'utf8')
+  ok(shots.includes('>d1-one.png</span><span class="dt">2026-03-01<'), '截图取自己那次提交日')
+  ok(shots.includes('>d1-two.png</span><span class="dt">2026-04-02<'), '同一批里另一张截图各归各的日期')
+  writeFileSync(join(kb, 'shots', 'd1-three.png'), 'z') // untracked
+  runGen(NEW_SCRIPTS, kb)
+  ok(readFileSync(join(kb, 'shots.html'), 'utf8').includes(`>d1-three.png</span><span class="dt">${todayStr}<`), '没提交过的截图退回文件 mtime')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

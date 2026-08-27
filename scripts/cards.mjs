@@ -14,6 +14,7 @@
 // 原数组下标,读回时按 order 再按 id 排,排完把 order 删掉:卡对象与拆分前逐字段相同。
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pickStrings } from './strings.mjs'
 
 /** 拆分的两类卡(manifest.json 的 tasks 不拆:34 条、迭代级摘要、改动少) */
 export const CARD_KINDS = [
@@ -21,11 +22,28 @@ export const CARD_KINDS = [
   { sub: 'decisions', manifest: 'decisions-manifest.json', key: 'entries' },
 ]
 
-/** config.cardsDir 归一:非空字符串才算开,首尾斜杠去掉;其它一切(缺席/false/空串)= 关 */
+/**
+ * 卡目录名必须是看板目录下的一个纯目录名 —— 与 gen 对 docs[].out 同一条规矩。
+ * 带路径分隔符或 .. 的值会把整个卡库搬到看板目录外面:gen / CLI / 守卫都跟着走,一切看着正常,
+ * 而 `git add app/kanban` 提交出去的板一张卡都没有,别人克隆下来就是空的。
+ */
+export const cardsDirUnsafe = (s) => /[/\\]/.test(s) || s === '.' || s === '..'
+
+/**
+ * 每类卡的时间线字段(一处定,ddd 与 pr-sync 共用)。
+ * manifest.json 的 tasks 用 notes、backlog 的 items 用 note,决策卡没有 —— gen 的 decCard 不渲染
+ * note/notes 里的任何一个字,往那儿写就是写一个没人读得到的字段,还骗人说「记下了」。
+ */
+export const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' }
+
+/** config.cardsDir 归一:非空字符串才算开,首尾斜杠去掉;其它一切(缺席/false/空串)= 关。
+ *  值逃出看板目录时抛 —— 悄悄当「没配」会让 gen 拿不到卡却也不报错,那更难查。 */
 export function cardsDirOf(cfg) {
   const v = cfg && cfg.cardsDir
   if (typeof v !== 'string') return ''
-  return v.trim().replace(/^\/+|\/+$/g, '')
+  const dir = v.trim().replace(/^\/+|\/+$/g, '')
+  if (dir && cardsDirUnsafe(dir)) throw new Error(pickStrings(cfg && cfg.lang).cards.cardsDirUnsafe(v))
+  return dir
 }
 
 /**
