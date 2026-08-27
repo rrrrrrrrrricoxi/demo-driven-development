@@ -41,7 +41,7 @@ if (ARGV[0] === 'pr-sync') {
 }
 
 // ---- 旗子 ----------------------------------------------------------------
-const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since'])
+const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since', 'tier'])
 const BOOL_FLAGS = new Set(['json', 'help', 'no-note'])
 const die = (msg) => { console.error(msg); process.exit(1) }
 
@@ -250,7 +250,7 @@ function cmdNew() {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) die(S.fromNotObject(flags.from))
     extra = raw
   }
-  const base = k.key === 'items' ? backlogTemplate(head) : decisionTemplate(head)
+  const base = k.key === 'items' ? backlogTemplate(store) : decisionTemplate(head)
   const card = { ...base, ...extra }
   delete card.order // order 是拆分记的原下标,手工新卡不写(gen 排完即删,缺席就按 id 排在最后)
   for (const [f, v] of Object.entries(card)) { if (f !== 'id') checkField(store, f, v) }
@@ -296,7 +296,8 @@ function cmdNew() {
 /** 手工新卡的 code 默认取 id:决策卡的锚点用它,缺了 gen 硬失败 */
 const withId = (card, id) => (Object.prototype.hasOwnProperty.call(card, 'code') ? { ...card, id, code: card.code || id } : { ...card, id })
 
-function backlogTemplate(head) {
+function backlogTemplate(store) {
+  const head = store.head
   const tiers = Object.keys(head.tiers || {})
   if (!tiers.length) die(S.noTiers())
   const pri = Object.keys(head.priorities || {})
@@ -304,7 +305,7 @@ function backlogTemplate(head) {
     id: '',
     title: flags.title || S.tplTitle(),
     status: firstStatus(head),
-    tier: tiers[0],
+    tier: flags.tier || dominantTier(store.rows, tiers),
     priority: pri[Math.floor(pri.length / 2)] || pri[0] || '', // 三档时正中那档;默认高优先级是给自己挖坑
     line: flags.line || defaultLine(),
     session: flags.session || '',
@@ -345,6 +346,26 @@ function dominantPrefix(ids) {
     if (!best || x.n > best.x.n || (x.n === best.x.n && x.max > best.x.max)) best = { prefix, x }
   }
   return best ? best.prefix : 'BL-'
+}
+
+/**
+ * 建卡默认 tier:现有非 done 卡里出现最多的那档(melon 上 tiers 表第一个键是 init 遗留的
+ * "0",老实取它几乎每次都要手动改回来);平手取 tiers 键序靠前的 —— 按 tiers 顺序扫、只在
+ * 严格大于时换榜,天然让先出现的键赢平手。板上没有非 done 卡时退回第一个键。
+ */
+function dominantTier(rows, tiers) {
+  const tally = new Map()
+  for (const r of rows) {
+    if (r.card.status === 'done') continue
+    const t = String(r.card.tier ?? '')
+    tally.set(t, (tally.get(t) || 0) + 1)
+  }
+  let best = null
+  for (const t of tiers) {
+    const n = tally.get(t) || 0
+    if (n > 0 && (!best || n > best.n)) best = { t, n }
+  }
+  return best ? best.t : tiers[0]
 }
 
 function maxNumber(ids, prefix) {

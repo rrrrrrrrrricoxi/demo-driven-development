@@ -9,6 +9,18 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Changed
+- **`card new backlog`'s default tier is no longer always the first key in
+  `tiers`.** A board adopted through legacy takeover gets a `tiers."0"` entry
+  as init leftover, so that first key sat there as the default long after the
+  board had moved on to real tiers — nearly every `card new` needed a manual
+  `--tier` fix-up. The default is now whichever tier is most common among the
+  existing non-done cards (ties go to the tier listed earlier in `tiers`;
+  falling back to the first key when there are no non-done cards yet). An
+  explicit `--tier` still wins over the computed default.
+
 ## [0.15.1] - 2026-08-27
 
 ### Fixed

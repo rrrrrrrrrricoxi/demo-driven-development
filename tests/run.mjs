@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。731 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。733 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -2410,6 +2410,17 @@ console.log('T50 写操作 CLI ddd.mjs')
       'export --json 在未拆模式下等于两份 manifest 的数组本身')
     ok(JSON.stringify(preBl.instance) === JSON.stringify(exp0.backlog.instance) && Object.keys(exp0.backlog).slice(-1)[0] === 'items',
       'export 的头与原 manifest 同形,数组仍在最后')
+
+    { // --tier 缺席时默认取板上非 done 卡里最多的那档;显式给了就照给的值落,不管多数
+      const rMaj = runCli(kb, ['card', 'new', 'backlog', '--title', '默认档'])
+      const idMaj = rMaj.stdout.match(/BL-C\d+/)[0]
+      ok(rMaj.status === 0 && rd(blP).items.find((x) => x.id === idMaj).tier === '1',
+        '--tier 缺席:板上非 done 卡多数是 tier "1",新卡也落在 "1" 上')
+      const rTier = runCli(kb, ['card', 'new', 'backlog', '--title', '指定档', '--tier', '2'])
+      const idTier = rTier.stdout.match(/BL-C\d+/)[0]
+      ok(rTier.status === 0 && rd(blP).items.find((x) => x.id === idTier).tier === '2',
+        '--tier 2 显式给了就照给的值落,不管板上多数是哪档')
+    }
   }
 
   { // ---- 拆分模式:一张卡一次原子写,号靠 openSync('wx') 预留 ----
