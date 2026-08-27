@@ -244,8 +244,27 @@ app/kanban/
    (行内写的对象展开、补末尾换行)—— 那点排版差异一并进这个 commit,别单独较真。
 4. **一个 commit** 提交整批(message 写明是 rename 性质),再通知各会话恢复。
 5. 从此只写 `cards/<sub>/<id>.json` —— 「只 `git add` 具体文件」这条纪律自然成立。
+6. **各会话改用写操作 CLI**(下一节):拆完还继续手搓 JSON 的话,一卡一文件治的那半个问题(整份重写互相带走)是治了,另半个(撞号)没治。
 
 反悔用 `node <plugin>/scripts/cards-join.mjs --dir app/kanban`(同样自带 gen 比对与回滚)。
+
+## 写操作 CLI(ddd.mjs,v0.14.0)
+
+`node <plugin>/scripts/ddd.mjs`,零依赖,`--dir` 与 gen 同一口径。两种形制都认:配了 `cardsDir` 就逐卡文件读写(一张卡一次原子写),没配就从头文件的数组读、整文件重写(竞态照旧,但校验与形制一致)。
+
+```
+card new backlog|decision [--title "…"] [--line C] [--session dev] [--from f.json]
+card set <id> <field> <value> [--json]      card status <id> <status> [--no-note]
+card note <id> "<text>"                     card link <id> "<title>" <href>
+card show <id> [--json]                     card list [--status s --line X --session Y --since YYYY-MM-DD]
+card history <id>                           export [--out f.json]        pr-sync […]
+```
+
+- **`card new` 分配并预留卡号**:拆分模式用 `openSync(path,'wx')` 独占创建,两个会话同时算出同一个号时,抢输的自己退到下一号 —— 号是预留出来的,不是各算各的。backlog 取板上现有 id 的主流前缀(如 `BL-C`),决策固定 `D`。模板正文是 `<…>` 占位,`--from f.json` 的字段覆盖模板。
+- **写之前先验**:status ∈ 该类卡的 statuses、date 形如 `YYYY-MM-DD`、`pr` 形如 `12` / `"#12"` / `"owner/repo#12"`、`line` ∈ `config.lanes.ids`、`session` ∈ `config.sessionTags`。不认识的字段只警告不拒(板上的字段一直在长),`order` 一律不许改 —— 它就是显示顺序。
+- **形制由脚本保证**:临时文件 + rename 原子替换,已有键的相对顺序原样保留、新键按规范插位(id/title 在前,长文居中,`links`/`shots`/`pr` 收尾),2 空格缩进 + 末尾换行。**从不 commit** —— `git add` 那几个文件仍是会话自己的事。
+- **`card new` 之后照守卫的口径数一遍 `ready`**,超 `config.wip.hard` 就在 stderr 上给同一句提醒(不是收工才说)。
+- **退路**:CLI 说不清的(重排一整段结构、批量改)直接编辑卡文件,形制照旧。
 
 ## init 段 token 硬规则(命令式,不是建议)
 

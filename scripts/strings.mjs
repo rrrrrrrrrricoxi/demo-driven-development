@@ -51,7 +51,7 @@ const zh = {
   ghprRemindMerge:
     '[看板提醒] 刚合了一个 PR。跑 `node <plugin>/scripts/pr-sync.mjs --settle`:它先把 gh 上的 PR 与版本同步进 release-manifest.json,再列出「PR 都合了、卡还没收」的卡与建议 status(默认只打印;确认无误后加 --write 收账)。顺手核一遍卡的 links 标题:状态词(开而不合 / 待合 / 已合)不必手写,看板会按实际状态渲染。与看板无关则忽略。',
   ghprRemind:
-    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成);顺手在卡上写 `pr` 字段(如 "pr": 230),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
+    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成);顺手把 PR 挂上卡 —— `node <plugin>/scripts/ddd.mjs card link <卡号> "<这个 PR 干了什么>" <PR 链接>`(它顺手写 pr 字段),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
   prSync: {
     noRepo: () => 'pr-sync:三份 manifest 的 instance.ghRepo 都是空的,不知道该同步哪个仓 —— 先在 manifest.json 的 instance.ghRepo 填 "owner/repo"。',
     ghMissing: () => 'pr-sync:找不到 gh 命令。装 GitHub CLI(https://cli.github.com)并 `gh auth login` 之后重跑;本次一个字节都没写。',
@@ -97,6 +97,85 @@ const zh = {
       '产物与拆分前逐字节相同(除新增的每卡「更新」时间戳)。请把整批改动作为一个 commit 提交,message 写明是 rename 性质。',
     joinDone: (total, files) => `cards-join:${total} 张卡合回 ${files};卡文件与目录已删除,kanban.config.json 去掉了 cardsDir。产物与合并前逐字节相同。`,
     baselineFailed: (err) => `跑不出「改动前」的基准产物(gen.mjs 先失败了),一个字节都没写:\n${err}`,
+  },
+  cli: {
+    usage: () => `ddd —— 看板写操作 CLI(v0.14.0,零依赖)
+
+  node <plugin>/scripts/ddd.mjs <命令> [参数] [--dir <看板目录>] [--json]
+
+卡:
+  card new backlog|decision [--title "…"] [--line C] [--session dev] [--from f.json]
+      建卡。卡号由脚本分配并独占预留(一卡一文件时用 openSync 'wx',抢输的自己退到下一号)。
+      模板里的占位写成 <…>,建完把它们填掉;--from 给的字段覆盖模板。
+  card set <id> <field> <value> [--json]
+      改一个字段。--json:值按 JSON 解析(要写数组/对象用它,顺带把结果也打成 JSON)。
+      校验:status ∈ 该类卡的 statuses、date 形如 YYYY-MM-DD、pr 形如 12 / "#12" / "owner/repo#12"、
+      line ∈ config.lanes.ids、session ∈ config.sessionTags;order 不许改;不认识的字段只警告不拒。
+  card status <id> <status> [--no-note]
+      改状态,并在时间线字段末尾追一行「【日期】status → …」(--no-note 关掉这一行)。
+  card note <id> "<text>"           时间线末尾追一行「【日期】text」
+  card link <id> "<title>" <href>   links 追一条(href 去重);指向本仓 PR 的链接顺手写进 pr 字段
+  card show <id> [--json]
+  card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
+  card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
+
+其它:
+  export [--out f.json]             合成与 manifest 同形的一坨(backlog / decisions 两段),默认打到 stdout
+  pr-sync […]                       转调 pr-sync.mjs,参数原样透传
+
+看板目录:--dir > $CLAUDE_PROJECT_DIR/app/kanban > 当前目录(含 kanban.config.json)。
+本命令从不 commit —— 写完的卡按纪律自己 git add 那几个文件。`,
+    unknownFlag: (flag) => `ddd:不认识的旗子 ${flag}。看 --help;要把它当普通参数传就先写一个 -- 隔开。`,
+    flagNeedsValue: (name) => `ddd:--${name} 后面要跟一个值。`,
+    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / export / pr-sync;看 --help。`,
+    unknownCardCmd: (cmd, list) => `ddd card:不认识的子命令「${cmd}」。可用:${list.join(' / ')};看 --help。`,
+    kindBad: (kind) => `ddd card new:第一个参数要写 backlog 或 decision(给的是「${kind}」)。`,
+    readFailed: (what, err) => `ddd:读不了 ${what}(不在,或不是合法 JSON):${err}`,
+    headNoArray: (file, key) => `ddd:${file} 里没有 ${key} 数组,也没配 cardsDir —— 这块板的形制不对,先核对 manifest。`,
+    headHasArray: (file, key, dir) => `ddd:kanban.config.json 配了 cardsDir = "${dir}",${file} 里却还留着 ${key} 数组(一个真源被破坏了)。卡的真源是 ${dir}/ 下的文件,先把头文件的 ${key} 删掉。`,
+    dirMissing: (rel) => `ddd:卡目录 ${rel} 不在(相对看板目录)—— gen 也会硬失败。建目录,或把 cardsDir 从 kanban.config.json 去掉。`,
+    cardParseBad: (rel, err) => `ddd:卡文件 ${rel} 不是合法 JSON,本次一个字节都没写(gen 也会在这儿硬失败):${err}`,
+    cardIdMismatch: (rel, id) => `ddd:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,本次一个字节都没写 —— 文件名就是卡号(一个真源)。`,
+    cardNotFound: (id) => `ddd:板上没有卡号「${id}」。用 card list 核一遍(拆成一卡一文件之后,文件名就是卡号)。`,
+    orderLocked: () => 'ddd:order 是拆分时记下的原数组下标(它就是显示顺序),不许用 CLI 改 —— 真要挪位置,直接编辑卡文件并说明理由。',
+    statusBad: (v, list) => `ddd:status「${v}」不在这类卡的 statuses 里。可用:${list.join(' / ')}`,
+    dateBad: (v) => `ddd:日期「${v}」形制不对,要 YYYY-MM-DD(板上按字符串比大小,补零不能省)。`,
+    lineBad: (v, list) => `ddd:线别「${v}」不在 config.lanes.ids 里。可用:${list.join(' / ')}(多线共享写成空格分隔,如 "B C")`,
+    sessionBad: (v, list) => `ddd:session 标签「${v}」不在 config.sessionTags 里。可用:${list.join(' / ')}(多标写成空格分隔,如 "dev release")`,
+    prBad: (v) => `ddd:pr 值 ${v} 形制不对。要 12(本仓号)/ "#12" / "owner/repo#12";一张卡跨几个 PR 用 --json '[227,230]'。`,
+    unknownField: (field, kind) => `⚠ ddd:「${field}」不是${kind}卡认得的字段,还是写进去了 —— 板上不会渲染它。是笔误就用 card set 改回来。`,
+    fromNotObject: (file) => `ddd --from:${file} 的顶层不是一个 JSON 对象(要的是一张卡的字段表)。`,
+    valueNotJson: (err) => `ddd --json:值不是合法 JSON:${err}\n  (shell 里记得整段加单引号,如 --json '["a","b"]')`,
+    writeFailed: (where, err) => `ddd:写 ${where} 失败,原文件一个字节都没变(临时文件 + rename,半截文件不会落到卡的位置上):${err}`,
+    noTiers: () => 'ddd card new backlog:这块板的 backlog-manifest.json 里 tiers 是空的,而 gen 硬要求每张卡的 tier 在 tiers 里 —— 先定义至少一个工作类型再建卡。',
+    newExhausted: (prefix) => `ddd card new:从当前最大号往后 1000 个「${prefix}N」都被占了,没往下试。先看看卡目录里是不是有一批空占位文件。`,
+    newDone: (id, file) => `ddd card new:${id} → ${file}\n  模板里的 <…> 是占位,用 card set 填掉(至少 title / problem / approach)。`,
+    tplTitle: () => '<一句话说清这张卡要解决什么>',
+    tplProblem: () => '<用户看到什么、为什么这是问题;≤ 2 句,别写查证过程>',
+    tplApproach: () => '<怎么改、改哪、代价;结论先行,1–3 行>',
+    tplNote: () => '<决策与进展的时间线,一段一条;用 ddd card note 追加>',
+    tplQuestion: () => '<要定的是什么;一句话>',
+    tplDecision: () => '<拍板结论;还没拍板就先留着这行>',
+    setUsage: () => 'ddd card set:写法 card set <id> <字段> <值>;值是数组/对象时加 --json。',
+    setDone: (id, field, value, file) => `ddd card set:${id} 的 ${field} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
+    statusUsage: () => 'ddd card status:写法 card status <id> <status> [--no-note]。',
+    statusDone: (id, from, to, noteField) => `ddd card status:${id} ${from || '(空)'} → ${to}` + (noteField ? `,并在 ${noteField} 末尾记了一行时间线` : '(--no-note:没记时间线)'),
+    noteUsage: () => 'ddd card note:写法 card note <id> "<一句话进展>"。',
+    noteDone: (id, field, line) => `ddd card note:${id} 的 ${field} 追加了「${line}」`,
+    linkUsage: () => 'ddd card link:写法 card link <id> "<标题>" <链接>。标题只写这个链接干了什么 —— 状态词(待合 / 已合)看板会自己渲染。',
+    linkDup: (id, href) => `ddd card link:${id} 上已经有这条链接了,一个字节都没写:${href}`,
+    linkDone: (id, href, pr) => `ddd card link:${id} + ${href}` + (pr ? `;顺手把 PR #${pr} 写进了 pr 字段(卡头芯片只认这一档)` : ''),
+    showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
+    showHead: (id, kind, file) => `${id}  (${kind === 'backlog' ? 'backlog' : '决策'}卡 · ${file})`,
+    listEmpty: () => 'ddd card list:这组筛选下一张卡都没有。',
+    listHead: () => '卡号          状态      线别  session   建卡日      标题',
+    listCount: (n) => `  —— 共 ${n} 张`,
+    historyUsage: () => 'ddd card history:写法 card history <id>。',
+    historyUnsplit: () => 'ddd card history:这块板还没拆成一卡一文件,单张卡没有自己的文件,也就没有自己的 git 历史。要么先跑 scripts/cards-split.mjs,要么 git log -p 整份 manifest 自己翻。',
+    historyFailed: (err) => `ddd card history:git log 跑不动(不是 git 仓库?):${err}`,
+    historyEmpty: (id, file) => `ddd card history:${id}(${file})还没进过任何一次 commit。`,
+    historyHead: (id, file) => `${id}  ${file}`,
+    exportWrote: (file) => `ddd export:已写入 ${file}`,
   },
   init: {
     portCaveat: zhPortCaveat,
@@ -280,7 +359,7 @@ const en = {
   ghprRemindMerge:
     '[Kanban reminder] A pull request was just merged. Run `node <plugin>/scripts/pr-sync.mjs --settle`: it syncs pull requests and releases from gh into release-manifest.json, then lists the cards whose pull requests are all merged while the card is not settled, with a suggested status (printing only by default; add --write once the list looks right). While you are there, check the link titles on those cards — hand-written status words are no longer needed, the board renders the real state.',
   ghprRemind:
-    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically), and put the `pr` field on the card (e.g. "pr": 230); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
+    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically), and attach the pull request to the card with `node <plugin>/scripts/ddd.mjs card link <id> "<what this pull request did>" <pr-url>` (it writes the pr field too); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
   prSync: {
     noRepo: () => 'pr-sync: instance.ghRepo is empty in all three manifests, so there is no repository to sync — set it to "owner/repo" in manifest.json first.',
     ghMissing: () => 'pr-sync: the gh command was not found. Install the GitHub CLI (https://cli.github.com), run `gh auth login`, then try again; nothing was written.',
@@ -326,6 +405,90 @@ const en = {
       'The generated output is byte-for-byte identical to before the split (apart from the new per-card "updated" stamps). Commit the whole batch as one commit and say in the message that it is a rename.',
     joinDone: (total, files) => `cards-join: ${total} card(s) joined back into ${files}; the card files and directories are gone and cardsDir was removed from kanban.config.json. The generated output is byte-for-byte identical to before the join.`,
     baselineFailed: (err) => `Could not produce the "before" baseline (gen.mjs failed first); nothing was written:\n${err}`,
+  },
+  cli: {
+    usage: () => `ddd — the kanban write CLI (v0.14.0, no dependencies)
+
+  node <plugin>/scripts/ddd.mjs <command> [args] [--dir <kanban dir>] [--json]
+
+Cards:
+  card new backlog|decision [--title "…"] [--line C] [--session dev] [--from f.json]
+      Create a card. The script allocates the id and reserves it exclusively (with one file per
+      card it uses openSync 'wx', so whoever loses the race steps to the next number instead).
+      Template placeholders are written as <…>; fill them in. Fields from --from win over them.
+  card set <id> <field> <value> [--json]
+      Change one field. --json parses the value as JSON (use it for arrays and objects; the
+      report comes back as JSON too).
+      Checked: status is one of that card kind's statuses, date looks like YYYY-MM-DD, pr looks
+      like 12 / "#12" / "owner/repo#12", line is in config.lanes.ids, session is in
+      config.sessionTags. "order" cannot be changed; an unrecognised field only warns.
+  card status <id> <status> [--no-note]
+      Change the status and append one timeline line "【date】status → …" (--no-note skips it).
+  card note <id> "<text>"           append one timeline line "【date】text"
+  card link <id> "<title>" <href>   append a link (href deduped); a link to this repository's
+                                    pull request is written into the pr field as well
+  card show <id> [--json]
+  card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
+  card history <id>                 git history of that card's file (needs one file per card)
+
+Other:
+  export [--out f.json]             one object shaped like the manifests (a backlog and a
+                                    decisions section); goes to stdout unless --out is given
+  pr-sync […]                       hands over to pr-sync.mjs with the arguments unchanged
+
+Kanban directory: --dir > $CLAUDE_PROJECT_DIR/app/kanban > the current directory (if it holds a
+kanban.config.json). This command never commits — git add the card files yourself.`,
+    unknownFlag: (flag) => `ddd: unknown flag ${flag}. See --help; to pass it as a plain argument, put a -- in front of it.`,
+    flagNeedsValue: (name) => `ddd: --${name} needs a value after it.`,
+    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / export / pr-sync; see --help.`,
+    unknownCardCmd: (cmd, list) => `ddd card: unknown subcommand "${cmd}". Available: ${list.join(' / ')}; see --help.`,
+    kindBad: (kind) => `ddd card new: the first argument must be backlog or decision (got "${kind}").`,
+    readFailed: (what, err) => `ddd: cannot read ${what} (missing, or not valid JSON): ${err}`,
+    headNoArray: (file, key) => `ddd: ${file} has no ${key} array and cardsDir is not configured — check the manifest shape first.`,
+    headHasArray: (file, key, dir) => `ddd: kanban.config.json sets cardsDir = "${dir}", yet ${file} still has a ${key} array (the one-source-of-truth rule is broken). The cards live under ${dir}/; delete ${key} from the header file.`,
+    dirMissing: (rel) => `ddd: the card directory ${rel} is not there (relative to the kanban directory) — gen would fail too. Create it, or drop cardsDir from kanban.config.json.`,
+    cardParseBad: (rel, err) => `ddd: card file ${rel} is not valid JSON; nothing was written (gen fails on this too): ${err}`,
+    cardIdMismatch: (rel, id) => `ddd: card file ${rel} does not match the id "${id}" inside it; nothing was written — the filename is the card id (one source of truth).`,
+    cardNotFound: (id) => `ddd: no card "${id}" on this board. Check with card list (with one file per card, the filename is the id).`,
+    orderLocked: () => 'ddd: "order" is the original array index recorded by the split (it is the display order) and the CLI will not change it. To really move a card, edit its file and say why.',
+    statusBad: (v, list) => `ddd: status "${v}" is not one of this card kind's statuses. Available: ${list.join(' / ')}`,
+    dateBad: (v) => `ddd: the date "${v}" is malformed; it must be YYYY-MM-DD (the board compares them as strings, so the zero padding matters).`,
+    lineBad: (v, list) => `ddd: lane "${v}" is not in config.lanes.ids. Available: ${list.join(' / ')} (a card on several lanes is space-separated, e.g. "B C")`,
+    sessionBad: (v, list) => `ddd: session tag "${v}" is not in config.sessionTags. Available: ${list.join(' / ')} (several tags are space-separated, e.g. "dev release")`,
+    prBad: (v) => `ddd: the pr value ${v} is malformed. It must be 12 (a number in this repository) / "#12" / "owner/repo#12"; for a card spanning several, use --json '[227,230]'.`,
+    unknownField: (field, kind) => `⚠ ddd: "${field}" is not a field a ${kind} card knows, and it was written anyway — the board will not render it. If it is a typo, put it right with card set.`,
+    fromNotObject: (file) => `ddd --from: the top level of ${file} is not a JSON object (it should be one card's fields).`,
+    valueNotJson: (err) => `ddd --json: the value is not valid JSON: ${err}\n  (remember the single quotes in a shell, e.g. --json '["a","b"]')`,
+    writeFailed: (where, err) => `ddd: writing ${where} failed and the file is byte-for-byte as it was (temp file + rename, so a half-written file never lands where a card belongs): ${err}`,
+    noTiers: () => 'ddd card new backlog: tiers is empty in backlog-manifest.json, and gen requires every card\'s tier to be one of them — define at least one kind of work before creating cards.',
+    newExhausted: (prefix) => `ddd card new: the next 1000 "${prefix}N" after the current highest are all taken, so it stopped trying. Look for a batch of empty placeholder files in the card directory.`,
+    newDone: (id, file) => `ddd card new: ${id} → ${file}\n  The <…> in the template are placeholders; fill them in with card set (at least title / problem / approach).`,
+    tplTitle: () => '<one line saying what this card is for>',
+    tplProblem: () => '<what the user sees and why it is a problem; 2 sentences at most, no investigation notes>',
+    tplApproach: () => '<what to change, where, and at what cost; conclusion first, 1-3 lines>',
+    tplNote: () => '<timeline of decisions and progress, one entry per paragraph; append with ddd card note>',
+    tplQuestion: () => '<what has to be decided; one line>',
+    tplDecision: () => '<the call, once it is made; leave this line until then>',
+    setUsage: () => 'ddd card set: card set <id> <field> <value>; add --json when the value is an array or object.',
+    setDone: (id, field, value, file) => `ddd card set: ${field} of ${id} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
+    statusUsage: () => 'ddd card status: card status <id> <status> [--no-note].',
+    statusDone: (id, from, to, noteField) => `ddd card status: ${id} ${from || '(empty)'} → ${to}` + (noteField ? `, with one timeline line appended to ${noteField}` : ' (--no-note: no timeline line)'),
+    noteUsage: () => 'ddd card note: card note <id> "<one line of progress>".',
+    noteDone: (id, field, line) => `ddd card note: appended "${line}" to ${field} of ${id}`,
+    linkUsage: () => 'ddd card link: card link <id> "<title>" <href>. The title says what the link is; the board renders the status (open / merged) itself.',
+    linkDup: (id, href) => `ddd card link: ${id} already has this link, nothing was written: ${href}`,
+    linkDone: (id, href, pr) => `ddd card link: ${id} + ${href}` + (pr ? `; pull request #${pr} went into the pr field too (the chip on the card only reads that one)` : ''),
+    showUsage: () => 'ddd card show: card show <id> [--json].',
+    showHead: (id, kind, file) => `${id}  (${kind} card · ${file})`,
+    listEmpty: () => 'ddd card list: no card matches those filters.',
+    listHead: () => 'id          status    lane  session   created     title',
+    listCount: (n) => `  — ${n} card(s)`,
+    historyUsage: () => 'ddd card history: card history <id>.',
+    historyUnsplit: () => 'ddd card history: this board is not split into one file per card, so a single card has no file of its own and no history of its own. Run scripts/cards-split.mjs first, or read git log -p over the whole manifest.',
+    historyFailed: (err) => `ddd card history: git log failed (not a git repository?): ${err}`,
+    historyEmpty: (id, file) => `ddd card history: ${id} (${file}) has never been part of a commit.`,
+    historyHead: (id, file) => `${id}  ${file}`,
+    exportWrote: (file) => `ddd export: written to ${file}`,
   },
   init: {
     portCaveat: enPortCaveat,

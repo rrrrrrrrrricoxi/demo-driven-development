@@ -20,6 +20,7 @@ This plugin packages the SEE-IT half as a workflow:
 - Two hooks. A Stop guard regenerates the board when inputs change and blocks demos that aren't linked to any card. A second hook nudges card status after `gh pr` actions. Both check whether the project actually uses this plugin before doing anything, so they stay silent everywhere else.
 - `gen.mjs` builds the kanban (`index.html`) from four manifest JSONs, renders project markdown into board-local pages, and injects a back-navigation bar into each demo.
 - `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
+- `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
 - `retire-stale-caches.mjs` defuses superseded plugin versions that long-lived sessions are still pinned to (see "Upgrading").
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
@@ -172,6 +173,76 @@ configured the numbers follow the selected lane, recomputed with the same
 visibility rule that drives the tab badges. A non-blocking guard notice fires
 at stop time when the total across lanes is over `hard`. Left unset, output is
 byte-identical to a board without the feature.
+
+## One file per card (optional)
+
+Set `config.cardsDir` to a directory name — `"cards"` by convention, relative to
+the kanban directory — and the backlog and decision cards move out of their
+manifests into `<cardsDir>/backlog/<id>.json` and
+`<cardsDir>/decisions/<id>.json`, one file each. The two manifests keep only
+their headers; leaving an `items`/`entries` array behind in one is a hard error,
+as is a filename that disagrees with the `id` inside it, or the same id twice.
+
+The problem this solves is concurrent writes. Several sessions editing one large
+manifest each rewrite the whole file, so they quietly take each other's in-flight
+cards with them and git reports no conflict, because textually there wasn't one.
+One path per card either avoids that or turns it into a conflict git can stop.
+A board only one session ever writes to does not need this.
+
+Each card carries an `order` field written by the migration — the array index it
+had before, because array order *was* display order in several places. `gen`
+sorts by `order` then by `id` and deletes the field afterwards. Cards created by
+hand or by the CLI can leave it out; they sort last, by id. With the directory
+configured, each card header also shows the date its file was last committed
+(falling back to the file's mtime), and the dormancy chip measures from that
+instead of the card's creation date.
+
+Migrate with:
+
+```
+node <plugin>/scripts/cards-split.mjs --dir app/kanban [--dry-run]
+```
+
+It writes the files, re-runs `gen`, and compares the output byte for byte with
+what was there before; on any difference it puts everything back exactly as it
+was and exits non-zero. `cards-join.mjs` is the way back, with the same check.
+Upgrade every session before splitting — an older `gen` cannot see the card
+directory. Left unset, output is byte-identical to a board without the feature.
+
+## Card CLI
+
+```
+node <plugin>/scripts/ddd.mjs card new backlog|decision [--title "…"] [--line C] [--session dev]
+node <plugin>/scripts/ddd.mjs card set <id> <field> <value> [--json]
+node <plugin>/scripts/ddd.mjs card status <id> <status> [--no-note]
+node <plugin>/scripts/ddd.mjs card note <id> "<text>"
+node <plugin>/scripts/ddd.mjs card link <id> "<title>" <href>
+node <plugin>/scripts/ddd.mjs card show|history <id>
+node <plugin>/scripts/ddd.mjs card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD]
+node <plugin>/scripts/ddd.mjs export [--out f.json]
+node <plugin>/scripts/ddd.mjs pr-sync […]
+```
+
+`card new` allocates the next id and reserves it: with one file per card it
+creates the file with `openSync(path, 'wx')`, so two sessions racing for the same
+number both succeed and the loser steps to the next one. It fills a template
+whose prose fields are `<…>` placeholders to be replaced; `--from file.json`
+overrides any of them.
+
+The write commands check what they write — the status has to be one the board
+declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number, `#12`
+or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session tag in
+`config.sessionTags`. An unrecognised field only warns, since boards grow fields;
+`order` cannot be changed at all, because it is the display order. `card status`
+appends a dated timeline line unless told not to, and `card link` dedupes by href
+and writes a link to this repository's pull request into the `pr` field too.
+
+Every write goes through a temp file and a rename, keeps the card's existing key
+order, slots only new keys into place, and ends with two-space indentation and a
+trailing newline. Nothing is ever committed for you. `--json` gives machine
+output (on `card set` it also means the value itself is JSON), and `--dir` picks
+the board the same way `gen` does. Boards without a card directory work too: the
+CLI rewrites the manifest as a whole there.
 
 ## License
 
