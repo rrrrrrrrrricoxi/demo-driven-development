@@ -1115,6 +1115,9 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   const pv = litePreview('a'.repeat(100) + '\n\n' + 'b'.repeat(500), 400)
   ok(pv.head === 'a'.repeat(100) && pv.rest === 502, '预览按段落边界截:只取第一段;rest = 原文字符数 − 预览字符数', JSON.stringify(pv))
   ok(litePreview('c'.repeat(3000), 400).rest === 0, '单段巨长文没有段落边界可切 → 不拆,留给高度折叠')
+  ok(litePreview('a'.repeat(794) + '\n\n' + 'b'.repeat(81), 400).rest === 0,
+    '首段自己就超 n:同样没有 ≤ n 的段落边界可切 → 不拆(否则预览到 2n 字,还把高度折叠一并让掉)')
+  ok(litePreview('a'.repeat(400) + '\n\n' + 'b'.repeat(81), 400).rest === 83, '首段正好 n 字仍然切得动')
   ok(litePreview('短', 400).rest === 0 && litePreview('', 400).rest === 0, '短文本 / 空文本不折叠')
 
   // ---- gen 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
@@ -1129,8 +1132,11 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   wr(decP, dec)
   const bl = rd(blP)
   bl.tiers = { 1: '核心' }
+  const LONGHEAD = 'x'.repeat(700) + '\n\n尾段' // 首段自己就超 400:没有 ≤ 400 的段落边界可切
   bl.items = [{ id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: 'c',
-    problem: 'p', approach: LONG, note: '【2026-01-01】一行', area: 'x', source: 's' }]
+    problem: 'p', approach: LONG, note: '【2026-01-01】一行', area: 'x', source: 's' },
+  { id: 'BL-2', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1', title: 'd',
+    problem: 'p', approach: LONGHEAD, area: 'x', source: 's' }]
   wr(blP, bl)
   runGen(NEW_SCRIPTS, fx35.kb)
   const offSha = sha(idxP)
@@ -1153,6 +1159,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   ok(on.includes('<div class="tsec"><p>【2026-01-01】一行</p></div>'), '【日期】段包进 .tsec')
   ok(on.includes('<div class="lite lpre">') && on.includes('<div class="lite lfull" hidden>') &&
     /class="litemore" data-rest="\d+">展开 · 还有 \d+ 字</.test(on), '超 400 字的字段烤成预览 + 全文两份 + 展开钮')
+  ok(count(on, '<div class="lite lpre">') === 1 && on.includes('<div class="lite"><p>' + 'x'.repeat(700)),
+    '首段自己就超 400 的字段不烤预览:整篇一份,交给高度折叠 —— 与「整篇一段」同一种处置')
   ok(on.includes('<div class="notes">') && !on.includes('<p class="notes">'), 'notes 容器换成 <div>(<p> 里塞不进 <p>/<ul>,解析器会当场闭合)')
   ok(on.includes('dd.demonote, div.notes') && on.includes("if (el.querySelector('.lfull'))"), 'clampScan 认 div.notes,并给拆过两份的字段让路(两套折叠不叠加)')
   ok(on.includes('<dd class="lsrc"><span class="bbadge src"><p>用户 <b>口述</b></p></span></dd>'), '决策卡 source 补渲染成同款小徽章(0.12.0 前是死数据)')
