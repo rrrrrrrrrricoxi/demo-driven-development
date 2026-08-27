@@ -26,6 +26,7 @@ import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
 import { dormantDate, settleHold, settleOf, staleLink } from './settle.mjs'
+import { CARD_KINDS, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -76,6 +77,62 @@ const tcMerge = (name, base) => {
 const m = JSON.parse(readFileSync(join(HERE, 'manifest.json'), 'utf8'))
 const b = JSON.parse(readFileSync(join(HERE, 'backlog-manifest.json'), 'utf8'))
 const dm = JSON.parse(readFileSync(join(HERE, 'decisions-manifest.json'), 'utf8'))
+// ———— 一卡一文件(v0.14.0,config.cardsDir;未配 = 一切照旧,输出逐字节冻结)————
+// 卡从 <cardsDir>/backlog/*.json 与 <cardsDir>/decisions/*.json 逐文件读,头文件只剩表头
+// ($comment / instance / statuses / priorities / tiers / groups)。文件按名排序后读,与文件系统顺序无关;
+// 显示顺序按拆分写入的 order(= 原数组下标)再按 id —— 数组顺序在这份 gen 里就是显示顺序
+// (截图廊组序靠 decisionRank、深链表 LAZY_IDMAP 靠键序、byDateDesc 是稳定排序)。
+const CARDS_DIR = cardsDirOf(cfg)
+const CARD_SRC = new Map() // id → 卡文件相对看板目录的路径(更新日期与报错点名共用)
+if (CARDS_DIR) {
+  const seen = new Map()
+  for (const kind of CARD_KINDS) {
+    const head = kind.key === 'items' ? b : dm
+    if (head[kind.key] !== undefined) throw new Error(GS.cardsDirHeadHasItems(kind.manifest, kind.key, CARDS_DIR))
+    const rel = `${CARDS_DIR}/${kind.sub}`
+    const scan = scanCardDir(join(HERE, CARDS_DIR, kind.sub))
+    if (scan.missing) throw new Error(GS.cardsDirMissing(rel))
+    for (const x of scan.bad) {
+      if (x.kind === 'parse') throw new Error(GS.cardParseFail(`${rel}/${x.file}`, x.message))
+      throw new Error(GS.cardIdMismatch(`${rel}/${x.file}`, x.id))
+    }
+    const list = []
+    for (const x of scan.cards) {
+      const id = String(x.card.id)
+      const prev = seen.get(id)
+      if (prev) throw new Error(GS.cardDupId(id, prev, `${rel}/${x.file}`))
+      seen.set(id, `${rel}/${x.file}`)
+      CARD_SRC.set(id, `${rel}/${x.file}`)
+      list.push(x.card)
+    }
+    head[kind.key] = stripOrder(sortCards(list))
+  }
+}
+// ———— 每卡更新日期(v0.14.0,仅 cardsDir 开)————
+// 一条 git log 批量取每个卡文件的最后提交日(不是一卡一条命令);照 docUpdated 的静默降级:
+// git 失败 / 文件还没提交 → 文件 mtime → 空。取的是已提交的事实,同一 commit 下同输出,不破确定性。
+const CARD_UPDATED = new Map() // id → 'YYYY-MM-DD' | ''
+if (CARDS_DIR) {
+  const byPath = new Map() // '<sub>/<id>.json' → 最后提交日(git 的路径相对仓根,不相对看板目录,故只认末两段)
+  try {
+    const out = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', CARDS_DIR],
+      { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+    let day = ''
+    for (const raw of out.split('\n')) {
+      const line = raw.trim()
+      if (!line) continue
+      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+      const k = line.split('/').slice(-2).join('/')
+      if (day && !byPath.has(k)) byPath.set(k, day) // git log 是新→旧,第一次见到即最后一次改动
+    }
+  } catch { /* 无 git / 命令失败 → 整批退 mtime */ }
+  for (const [id, rel] of CARD_SRC) {
+    let d = byPath.get(rel.split('/').slice(-2).join('/')) || ''
+    if (!d) { try { d = statSync(join(HERE, rel)).mtime.toISOString().slice(0, 10) } catch { d = '' } }
+    CARD_UPDATED.set(id, d)
+  }
+}
+const cardUpd = (id) => CARD_UPDATED.get(id) || ''
 // instance.ghRepo/branch 三 manifest 各存一份(现状,避免双真源迁移);不一致仅提醒,不阻断
 {
   const three = [['manifest', m], ['backlog-manifest', b], ['decisions-manifest', dm]]
@@ -608,10 +665,13 @@ const respChips = (entry) => {
   return ''
 }
 // 沉睡:ready + 有日期 + 一个 PR 都没挂。天数与阈值判定都在浏览器(gen 零时间),这里只烤日期。
+// cardsDir 开着时天数从「卡文件最后改动日」起算 —— 比建卡 date 诚实(0.13.0 用 date 是当时没有更好的事实)。
 const dormChip = (entry) => {
   if (!RESP) return ''
   const d = dormantDate(entry)
-  return d && !prsOfCard(entry, PR_REPO).length ? `<span class="rspdorm" data-dorm="${esc(d)}" hidden></span>` : ''
+  return d && !prsOfCard(entry, PR_REPO).length
+    ? `<span class="rspdorm" data-dorm="${esc((CARDS_DIR && cardUpd(entry.id)) || d)}" hidden></span>`
+    : ''
 }
 // links 里指向本仓 /pull/N 的链接:补真实状态后缀;标题里手写的状态词若已过时,划掉(不改数据)。
 // 复用 prsOfCard 认号 —— 与卡的 PR 集合同一条口径,不另写一遍 href 正则。
@@ -1302,7 +1362,8 @@ const lineTag = (l) =>
     .filter(Boolean)
     .map((x) => `<span class="rline line-${esc(x)}">${esc(x)}</span>`)
     .join('')
-const rowHead = ({ id, badge, title, tags = '', line = '', date = '' }) => `
+// upd(v0.14.0,仅 cardsDir 开)= 卡文件最后改动日;date 是建卡日,两个说的不是一件事,并排放
+const rowHead = ({ id, badge, title, tags = '', line = '', date = '', upd = '' }) => `
     <div class="rhead">
       <span class="tid">${esc(id)}</span>
       ${badge}
@@ -1310,7 +1371,7 @@ const rowHead = ({ id, badge, title, tags = '', line = '', date = '' }) => `
       ${tags ? `<span class="rtags">${tags}</span>` : ''}
       <span class="rspacer"></span>
       ${lineTag(line)}
-      ${date ? `<span class="cdate">${esc(date.slice(5))}</span>` : ''}
+      ${date ? `<span class="cdate">${esc(date.slice(5))}</span>` : ''}${upd ? `<span class="udate" title="卡文件最后改动 ${esc(upd)}">更新 ${esc(upd.slice(5))}</span>` : ''}
       <span class="rtoggle" aria-hidden="true">▾</span>
     </div>`
 
@@ -1553,6 +1614,7 @@ const blCard = (it) => `
       tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}${respChips(it)}${dormChip(it)}`,
       line: blLine(it),
       date: it.date,
+      upd: cardUpd(it.id),
     })}
     <div class="rbody">
       <div class="blbadges">
@@ -1698,6 +1760,7 @@ const decCard = (e) => {
       tags,
       line: decLine(e),
       date: e.date,
+      upd: cardUpd(e.id),
     })}
     <div class="rbody">
       <dl>
@@ -3131,6 +3194,11 @@ const WIP_CSS = !WIP ? '' : `
      border: 1px solid var(--line); background: var(--bg); color: var(--mut); }
   .wipbar[hidden] { display: none; }
   .wipbar.wip-hard { border: 1px solid #d44c47; border-left-width: 3px; background: #fdf3f2; color: #d44c47; font-weight: 600; }`
+// 每卡更新日期:与建卡日 .cdate 同一族的灰字,安静地跟在它后面(cardsDir 关 = 空串)。
+// 只用 var(--faint) 这类已有变量 —— 不引新色,暗档自然跟着走。
+const CARDS_CSS = !CARDS_DIR ? '' : `
+  /* ============ 每卡更新日期(v0.14.0,config.cardsDir)============ */
+  .udate { margin-left: 7px; font-size: 10.5px; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }`
 
 // ============================================================================
 //  组装 index.html
@@ -3752,7 +3820,7 @@ const html = `<!doctype html>
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">

@@ -40,6 +40,14 @@ const zh = {
     `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
   wipOver: (n, hard) =>
     `⚠ 看板守卫:可立即做(ready)的卡有 ${n} 张,超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
+  cardsDirMissing: (rel) =>
+    `⚠ 看板守卫:config.cardsDir 开着,但卡目录 ${rel} 不在 —— gen 会硬失败,看板停在上一版。建目录或把 cardsDir 从 kanban.config.json 去掉。`,
+  cardIdBad: (rows, total) =>
+    `⚠ 看板守卫:${total} 个卡文件的文件名与卡里的 id 对不上 —— 文件名就是卡号(一个真源),对不上 gen 会硬失败:\n` +
+    rows.map((r) => `  - ${r.file}(id 是「${r.id}」)`).join('\n'),
+  cardParseBad: (rows, total) =>
+    `⚠ 看板守卫:${total} 个卡文件不是合法 JSON —— gen 会硬失败,看板停在上一版:\n` +
+    rows.map((r) => `  - ${r.file}:${r.message}`).join('\n'),
   ghprRemindMerge:
     '[看板提醒] 刚合了一个 PR。跑 `node <plugin>/scripts/pr-sync.mjs --settle`:它先把 gh 上的 PR 与版本同步进 release-manifest.json,再列出「PR 都合了、卡还没收」的卡与建议 status(默认只打印;确认无误后加 --write 收账)。顺手核一遍卡的 links 标题:状态词(开而不合 / 待合 / 已合)不必手写,看板会按实际状态渲染。与看板无关则忽略。',
   ghprRemind:
@@ -62,6 +70,33 @@ const zh = {
     settleOnlyBad: (ids) => `pr-sync --settle --only:这些卡号不在上面的待收账清单里,本次一个字节都没写:${ids.join(' ')}\n  对着清单核卡号;写了 settleHold 的卡本来就不在清单里(要收它,先删掉卡上的 settleHold)。`,
     settleDryWins: () => 'pr-sync:--dry-run 与 --write 同时给了,按 --dry-run 处理 —— 只打印,不写。',
     settleReformat: (file) => `pr-sync --settle --write:${file} 的排版不是 JSON.stringify(…, null, 2) 的标准形制,拒绝改写(重排会动到其它卡的字节)。这几张卡请手工收账。`,
+  },
+  cards: {
+    alreadySplit: (dir) => `cards-split:kanban.config.json 已经配了 cardsDir = "${dir}",这块板已是一卡一文件。要反向合回单文件用 cards-join.mjs。`,
+    notSplit: () => 'cards-join:kanban.config.json 没配 cardsDir,这块板还是单文件形制,没什么可合的。',
+    headNoArray: (file, key) => `cards-split:${file} 里没有 ${key} 数组,不知道要拆什么 —— 这块板的形制不对,先核对 manifest。`,
+    headHasArray: (file, key) => `cards-join:${file} 里已经有 ${key} 数组(一个真源被破坏了)——先手工清理头文件再合。`,
+    dirNotEmpty: (rel) => `cards-split:${rel} 已存在且非空,拒绝往里拆(怕盖掉已有的卡)。换一个目录名,或先清空。`,
+    idBad: (id, why) => `卡 id「${id}」${why}`,
+    idEmpty: () => '是空的 —— 每张卡都要有 id,文件名就是它',
+    idUnsafe: () => '不能当文件名(含 / \\ 或 .. 或前后空白)',
+    idDup: (id) => `卡 id「${id}」出现了两次 —— 拆开之后会是同一个文件名,先把重复的改掉`,
+    orderTaken: (id) => `卡「${id}」已经有 order 字段了 —— 拆分要用这个名字记原数组下标,请先给它改个名`,
+    dirMissing: (rel) => `cards-join:卡目录 ${rel} 不在(相对看板目录),没得可合`,
+    parseBad: (rel, err) => `cards-join:卡文件 ${rel} 不是合法 JSON,拒绝合并(会把这张卡弄丢):${err}`,
+    idMismatch: (rel, id) => `cards-join:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,先改一致再合`,
+    dryRun: (rows, total) =>
+      `cards-split --dry-run:将生成 ${total} 个卡文件\n` + rows.map((r) => `  ${r.rel}/  ${r.n} 个`).join('\n') + '\n未写任何文件。',
+    dryRunJoin: (rows, total) =>
+      `cards-join --dry-run:将合回 ${total} 张卡\n` + rows.map((r) => `  ${r.rel}/  ${r.n} 个 → ${r.file} 的 ${r.key}`).join('\n') + '\n未写任何文件。',
+    genFailed: (err) => `gen.mjs 跑不过,已回滚(看板与拆分前一模一样):\n${err}`,
+    diffFound: (files) => `拆分前后的产物对不上,已回滚(看板与拆分前一模一样)。对不上的:${files}\n这是 0.14.0 的验收门 —— 不相同就不算拆成功,请把差异报上游。`,
+    diffFoundJoin: (files) => `合并前后的产物对不上,已回滚(看板与合并前一模一样)。对不上的:${files}`,
+    splitDone: (total, rows, dir) =>
+      `cards-split:${total} 张卡 → ${rows.map((r) => `${r.rel}/ ${r.n} 个`).join(' · ')};头文件已去掉数组,kanban.config.json 写入 cardsDir = "${dir}"。\n` +
+      '产物与拆分前逐字节相同(除新增的每卡「更新」时间戳)。请把整批改动作为一个 commit 提交,message 写明是 rename 性质。',
+    joinDone: (total, files) => `cards-join:${total} 张卡合回 ${files};卡文件与目录已删除,kanban.config.json 去掉了 cardsDir。产物与合并前逐字节相同。`,
+    baselineFailed: (err) => `跑不出「改动前」的基准产物(gen.mjs 先失败了),一个字节都没写:\n${err}`,
   },
   init: {
     portCaveat: zhPortCaveat,
@@ -234,6 +269,14 @@ const en = {
     `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
   wipOver: (n, hard) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  cardsDirMissing: (rel) =>
+    `⚠ Kanban guard: config.cardsDir is set but the card directory ${rel} is not there — gen will fail hard and the board stays on its last version. Create the directory, or drop cardsDir from kanban.config.json.`,
+  cardIdBad: (rows, total) =>
+    `⚠ Kanban guard: ${total} card file(s) have a filename that does not match the id inside — the filename is the card id (one source of truth), and gen fails hard on a mismatch:\n` +
+    rows.map((r) => `  - ${r.file} (its id is "${r.id}")`).join('\n'),
+  cardParseBad: (rows, total) =>
+    `⚠ Kanban guard: ${total} card file(s) are not valid JSON — gen will fail hard and the board stays on its last version:\n` +
+    rows.map((r) => `  - ${r.file}: ${r.message}`).join('\n'),
   ghprRemindMerge:
     '[Kanban reminder] A pull request was just merged. Run `node <plugin>/scripts/pr-sync.mjs --settle`: it syncs pull requests and releases from gh into release-manifest.json, then lists the cards whose pull requests are all merged while the card is not settled, with a suggested status (printing only by default; add --write once the list looks right). While you are there, check the link titles on those cards — hand-written status words are no longer needed, the board renders the real state.',
   ghprRemind:
@@ -256,6 +299,33 @@ const en = {
     settleOnlyBad: (ids) => `pr-sync --settle --only: these card ids are not in the list above, so nothing was written: ${ids.join(' ')}\n  Check them against the list; a card carrying settleHold is never in it (remove that field first if you mean to settle it).`,
     settleDryWins: () => 'pr-sync: both --dry-run and --write were given; --dry-run wins — printing only, nothing written.',
     settleReformat: (file) => `pr-sync --settle --write: ${file} is not formatted the way JSON.stringify(…, null, 2) writes it, so it is left alone (rewriting it would touch bytes of other cards). Settle those cards by hand.`,
+  },
+  cards: {
+    alreadySplit: (dir) => `cards-split: kanban.config.json already sets cardsDir = "${dir}"; this board is already one file per card. Use cards-join.mjs to go back to single files.`,
+    notSplit: () => 'cards-join: kanban.config.json has no cardsDir, so this board is still single-file — nothing to join.',
+    headNoArray: (file, key) => `cards-split: ${file} has no ${key} array, so there is nothing to split — check the manifest shape first.`,
+    headHasArray: (file, key) => `cards-join: ${file} already has a ${key} array (the one-source-of-truth rule is broken); clean up the header file by hand before joining.`,
+    dirNotEmpty: (rel) => `cards-split: ${rel} already exists and is not empty; refusing to split into it (existing cards could be overwritten). Pick another directory name, or empty it first.`,
+    idBad: (id, why) => `card id "${id}" ${why}`,
+    idEmpty: () => 'is empty — every card needs an id, and the filename is it',
+    idUnsafe: () => 'cannot be a filename (it contains / \\ or .. or leading/trailing whitespace)',
+    idDup: (id) => `card id "${id}" appears twice — after the split both would be the same filename; rename one first`,
+    orderTaken: (id) => `card "${id}" already has an "order" field — the split needs that name to record the original array index; rename the field first`,
+    dirMissing: (rel) => `cards-join: the card directory ${rel} is not there (relative to the kanban directory); nothing to join`,
+    parseBad: (rel, err) => `cards-join: card file ${rel} is not valid JSON, refusing to join (that card would be lost): ${err}`,
+    idMismatch: (rel, id) => `cards-join: card file ${rel} does not match the id "${id}" inside it; make them agree first`,
+    dryRun: (rows, total) =>
+      `cards-split --dry-run: would write ${total} card file(s)\n` + rows.map((r) => `  ${r.rel}/  ${r.n}`).join('\n') + '\nNothing was written.',
+    dryRunJoin: (rows, total) =>
+      `cards-join --dry-run: would join ${total} card(s) back\n` + rows.map((r) => `  ${r.rel}/  ${r.n} → ${r.key} of ${r.file}`).join('\n') + '\nNothing was written.',
+    genFailed: (err) => `gen.mjs failed; rolled back (the board is exactly as it was before):\n${err}`,
+    diffFound: (files) => `The generated output differs before and after the split; rolled back (the board is exactly as it was before). Differing: ${files}\nByte-for-byte equality is the acceptance gate for this change — please report the difference upstream.`,
+    diffFoundJoin: (files) => `The generated output differs before and after the join; rolled back (the board is exactly as it was before). Differing: ${files}`,
+    splitDone: (total, rows, dir) =>
+      `cards-split: ${total} card(s) → ${rows.map((r) => `${r.rel}/ ${r.n}`).join(' · ')}; the array was removed from each header file and kanban.config.json now has cardsDir = "${dir}".\n` +
+      'The generated output is byte-for-byte identical to before the split (apart from the new per-card "updated" stamps). Commit the whole batch as one commit and say in the message that it is a rename.',
+    joinDone: (total, files) => `cards-join: ${total} card(s) joined back into ${files}; the card files and directories are gone and cardsDir was removed from kanban.config.json. The generated output is byte-for-byte identical to before the join.`,
+    baselineFailed: (err) => `Could not produce the "before" baseline (gen.mjs failed first); nothing was written:\n${err}`,
   },
   init: {
     portCaveat: enPortCaveat,
@@ -444,6 +514,11 @@ const genZh = {
   accManifestMissing: (err) => `kanban.config.json 开了 acceptanceTab,但看板目录的 acceptance-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/acceptance-manifest.json;不想开就把 acceptanceTab 去掉)`,
   relManifestMissing: (err) => `kanban.config.json 开了 releaseTab,但看板目录的 release-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/release-manifest.json,内容由 scripts/pr-sync.mjs 填;不想开就把 releaseTab 去掉)`,
   relStagesNoDev: () => 'release-manifest.json 的 stages 里没有 id 为 "dev" 的段:dev(开着的 PR)是必备段,宿主可以只列两段但不能省掉 dev(缺 test = 合了即发,是允许的)',
+  cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json 配了 cardsDir = "${dir}"(一卡一文件),${file} 里却还留着 ${key} 数组 —— 两处都能写的字段迟早对不上。卡的真源是 ${dir}/ 下的文件,把头文件的 ${key} 删掉(或跑 scripts/cards-join.mjs 合回单文件并去掉 cardsDir)`,
+  cardsDirMissing: (rel) => `kanban.config.json 配了 cardsDir,但卡目录 ${rel} 不在(相对看板目录)—— 建目录并把卡放进去,或把 cardsDir 去掉退回单文件形制`,
+  cardParseFail: (rel, err) => `卡文件 ${rel} 不是合法 JSON:${err}`,
+  cardIdMismatch: (rel, id) => `卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上 —— 文件名就是卡号(一个真源),改文件名或改 id`,
+  cardDupId: (id, a, z) => `卡 id「${id}」出现了两次:${a} 与 ${z} —— 深链、截图廊归组、懒加载定位全按 id 走,重复即互相顶掉`,
 }
 const genEn = {
   cfgMissingBrand: () => 'kanban.config.json is missing "brand"',
@@ -474,5 +549,10 @@ const genEn = {
   accManifestMissing: (err) => `kanban.config.json enables acceptanceTab, but the board's acceptance-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/acceptance-manifest.json; drop acceptanceTab to turn the tab off)`,
   relManifestMissing: (err) => `kanban.config.json enables releaseTab, but the board's release-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/release-manifest.json, filled in by scripts/pr-sync.mjs; drop releaseTab to turn the tab off)`,
   relStagesNoDev: () => 'release-manifest.json has no stage with id "dev": dev (open pull requests) is required. A board may list only two stages, but not drop dev (dropping test — "merged means shipped" — is fine)',
+  cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json sets cardsDir = "${dir}" (one file per card), yet ${file} still has a ${key} array — two writable places for the same field drift apart sooner or later. The cards live under ${dir}/; delete ${key} from the header file (or run scripts/cards-join.mjs to go back to single files and drop cardsDir)`,
+  cardsDirMissing: (rel) => `kanban.config.json sets cardsDir, but the card directory ${rel} is not there (relative to the kanban directory) — create it and put the cards in, or drop cardsDir to stay on single-file manifests`,
+  cardParseFail: (rel, err) => `card file ${rel} is not valid JSON: ${err}`,
+  cardIdMismatch: (rel, id) => `card file ${rel} does not match the id "${id}" inside it — the filename is the card id (one source of truth); rename the file or change the id`,
+  cardDupId: (id, a, z) => `card id "${id}" appears twice: ${a} and ${z} — deep links, screenshot grouping and lazy-pane routing all work by id, so duplicates shadow each other`,
 }
 export function genStrings(lang) { return lang === 'en' ? genEn : genZh }
