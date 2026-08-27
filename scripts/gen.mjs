@@ -3235,10 +3235,12 @@ const html = `<!doctype html>
   a { color: inherit; }
   .wrap { max-width: 1060px; margin: 0 auto; padding: 20px 20px 80px; }
 
-  .tabbar { display: flex; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .tabbar { display: flex; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 14px;
+            overflow-x: auto; scrollbar-width: none; }
+  .tabbar::-webkit-scrollbar { display: none; }
   .tab { appearance: none; border: 0; background: none; cursor: pointer; font: inherit;
          padding: 9px 16px; margin-bottom: -1px; color: var(--mut); font-weight: 600;
-         border-bottom: 2px solid transparent; }
+         border-bottom: 2px solid transparent; white-space: nowrap; flex: none; }
   .tab:hover { color: var(--ink); }
   .tab-active { color: var(--accent); border-bottom-color: var(--accent); }
   /* 链接型 tab(出站到 shots.html):形制同 tab,右端对齐,尾缀 ↗ 标出站 */

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。465 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。469 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -7,7 +7,8 @@
 // 进度响应(settle/reopen/stale-link/dormant 穷举 + 芯片 + 待收账段 + 守卫 + pr-sync --settle)、
 // done 卡归档(独立 pane + lazy 第三个 part + 深链映射)、积压提醒 wip(三档 + 守卫)、
 // 发布进度时间线几何(轴按繁忙度加宽 / 刻度不压字 / 泳道封顶 / 带高有上界)、
-// 暂不收账 settleHold(三种卡的灰芯片 + 待收账段/守卫闭嘴 + pr-sync --settle --only 挑着收)等。
+// 暂不收账 settleHold(三种卡的灰芯片 + 待收账段/守卫闭嘴 + pr-sync --settle --only 挑着收)、
+// tab 条 nowrap(中文/· 断行点回归锚 + 横向滚动)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -1901,6 +1902,23 @@ esac
   const rDone = runSync(['--settle'])
   ok(/没有待收账|nothing to settle/.test(rDone.stdout) && /已 hold\(2\)/.test(rDone.stdout),
     '清单空了也照报「已 hold」—— 挂起的账不能就此消失在视野里', rDone.stdout)
+}
+
+// ============ T47 tab 条不折行(BL-C91 同根:中文/「·」都是合法断行点)============
+// .tabbar 是 flex 行,.tab 一旦可换行,中等宽度下「进度看板」「决策·Demo · 112」这类长标签
+// 就在中文字间或 · 处断成两行,整条 tabbar 被撑成两倍高。钉 nowrap + flex: none,并让
+// tabbar 本身横向可滚动(溢出时滚动而不是折行)。
+console.log('T47 tab 条不折行')
+{
+  const fx47 = mkFixture('fx47', { 's.html': demoHtml('s') })
+  runGen(NEW_SCRIPTS, fx47.kb)
+  const idx = readFileSync(join(fx47.kb, 'index.html'), 'utf8')
+  const tabRule = (idx.match(/\.tab\s*\{[^}]*\}/) || [''])[0]
+  const tabbarRule = (idx.match(/\.tabbar\s*\{[^}]*\}/) || [''])[0]
+  ok(/white-space:\s*nowrap/.test(tabRule), '.tab 钉了 white-space: nowrap(中文/· 都可断行 → 逐字竖排)', tabRule.slice(0, 120))
+  ok(/flex:\s*none/.test(tabRule), '.tab 钉了 flex: none(不跟着挤压收缩)', tabRule.slice(0, 120))
+  ok(/overflow-x:\s*auto/.test(tabbarRule), '.tabbar 窄视口下横向滚动而不是折行', tabbarRule.slice(0, 160))
+  ok(idx.includes('class="tab tab-shots"'), '截图出站 tab 仍带 .tab 类(同吃 nowrap/flex:none)')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

@@ -64,6 +64,16 @@ downgrade would freeze every already-stamped board. See
   and the drawing cannot drift apart (they did in the prototype), and the tests
   exercise the same source the browser runs.
 
+### Fixed
+- Tab labels wrapped onto two lines at medium viewport widths, doubling the
+  height of the tab bar. `.tabbar` is a flex row and `.tab` had no
+  `white-space` declaration, so CJK text breaks between any two characters and
+  a label like "决策·Demo · 112" could fold at the character before or after
+  "·". `.tab` (and the linked "截图" tab, which shares the class) is now
+  `white-space: nowrap` and `flex: none`; `.tabbar` scrolls horizontally
+  instead of wrapping when its tabs no longer fit. This changes rendered
+  output on every board, not only affected ones.
+
 ## [0.13.0] - 2026-08-27
 
 ### Added
