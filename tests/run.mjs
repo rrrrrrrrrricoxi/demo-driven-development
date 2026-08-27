@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。733 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。750 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -18,7 +18,9 @@
 // 总览落地页 overviewTab(四拍冻结 × lazy 开关 / 各行随数据源出没 / 迭代史折叠含原任务表 / 深链先展开折叠)、
 // 决策路径入文档库 pathTab:"docs"(四拍冻结 / refs 文档页 + Hub 条目 / 相对链接各退一级 / #path 改落文档库 / out 撞名硬报错)、
 // 验收/发布进度也进 parts(壳里零烤入数据 / 数据块随 part 走 / init 幂等 / 跨 part 取分子 /
-// #acc-*、#pr-* 深链映射 / LAZY_BYTES 五项对账 / 守卫缺件自愈 / 单独关一个 tab 只清一份)等。
+// #acc-*、#pr-* 深链映射 / LAZY_BYTES 五项对账 / 守卫缺件自愈 / 单独关一个 tab 只清一份)、
+// 时间线 hover peek(四拍冻结 / 原生 title 撤干净 / 条与段都可聚焦 / 内容现取不烤第二份 /
+// 150ms 防抖与捕获委托 / 触摸两下 / z-index 压得住 tabrail / 不引新色 / part 里一个字不多)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -3188,6 +3190,103 @@ console.log('T60 验收/发布进度进 parts')
   runGen(NEW_SCRIPTS, fx60.kb)
   ok(!existsSync(join(fx60.kb, 'parts')), '关回 lazyTabs:五个 part 全清,目录一并清除')
   ok(sha(idxP) === flatSha, '关回后 index 与单文件基线逐字节相同')
+}
+
+// ============ T61 时间线 hover peek(自绘卡顶掉原生 title;releaseTab 关档照旧四拍冻结)============
+console.log('T61 时间线 hover peek')
+{
+  const fx61 = mkFixture('fx61', { 's.html': demoHtml('s') })
+  const cfgP = join(fx61.kb, 'kanban.config.json'), idxP = join(fx61.kb, 'index.html')
+  const relP = join(fx61.kb, 'release-manifest.json')
+  const mP = join(fx61.kb, 'manifest.json'), decP = join(fx61.kb, 'decisions-manifest.json'), blP = join(fx61.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '待办甲', pr: 230 }]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  wr(relP, REL_MANIFEST)
+  const cfg = rd(cfgP)
+  cfg.tabRail = true // peek 得压得住左侧竖导航,z-index 那条断言才有对手
+  wr(cfgP, cfg)
+
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, fx61.kb)
+  const offSha = sha(idxP)
+  ok(!readFileSync(idxP, 'utf8').includes('relpeek'), '未配 releaseTab:壳里零 peek 痕迹')
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx61.kb)
+  ok(sha(idxP) === offSha, 'releaseTab:false 与未配逐字节相同(冻结)')
+
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx61.kb)
+  ok(r.status === 0, 'releaseTab:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(count(on, "pk.className = 'relpeek'") === 1 && count(on, 'document.body.appendChild(pk)') === 1,
+    'peek 容器只建一份、挂在 body 上(时间线自己在横向滚动容器里,卡跟着滚就贴不住锚点)')
+  {
+    const tlb = on.slice(on.indexOf('function tlBar('), on.indexOf('// ———— hover peek'))
+    ok(tlb.length > 200 && !tlb.includes('title=') && tlb.includes('tabindex="0"') && tlb.includes("data-relpk=") ,
+      '条/方块不再写原生 title(截断、要等、还与自绘卡叠成两层),改挂 data-relpk + 显式 tabindex', tlb.slice(-180))
+  }
+  ok(/class="relsp relc s-' \+ g\.sg \+ ' q' \+ g\.q \+ '" tabindex="0"'/.test(on) &&
+    on.includes("data-relpkg=") && on.includes("data-relpkd="),
+    '折叠带上的一段(= 那条带的那一天)同样可聚焦,并挂上带 / 日两个钩子')
+  ok(on.includes("pkCell(n, '.rc-d')") && on.includes("pkCell(n, '.rc-b')") &&
+    on.includes(".rc-a [data-acc]") && on.includes('var d = byN[n]'),
+    'peek 内容全从已烤入的 D 与表格那一行现取(状态·日期 / 分支 / 验收分子),不烤第二份')
+  ok(/pkT = setTimeout\(function \(\) \{ pkT = 0; if \(pkFor === el\) pkShow\(el\) \}, 150\)/.test(on) &&
+    on.includes('if (el) pkOver(el, false) })'),
+    '鼠标停够 150ms 才浮出(扫过一排不该抖出一串),键盘获焦不等')
+  ok(on.includes("host.addEventListener('mouseenter', function (ev) { var el = pkAt(ev); if (el) pkOver(el, true) }, true)") &&
+    on.includes("host.addEventListener('mouseleave', function (ev) { if (pkAt(ev)) pkSoon() }, true)"),
+    'mouseenter / mouseleave 走捕获委托 —— 两者都不冒泡,而 drawTl 每次整块换 innerHTML')
+  ok(on.includes("if (ev.pointerType !== 'touch') return") &&
+    /if \(!el \|\| \(el === pkFor && !pk\.hidden\)\) return\n\s*ev\.preventDefault\(\)/.test(on),
+    '触摸屏没有 hover:第一下只出卡,第二下才放行链接')
+  ok(on.includes("if (ev.key === 'Escape') pkHide()") && on.includes("pksc.addEventListener('scroll', pkHide)"),
+    'Esc 收起;时间线一横滚锚点就跑了,与其错位不如收起')
+  {
+    const railZ = Number((on.match(/\.tabrail:not\(\[hidden\]\)[^}]*z-index: (\d+)/) || [, '0'])[1])
+    const pkZ = Number((on.match(/\.relpeek \{[^}]*z-index: (\d+)/) || [, '0'])[1])
+    ok(railZ > 0 && pkZ > railZ, `peek 的 z-index ${pkZ} 压在 tabrail ${railZ} 之上`)
+  }
+  ok(/\.relpeek \{[^}]*max-width: 320px/.test(on), '卡宽封在 320px(读一眼的量,不是第二张表)')
+  { // 「不引新色」的真检法:peek 那几条里出现的色值,样式表里别处已经在用(与总览那条同一把尺)
+    const styleAll = on.slice(on.indexOf('<style>'), on.indexOf('</style>'))
+    const cut = styleAll.indexOf('/* hover peek(v0.15.2)')
+    const end = styleAll.indexOf('@media (max-width: 820px)', cut)
+    const pkCss = styleAll.slice(cut, end)
+    const rest = styleAll.slice(0, cut) + styleAll.slice(end)
+    const cols = [...new Set([...(pkCss.match(/#[0-9a-fA-F]{3,8}\b/g) || []), ...(pkCss.match(/rgba?\([^)]*\)/g) || [])])]
+    ok(pkCss.length > 300 && cols.every((c) => rest.includes(c)),
+      'peek CSS 不引新色:每个色值样式表别处已在用(暗档自然跟着同一条 light-dark 链)',
+      cols.filter((c) => !rest.includes(c)).join(' ') || pkCss.length + ' 字符')
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  { // lazy 档:时间线本来就是运行期画的,peek 整套都是壳里的代码,part 里一个字都不多
+    cfg.lazyTabs = true
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx61.kb)
+    const lzOn = readFileSync(idxP, 'utf8')
+    const pRel = readFileSync(join(fx61.kb, 'parts', 'release.html'), 'utf8')
+    ok(lzOn.includes("pk.className = 'relpeek'") && lzOn.includes('.relpeek {') && !pRel.includes('relpeek'),
+      'lazy 档:peek 的容器、样式与代码都在壳里,parts/release.html 一个字不多')
+    cfg.lazyTabs = false
+    wr(cfgP, cfg)
+  }
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx61.kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

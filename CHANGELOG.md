@@ -9,7 +9,28 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
-## [Unreleased]
+## [0.15.2] - 2026-08-27
+
+### Added
+- **Hover peek cards on the release timeline.** A PR opened and merged the same
+  day is drawn as a square a handful of pixels wide — too narrow for its own
+  number, let alone a title. All it had was the browser's native `title`
+  tooltip: it truncates, it takes a second to appear, and it would stack as a
+  second layer under anything the board drew itself. Hovering a bar or a square
+  (150 ms, so sweeping across a row does not flicker a trail of cards) or
+  tabbing onto one now floats a small card beside it: `PR #N` with the full
+  title, status and date, branch, the linked card chips (clicking one switches
+  pane, as in the table), and the acceptance count when that PR has a checklist.
+  Every field is read from data already baked into the page — the row in the
+  table right below — so nothing is baked a second time. The native `title` is
+  gone, bars and squares carry an explicit `tabindex`, `Esc` dismisses, and the
+  card stays put while the pointer is inside it so the chips are reachable.
+  On a collapsed version band, each segment stands for one day: hovering it
+  lists that day's PRs (number plus short title, capped at ten with "还有 N 个"),
+  while clicking the band header still expands it. Touch gets the two-tap
+  pattern — first tap shows the card, second follows the link. Works the same
+  with `lazyTabs` on and off; the whole thing lives in the shell, so
+  `parts/release.html` is byte-for-byte what it was.
 
 ### Changed
 - **`card new backlog`'s default tier is no longer always the first key in
