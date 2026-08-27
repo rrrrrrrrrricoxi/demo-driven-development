@@ -262,9 +262,11 @@ app/kanban/
   这些可选的也算)两边一起变,不会各说各话;截图廊那项照旧是出站链接。
 - **徽章同源**:线别/时间/搜索重算 tab 徽章时,rail 文案直接抄 tab 按钮的现值,两边不可能对不上。
 - **点击 = 同一条路**:走 tab 按钮那个 `show()` + `history.replaceState`,深链、懒加载 pane 行为不变;
-  切完滚回该 pane 顶部(内容整个换了,停在原来的滚动位置没有意义)。
-- **三道显隐门**:tab 条向上离开视口才出现(`IntersectionObserver`);窗口窄于 1200px 没有左侧留白,
-  永不出现;浏览器没有 `IntersectionObserver` 就静默不出现。
+  切完滚到 **tab 条**、贴 hubbar 下沿停住(v0.15.1)。落 pane 顶的话 tab 条正好被顶出视口,而 rail 只在
+  tab 条滑出时才在 —— 两头都看不见就丢了方位;停在 tab 条上,tab 条露出来,rail 按规则自行让位。
+- **三道显隐门**:tab 条向上离开视口才出现(`IntersectionObserver`,阈值 0 —— tab 条露出一丝就算在视口,
+  rail 让位);窗口窄于 1200px 没有左侧留白,永不出现;浏览器没有 `IntersectionObserver` 就静默不出现。
+  键盘焦点还落在 rail 里时(`:focus-visible`)先不收走,免得焦点掉回 body。
 - **不跟人抢地方**:它住在内容列之外的留白里,验收 pane 的分组目录、文档库的左导航都在列内,互不遮挡。
 - **字节冻结**:不配或 `false` 时输出逐字节不变。
 

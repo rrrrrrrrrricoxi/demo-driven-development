@@ -3934,7 +3934,7 @@ const TABRAIL_CSS = !TABRAIL ? '' : `
   .railitem { appearance: none; border: 0; background: none; cursor: pointer; font: inherit; font-size: 11.5px;
     font-weight: 600; line-height: 1.5; color: var(--mut); text-align: left; text-decoration: none;
     padding: 4px 7px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .railitem:hover { color: var(--ink); background: var(--card); }
+  .railitem:hover, .railitem:focus-visible { color: var(--ink); background: var(--card); }
   .railitem.on { color: var(--accent-deep); background: var(--accent-soft); }`
 const TABRAIL_SHOW = !TABRAIL ? '' : `
     document.querySelectorAll('.railitem[data-pane]').forEach((r) => r.classList.toggle('on', r.dataset.pane === name))`
@@ -3951,21 +3951,30 @@ const TABRAIL_JS = !TABRAIL ? '' : `
     if (!rail || !bar || typeof IntersectionObserver !== 'function') return // 没 IO 的旧浏览器:静默不出现
     var wide = window.matchMedia('(min-width: 1200px)') // 窄屏没有左侧留白,rail 永不显示
     var past = false
-    var apply = function () { rail.hidden = !(past && wide.matches) }
+    var held = false // 键盘焦点还落在 rail 里:先别收走,否则焦点掉回 body,人就断了线
+    var apply = function () { rail.hidden = !(held || (past && wide.matches)) }
     new IntersectionObserver(function (es) {
       var e = es[es.length - 1]
       past = !e.isIntersecting && e.boundingClientRect.top < 0 // 只认「向上滑出去」,别的方向离场不算
       apply()
-    }).observe(bar)
+    }, { threshold: 0 }).observe(bar) // 阈值 0:tab 条露出一丝就算「在视口」,rail 立刻让位给它
     if (wide.addEventListener) wide.addEventListener('change', apply)
+    // 只认键盘焦点(:focus-visible):鼠标点按钮在部分浏览器里也会得焦点,那种不该把 rail 钉住
+    rail.addEventListener('focusin', function (ev) {
+      try { held = !!(ev.target.matches && ev.target.matches(':focus-visible')) } catch (e) { held = false }
+      apply()
+    })
+    rail.addEventListener('focusout', function () { held = false; apply() })
     rail.addEventListener('click', function (ev) {
       var it = ev.target.closest('.railitem[data-pane]')
       if (!it) return // 截图那项是出站链接,照旧交给浏览器
       var name = it.dataset.pane
       show(name)
       history.replaceState(null, '', name === 'progress' ? '#' : '#' + name)
-      var pane = document.getElementById('pane-' + name) // 切了 tab 内容全变,回到该 pane 顶部
-      window.scrollTo({ top: pane ? Math.max(0, pane.getBoundingClientRect().top + window.scrollY - hubH - 8) : 0 })
+      // 落点是 tab 条,不是 pane 顶:落 pane 顶正好把 tab 条顶出视口,而 rail 只在 tab 条滑出时才在 ——
+      // 两头都看不见,人就丢了方位。停在 hubbar 下沿:tab 条露出来,rail 按规则自行让位。
+      // 懒加载 pane 注入的内容全在 tab 条下方,不动它的位置,所以注入后不必再滚一次。
+      window.scrollTo({ top: Math.max(0, bar.getBoundingClientRect().top + window.scrollY - hubH - 8) })
     })
   })()`
 

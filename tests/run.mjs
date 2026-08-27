@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。726 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。731 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -13,7 +13,8 @@
 // 写操作 CLI(建卡的号靠 openSync 'wx' 预留 —— 真起两个进程并发验 / 六种校验拒绝 / 时间线 /
 // 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)、
 // 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)、
-// 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门)、
+// 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门 /
+// 点了落到 tab 条而不是 pane 顶 + 键盘获焦不被收走)、
 // 总览落地页 overviewTab(四拍冻结 × lazy 开关 / 各行随数据源出没 / 迭代史折叠含原任务表 / 深链先展开折叠)、
 // 决策路径入文档库 pathTab:"docs"(四拍冻结 / refs 文档页 + Hub 条目 / 相对链接各退一级 / #path 改落文档库 / out 撞名硬报错)、
 // 验收/发布进度也进 parts(壳里零烤入数据 / 数据块随 part 走 / init 幂等 / 跨 part 取分子 /
@@ -2764,6 +2765,23 @@ console.log('T55 左侧竖向 tab 导航 tabRail')
     'CSS:默认不显示,显示规则整个包在宽屏媒体查询里,top 跟 --hubh(hubbar 实高)走')
   ok(!/#[0-9a-fA-F]{3}/.test(railCss) && railCss.length > 200,
     'rail CSS 零硬编码色值:只用既有 var(),暗档跟着同一条 light-dark 链走', railCss.length + ' 字符')
+  // ---- 0.15.1:点 rail 项落到 tab 条,不再落 pane 顶(落 pane 顶 = tab 条被顶出视口,rail 又只在那时才在) ----
+  {
+    const railStart = on.indexOf("var rail = document.querySelector('.tabrail')")
+    const railJs = on.slice(railStart, on.indexOf('})()', railStart) + 4)
+    const railClick = railJs.slice(railJs.indexOf("rail.addEventListener('click'"))
+    ok(/window\.scrollTo\(\{ top: Math\.max\(0, bar\.getBoundingClientRect\(\)\.top \+ window\.scrollY - hubH - 8\) \}\)/.test(railClick),
+      '点 rail 项:落点算式量的是 tab 条(bar),贴 hubbar 下沿停住', railClick.slice(-140))
+    ok(!/pane-'\s*\+\s*name/.test(railClick) && !/pane\.getBoundingClientRect/.test(railClick),
+      '点 rail 项:不再滚到 pane 顶(那会把 tab 条顶出视口,rail 也跟着隐,两头都看不见)')
+    ok(/\}, \{ threshold: 0 \}\)\.observe\(bar\)/.test(railJs),
+      'IO 阈值显式写 0:tab 条露出一丝就算「在视口」,rail 让位')
+    ok(/var held = false/.test(railJs) && /rail\.hidden = !\(held \|\| \(past && wide\.matches\)\)/.test(railJs) &&
+      railJs.includes("matches(':focus-visible')") && railJs.includes("rail.addEventListener('focusout'"),
+      '键盘焦点还落在 rail 里就先不收走(只认 :focus-visible,鼠标点不算)')
+    ok(railCss.includes('.railitem:hover, .railitem:focus-visible'),
+      'rail 项键盘获焦有可见样式(与 hover 同一档)')
+  }
   {
     const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
     let compiled = true
