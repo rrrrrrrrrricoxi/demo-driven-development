@@ -109,9 +109,11 @@ const zh = {
   node <plugin>/scripts/ddd.mjs <命令> [参数] [--dir <看板目录>] [--json]
 
 卡:
-  card new backlog|decision [--title "…"] [--line C] [--session dev] [--from f.json]
+  card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev] [--from f.json]
       建卡。卡号由脚本分配并独占预留(一卡一文件时用 openSync 'wx',抢输的自己退到下一号)。
       模板里的占位写成 <…>,建完把它们填掉;--from 给的字段覆盖模板。
+      backlog 卡的 tier:--tier 缺席时取现有非 done 卡里出现最多的那档(板上没有非 done 卡时
+      退回 tiers 表第一个键)。
   card set <id> <field> <value> [--json]
       改一个字段。--json:值按 JSON 解析(要写数组/对象用它,顺带把结果也打成 JSON)。
       校验:status ∈ 该类卡的 statuses、date 形如 YYYY-MM-DD、pr 形如 12 / "#12" / "owner/repo#12"、
@@ -430,10 +432,12 @@ const en = {
   node <plugin>/scripts/ddd.mjs <command> [args] [--dir <kanban dir>] [--json]
 
 Cards:
-  card new backlog|decision [--title "…"] [--line C] [--session dev] [--from f.json]
+  card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev] [--from f.json]
       Create a card. The script allocates the id and reserves it exclusively (with one file per
       card it uses openSync 'wx', so whoever loses the race steps to the next number instead).
       Template placeholders are written as <…>; fill them in. Fields from --from win over them.
+      A backlog card's tier: when --tier is omitted it takes whichever tier is most common among
+      the existing non-done cards (falling back to the first key in tiers when there are none).
   card set <id> <field> <value> [--json]
       Change one field. --json parses the value as JSON (use it for arrays and objects; the
       report comes back as JSON too).
