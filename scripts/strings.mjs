@@ -240,7 +240,7 @@ const zh = {
     planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore 已在,将并入缺失条目(去重):${items.join(' · ')}`,
     planSettingsAdd: (items) =>
       `[plan] .claude/settings.json 将并入 permissions.deny(去重,不动其他键):\n${items.map((d) => `  + ${d}`).join('\n')}`,
-    planSettingsOk: '[plan] .claude/settings.json:deny 三条已在,跳过',
+    planSettingsOk: '[plan] .claude/settings.json:deny 条目已齐,跳过',
     planClaudeAdd: (marker) => `[plan] CLAUDE.md 将追加节「${marker}」`,
     planClaudeOk: '[plan] CLAUDE.md:标记节已在,跳过',
     planMergeDeferred: '[plan] ⚠ 检出散落 demo 但骨架未立:本轮 apply 只铺骨架;骨架就绪后重跑 scan/plan/apply 归拢',
@@ -566,7 +566,7 @@ kanban.config.json). This command never commits — git add the card files yours
     planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore exists; missing entries will be merged in (deduped): ${items.join(' · ')}`,
     planSettingsAdd: (items) =>
       `[plan] .claude/settings.json will gain permissions.deny entries (deduped, other keys untouched):\n${items.map((d) => `  + ${d}`).join('\n')}`,
-    planSettingsOk: '[plan] .claude/settings.json: all three deny entries present, skipping',
+    planSettingsOk: '[plan] .claude/settings.json: every deny entry present, skipping',
     planClaudeAdd: (marker) => `[plan] CLAUDE.md will gain section "${marker}"`,
     planClaudeOk: '[plan] CLAUDE.md: marker section present, skipping',
     planMergeDeferred: '[plan] ⚠ scattered demos found but no skeleton yet: this apply only lays the skeleton; re-run scan/plan/apply to merge once it is in place',

@@ -15,7 +15,7 @@
 | 规则 | 段 | 省在哪 |
 |---|---|---|
 | 盘点走 `init.mjs --scan` 摘要,禁读 demo 正文 | init | 71 个 demo:摘要 ~70 行 vs 正文几十万 token |
-| **永不读生成物**(`index.html` / `shots.html` / `refs/**`)—— deny 规则硬拦 + CLAUDE.md 注入段拦 `cat` 绕读 | 日常 | 单次省 10 万+ |
+| **永不读生成物**(`index.html` / `shots.html` / `refs/**` / `parts/**`)—— deny 规则硬拦 + CLAUDE.md 注入段拦 `cat` 绕读 | 日常 | 单次省 10 万+ |
 | 查证走源头:卡状态 → `jq` 点查 manifest;文档 → 读 md 源;渲染对错 → gen 报错已由守卫喂回 | 日常 | manifest 是地基,`index.html` 是像素 |
 | manifest 不整读(可达数百 KB):`jq` / `Grep` 点查、聚合 | 日常 | 几百 token 替代几万 |
 | 归拢 / `mv` / 写存根由 `--apply` 一次批量完成 | init | N 次工具调用 → 1 次 |

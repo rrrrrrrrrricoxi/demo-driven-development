@@ -27,13 +27,13 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs apply --dir <projectRoot> <同 plan 
 
 ## 三种进场景
 
-**greenfield(全新项目)**:无 config、无散落、无旧装。apply 从 templates 铺骨架(config + 三 manifest + demos/ + shots/ + .no-card-ok + 看板侧 .gitignore + serve.py + serve-kanban.sh;path-manifest 叙事模块缺省不铺——对应标签页自动不出现,要就加 `--with-narrative`,已有该文件则原样尊重),settings 并入三条 deny(生成物不读),CLAUDE.md 追加 token 保护节。需要 `--brand`(喂看板标题等 ~8 处);端口缺省自 8898 探测当下空闲位——探测避不开「别的项目 config 里写了但没起」的端口,同机多项目需人工分配。
+**greenfield(全新项目)**:无 config、无散落、无旧装。apply 从 templates 铺骨架(config + 三 manifest + demos/ + shots/ + .no-card-ok + 看板侧 .gitignore + serve.py + serve-kanban.sh;path-manifest 叙事模块缺省不铺——对应标签页自动不出现,要就加 `--with-narrative`,已有该文件则原样尊重),settings 并入四条 deny(生成物不读),CLAUDE.md 追加 token 保护节。需要 `--brand`(喂看板标题等 ~8 处);端口缺省自 8898 探测当下空闲位——探测避不开「别的项目 config 里写了但没起」的端口,同机多项目需人工分配。
 
 **散落资源(brownfield)**:repo 里有零散 demo、无看板。流程两轮:第一轮 apply 只铺骨架(manifest 是存根卡落点,骨架先立);重跑 scan/plan 审归拢计划,再次 apply 归拢——tracked → `git mv`、untracked → mv + git add、无 git 仓库明示「无历史可保、无回退点」;同名冲突不覆盖、改名 `.vN` 归档人裁决;demo 引用的兄弟资产随迁;同层非 HTML 资源(如 .xlsx)缺省只列名不动,`--take-assets` 才随归拢一起迁(同名不覆盖);md 断链只报告不改写(策略 B);每个归拢 demo 落最小存根卡(id + code + 标题 + 日期 + demo 链接 + status);断链/冲突自动落 backlog 遗留卡——报告会被冲走,卡不会丢。
 
 **归拢挑选(--only / --exclude)**:候选不都该进看板——⚠ **应用页面勿归拢**:产品本体 HTML(如 webapp/app.html 这类被应用直接 serve 的页面)含 `<html` 就会被当 demo 候选,一锅端 `git mv` 进 demos/ 会弄断项目自己的 serve 路径。归拢前先看 plan,把这类页面用 `--exclude` 挡在外面。两旗互斥、scan/plan/apply 通吃:`--only <逗号分隔相对路径|glob>` 只归拢命中的,`--exclude <同格式>` 跳过命中的(glob 支持 `*` 不跨 `/`、`**` 跨;匹配 repo 相对路径——`/` 分隔、大小写敏感,前缀 `./` 自动剥)。plan 给每个候选标注 [归拢] / [跳过:…] 并单独一行跳过统计;一个候选都没命中的模式单独 ⚠ 警告——笔误/大小写错若静默失效,应用页就被误搬,见警告必查。被跳过的候选**不写存根卡不动文件**,仍是散落态——重跑 scan 会再列出(诚实口径);被跳过候选(挑选跳过或配置豁免)仍引用的资产不自动随迁,列入人工裁决行——页留资产走会弄断留在原地的页。长期豁免加 `--remember`(仅与 `--exclude` 同用):apply 时把真命中候选的模式写入 config 新键 `skipScattered:[]`,此后 scan 标注[配置跳过]、不再当候选;`skipScattered` 在候选盘点阶段先裁,`--only`/`--exclude` 只在剩余候选里挑——`--only` 召不回配置跳过的路径,要召回先从 config 删该模式。注意 `.no-card-ok` 管不到这——那只豁免「已在 demos/ 内的免挂卡」。
 
-**旧版安装(legacy,机制接管)**:有 manifest/机制件/demos、无 config(= 项目里手工长出的旧看板)。apply = ①生成 config——docs 从旧 gen.mjs 的 REF_DOCS 机械翻译提取,`--brand` 按旧板实况给(要线别 UI 则接管后手工在 config 补 `lanes` 对象,见「线别」节);②settings.json 摘除旧 kanban hook 注册(只认 claude-stop-hook / 「看板提醒」两枚标记,其他 hook 与键一律原样),deny 三条缺则补齐;③旧机制件(gen/守卫/serve)**不删除**——自动落「割接清理」+「backnav 换章」两张 backlog 卡,退役与换章由人在割接后单独 PR。**数据合同:四 manifest 只允许 backlog 追加(卡 + `tiers."0"` 词汇),demos 与其余 manifest 逐字节不动。**
+**旧版安装(legacy,机制接管)**:有 manifest/机制件/demos、无 config(= 项目里手工长出的旧看板)。apply = ①生成 config——docs 从旧 gen.mjs 的 REF_DOCS 机械翻译提取,`--brand` 按旧板实况给(要线别 UI 则接管后手工在 config 补 `lanes` 对象,见「线别」节);②settings.json 摘除旧 kanban hook 注册(只认 claude-stop-hook / 「看板提醒」两枚标记,其他 hook 与键一律原样),deny 四条缺则补齐;③旧机制件(gen/守卫/serve)**不删除**——自动落「割接清理」+「backnav 换章」两张 backlog 卡,退役与换章由人在割接后单独 PR。**数据合同:四 manifest 只允许 backlog 追加(卡 + `tiers."0"` 词汇),demos 与其余 manifest 逐字节不动。**
 
 已初始化(有 config)时重跑 apply = 幂等补齐机制件 + 归拢新散落,是「升级 plugin 后重跑 init」的安全日常操作。
 
@@ -323,7 +323,7 @@ card history <id>                           export [--out f.json]        pr-sync
 ## init 段 token 硬规则(命令式,不是建议)
 
 - **盘点走 `init.mjs scan` 摘要,禁读 demo 正文**:几十个 demo 的正文是几十万 token,摘要只有几十行。脚本读正文不算成本,Claude 亲手读才算。
-- **永不读生成物**(index.html / shots.html / refs/**,含各类 *.baseline*):校验一律 cmp / shasum / grep / jq;refs 用逐文件 shasum 比对(diff/ls 这类命令会被 deny 规则按路径误伤)。
+- **永不读生成物**(index.html / shots.html / refs/** / parts/**,含各类 *.baseline*):校验一律 cmp / shasum / grep / jq;refs 用逐文件 shasum 比对(diff/ls 这类命令会被 deny 规则按路径误伤)。
 - **归拢 / mv / 写存根 / 摘 hook 由 `--apply` 一次批量完成**:N 次工具调用压成 1 次,不逐个手搬。
 - **补卡内容不在 init 会话做**:存根卡只落最小骨架,正文后续按需补——认知开销挪出这次一次性动作。
 - **manifest 不整读**:jq 点查/聚合;等价校验先 `shasum app/kanban/*.json` 固化指纹,apply 后逐处解释差异。

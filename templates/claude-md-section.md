@@ -1,6 +1,6 @@
 ## 看板生成物不读全文(token 保护)
 
-`app/kanban/` 下的 `index.html`、`shots.html`、`refs/**` 是 `gen.mjs` 的生成物(单文件几十万字符),已用权限 deny 规则禁止 Read,也**不要用 `cat`/`head`/`sed` 绕读**。原则:脚本读正文不算成本,Claude 亲手读才烧 token —— 确定性的活儿下沉到脚本。
+`app/kanban/` 下的 `index.html`、`shots.html`、`refs/**`、`parts/**` 是 `gen.mjs` 的生成物(单文件几十万字符),已用权限 deny 规则禁止 Read,也**不要用 `cat`/`head`/`sed` 绕读**。原则:脚本读正文不算成本,Claude 亲手读才烧 token —— 确定性的活儿下沉到脚本。
 
 要查证内容,走源头,别碰像素:
 

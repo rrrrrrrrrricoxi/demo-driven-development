@@ -81,6 +81,14 @@ downgrade would freeze every already-stamped board. See
   byte-identical to 0.14.1: both panes render into the single file exactly as
   before, data and all.
 
+### Fixed
+- `kanban-init` now denies reading `app/kanban/parts/**` alongside
+  `index.html`, `shots.html` and `refs/**`. The lazy split has been writing
+  generated part files since 0.11.0 and they were never covered: a part file of
+  a mature board is a six-figure-character generated blob, and nothing stopped a
+  session opening one. Existing boards pick the entry up by re-running
+  `kanban-init apply` (the merge is deduped and touches no other key).
+
 ## [0.14.1] - 2026-08-27
 
 ### Added

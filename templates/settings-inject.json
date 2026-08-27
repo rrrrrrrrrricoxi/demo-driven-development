@@ -3,7 +3,8 @@
     "deny": [
       "Read(/app/kanban/index.html)",
       "Read(/app/kanban/shots.html)",
-      "Read(/app/kanban/refs/**)"
+      "Read(/app/kanban/refs/**)",
+      "Read(/app/kanban/parts/**)"
     ]
   }
 }

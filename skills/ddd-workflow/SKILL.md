@@ -72,7 +72,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 成本大头是"Claude 亲手读了本可由脚本确定性产出的东西"。脚本读正文不算,Claude 读才算。
 
-- **永不读生成物**:`app/kanban/index.html`、`shots.html`、`refs/**` 是 `gen.mjs` 的产物(单文件可达几十万字符)。禁止 Read,禁止 `cat`/`head`/`sed` 绕读。deny 规则会硬拦。
+- **永不读生成物**:`app/kanban/index.html`、`shots.html`、`refs/**`、`parts/**` 是 `gen.mjs` 的产物(单文件可达几十万字符)。禁止 Read,禁止 `cat`/`head`/`sed` 绕读。deny 规则会硬拦。
 - **manifest 不整读**:查卡状态 / 某字段一律 `ddd.mjs card show|list`、`jq` 点查或 `Grep`,不整读(可达数百 KB)。
 - **查证走源头,不碰像素**:卡状态 → `ddd.mjs card show <id>`(或 `jq` 点查 manifest);文档正文 → 读 `docs/` 的 md 源;渲染对不对 → 跑 `gen.mjs` 看报错(守卫已把失败喂回),不 Read `index.html` 肉眼找。
 - **`gen.mjs` 大文件**:`Grep` 定位或 `offset`+`limit` 分片读,不整读第二遍。
