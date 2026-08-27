@@ -270,6 +270,42 @@ Below 1200px there is no margin to put it in, so it never appears; without
 `IntersectionObserver` it stays silent as well. Left unset, output is
 byte-identical to a board without the feature.
 
+## Overview landing pane (optional)
+
+Set `config.overviewTab` to `true` and the first pane stops being the iteration
+task table and becomes a narrative strip, read top to bottom in the order you
+would actually ask the questions:
+
+| row | source | what it says |
+| --- | --- | --- |
+| iteration | `manifest.json` | the one iteration currently `active`, its in-flight tasks, a link to the plan doc |
+| in acceptance | `acceptance-manifest.json` | the `current` PR, `n/N` tried (same localStorage key as the acceptance tab) and a mini bar |
+| ready | `backlog-manifest.json` | how many cards are `ready` — the same count the WIP reminder uses, amber/red at the same thresholds |
+| to settle | `release-manifest.json` | cards whose PRs are all merged but that are not closed out, plus the ones on `settleHold` |
+| dormant | `release-manifest.json` | `ready`, no PR, untouched for over 30 days |
+| last 7 days | `cardsDir` | cards whose file was committed within the window |
+| releases | `release-manifest.json` | dev / test / prod counts and the newest tag |
+
+Every row is derived from data the board already has — no new manifest, no new
+field. A row whose source is absent is not rendered at all: an empty row is
+noisier than no row. The pane keeps the id `progress` and the bare `#` hash, so
+existing links still land on it, and the old iteration table is folded whole
+into an `迭代史` (iteration history) block at the bottom of the page — nothing
+is dropped, and a deep link into a card inside it opens the fold on the way.
+Dates stay dates in the generated file: the day counts, the seven-day window and
+the checklist progress are all computed in the browser, as elsewhere. Left
+unset, output is byte-identical to a board without the feature.
+
+## Design path as a document (optional)
+
+The decision-path tab is a read-it-once narrative for whoever picks the project
+up, not something to click daily. Set `config.pathTab` to `"docs"` and it moves
+out of the tab bar: the same `path-manifest.json` renders into
+`refs/design-path.html`, listed in the doc library under 交接与接手 (override
+with `config.pathDocCategory`). Not a byte of data is dropped, and the old
+`#path` deep links still work — they now land on the doc library entry and flash
+it. Left unset, output is byte-identical to a board without the feature.
+
 ## Card CLI
 
 ```

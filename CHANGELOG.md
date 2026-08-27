@@ -9,6 +9,44 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Added
+- **An overview landing pane** (`config.overviewTab`, opt-in). The first thing a
+  board shows was the iteration task table — on a project a year in, that is a
+  page of mostly-finished rows that changes once every few weeks. With this on,
+  the first pane becomes a narrative strip read in the order the questions
+  actually come up: which iteration is running, which PR is in acceptance and
+  how far through its checklist, how many cards are ready to pick up, which
+  cards have merged PRs but are not closed out, which have been asleep for over
+  a month, what moved in the last seven days, and what is out in dev / test /
+  prod. Every row is derived from data the board already keeps — no new
+  manifest, no new field — and a row whose source is absent is not rendered at
+  all, because an empty row is noisier than no row. The counts share their
+  definitions with the places that already own them: the ready count is the WIP
+  reminder's count with the WIP thresholds' colours and it recomputes with the
+  lane filter, the settle list is `settleOf`'s (with `settleHold` cards counted
+  separately, as everywhere else), the acceptance numerator is read through the
+  same localStorage key as the acceptance tab. The pane keeps the id `progress`
+  and the bare `#` hash, so old links still land on it, and the iteration table
+  is folded whole into an iteration-history block at the bottom — nothing
+  dropped, and a deep link into a card inside it opens the fold on the way
+  instead of scrolling to an invisible element. Dates stay dates in the
+  generated file: day counts, the seven-day window and checklist progress are
+  computed in the browser. Left unset, output is byte-identical.
+- **The decision path can move into the doc library** (`config.pathTab: "docs"`,
+  opt-in). That tab is a read-it-once account of how the design got its current
+  shape — valuable to whoever picks the project up, and dead weight in the top
+  bar for everyone else. Set this and the tab and its pane stop rendering; the
+  same `path-manifest.json` renders instead into `refs/design-path.html`, a
+  document with the usual back bar, listed in the doc library under 交接与接手
+  (`config.pathDocCategory` overrides the category). Not a byte of data is
+  dropped and no link dies: the markup and the stylesheet are the same ones the
+  pane used (pulled into shared constants rather than written twice), links
+  inside it are rewritten a directory level out, and an old `#path` deep link
+  now lands on the doc library entry and flashes it. Turning it back off removes
+  the generated page again. Left unset, output is byte-identical.
+
 ## [0.14.1] - 2026-08-27
 
 ### Added
