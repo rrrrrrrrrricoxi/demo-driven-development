@@ -570,6 +570,24 @@ function resolveRepoPath(baseDir, href) {
   return stack.join('/')
 }
 
+// ———— href 的 scheme 白名单 ————
+// manifest 与卡里的链接是仓库里的数据,但「仓库里的数据」不等于「可以当代码执行」:
+// javascript: 的链接一点就在看板自己的源上跑脚本,而验收清单的勾选状态全存在这个源的
+// localStorage 里。esc() 挡得住属性逃逸,挡不住 scheme —— 这里挡。
+// 相对路径不带 scheme(refs/… 、demos/… 、#锚点),一律原样放行。
+const HREF_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const HREF_ALLOW = /^(?:https?|mailto):/i
+const hrefWarned = new Set()
+function safeHref(href) {
+  const raw = String(href ?? '')
+  if (!HREF_SCHEME.test(raw) || HREF_ALLOW.test(raw)) return raw
+  if (!hrefWarned.has(raw)) {
+    hrefWarned.add(raw)
+    console.warn(`[gen] ⚠ 链接 ${JSON.stringify(raw.slice(0, 80))} 的协议不在白名单(http / https / mailto),已渲染成不可点 —— 改掉它或写成相对路径`)
+  }
+  return '#'
+}
+
 // 卡片 link(相对 kanban/)→ 渲染页 / GitHub blob / 原样。
 function cardLink(href) {
   const raw = String(href || '')
@@ -580,7 +598,7 @@ function cardLink(href) {
   const repoPath = resolveRepoPath(KANBAN_REL, path)
   if (RENDERED[repoPath]) return { href: 'refs/' + RENDERED[repoPath] + frag }
   if (CODE_EXT.test(repoPath)) return { href: GH_BLOB + repoPath + frag, ext: true }
-  return { href: raw }
+  return { href: safeHref(raw) }
 }
 const linkA = (l) => {
   const r = cardLink(l.href)
@@ -1579,7 +1597,7 @@ const shotsBlock = (list, label) => {
     if (!file) return ''
     const href = file.includes('/') ? file : 'shots/' + file
     const cap = typeof s === 'string' ? '' : (s && s.caption) || ''
-    return `<a href="${esc(href)}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(href)}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
+    return `<a href="${esc(safeHref(href))}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(safeHref(href))}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
   }).join('')
   return cells ? `\n        <dt>${esc(label)}</dt><dd><div class="wtshots">${cells}</div></dd>` : ''
 }
@@ -1601,7 +1619,7 @@ const wtBlock = (list) =>
       <div class="wtshots">${(w.shots || [])
         .map(
           (s) =>
-            `<a href="${esc(s.file)}" target="_blank" rel="noopener" title="${esc(s.caption || '')}"><img src="${esc(s.file)}" loading="lazy" alt="${esc(s.caption || '')}"><span>${esc(s.caption || '')}</span></a>`,
+            `<a href="${esc(safeHref(s.file))}" target="_blank" rel="noopener" title="${esc(s.caption || '')}"><img src="${esc(safeHref(s.file))}" loading="lazy" alt="${esc(s.caption || '')}"><span>${esc(s.caption || '')}</span></a>`,
         )
         .join('')}</div>
     </div>`,
@@ -1778,9 +1796,9 @@ const decCard = (e) => {
       </div>` : ''}
       ${wtBlock(e.walkthroughs)}
       <div class="row links">
-        ${e.demo ? `<a class="demolink" href="${esc(e.demo)}">▶ 打开 demo</a>` : ''}
+        ${e.demo ? `<a class="demolink" href="${esc(safeHref(e.demo))}">▶ 打开 demo</a>` : ''}
         ${e.designDoc ? linkA({ title: '设计文档', href: e.designDoc }) : ''}
-        ${e.route && e.routeLive ? `<a href="${esc(liveUrl(e.route))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
+        ${e.route && e.routeLive ? `<a href="${esc(safeHref(liveUrl(e.route)))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
         ${(e.links || []).map(linkA).join('')}
       </div>${detailBlock(e)}
     </div>
@@ -1887,7 +1905,7 @@ function buildPathPane() {
   const demoNodes = pm.demos
     .map(
       (d) => `
-    <a class="demonode${d.flagship ? ' flag' : ''}" href="${esc(demoBase + d.file)}" target="_blank" rel="noopener" title="${esc(d.bet)}">
+    <a class="demonode${d.flagship ? ' flag' : ''}" href="${esc(safeHref(demoBase + d.file))}" target="_blank" rel="noopener" title="${esc(d.bet)}">
       <span class="dn-id">${esc(d.id)}</span>
       <span class="dn-name">${esc(d.name)}</span>
       <span class="dn-bet">${esc(d.bet)}</span>
@@ -2206,7 +2224,7 @@ const accCurHtml = (() => {
   return `
   <section class="acccur">
     <header class="acchd">${l.nums.map(accPrChip).join('')}<b>${esc(l.title || l.key)}</b></header>
-    <div class="accenv">${row('地址', env.url ? `<a href="${esc(env.url)}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
+    <div class="accenv">${row('地址', env.url ? `<a href="${esc(safeHref(env.url))}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
     </div>
     <div class="accprog" data-accprog="${esc(l.key)}">
       <span class="acctxt">已试 <b class="accdone">0</b> / <span class="acctot">${l.items.length}</span></span>
@@ -2214,7 +2232,7 @@ const accCurHtml = (() => {
       <button type="button" class="accbtn" data-acccopy="${esc(l.key)}">复制勾选结果</button>
     </div>${cards.length ? `
     <div class="accrel"><span class="acclbl">关联卡</span>${cards.map((c) => `<a class="acccard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}${c.st ? ` · ${esc(c.st)}` : ''}</a>`).join('')}</div>` : ''}${docs.length ? `
-    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(d.href)}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
+    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(safeHref(d.href))}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
     <p class="accqueue">排队中:${accQueueLists.map((q) => `<a href="#acc-${esc(q.key)}">${q.nums.map((n) => `#${n}`).join(' / ')} · ${esc(q.title || q.key)}(${q.items.length} 条)</a>`).join('')}</p>` : ''}
   </section>`
 })()
@@ -2228,7 +2246,7 @@ const acceptancePane = !ACC ? '' : `
   </details>` : ''}${accDoneLists.length ? `
   <details class="accfold"><summary>已验收 <span class="mut">${accDoneLists.length} 份清单${accDoneLists.some((l) => l.result && l.result.at) ? ` · 最近 ${esc(accDoneLists.map((l) => (l.result || {}).at || '').sort().pop())}` : ''}</span></summary>${accDoneLists.map(accListHtml).join('')}
   </details>` : ''}${accNoListPrs.length ? `
-  <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(p.u)}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
+  <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(safeHref(p.u))}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
   </div>` : ''}
   <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code> — 条目正文改完重跑生成;勾选进度只在这台浏览器,「复制勾选结果」产出的 JSON 贴回清单的 <code>result</code> 才进 git。</p>`
 
@@ -2600,7 +2618,7 @@ const relRowHtml = (r) => {
   const cur = ACC && Number(acm.current) === r.n
   return `
             <tr class="relr" id="pr-${r.n}" data-relnum="${r.n}">
-              <td class="rc-n"><a href="${esc(p.url || prUrl({ repo: PR_REPO, num: r.n }))}" target="_blank" rel="noopener">#${r.n}</a></td>
+              <td class="rc-n"><a href="${esc(safeHref(p.url || prUrl({ repo: PR_REPO, num: r.n })))}" target="_blank" rel="noopener">#${r.n}</a></td>
               <td class="rc-t">${esc(p.title || '')}${cur ? '<span class="relnow">验收中</span>' : ''}</td>
               <td class="rc-s"><span class="relsg s-${r.sg.id}">${esc(relStageText(r))}</span></td>
               <td class="rc-d">${esc(relStatusText(r))}</td>

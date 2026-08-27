@@ -411,9 +411,14 @@ function cmdNote() {
   say({ ok: true, id, field: nf, line, file: row.where, card }, S.noteDone(id, nf, line))
 }
 
+/** 只有这几个 scheme 能进 links —— gen 那边同一条白名单,坏值在这儿就该被拦下,别等渲染 */
+const HREF_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const HREF_ALLOW = /^(?:https?|mailto):/i
+
 function cmdLink() {
   const [id, title, href] = pos.slice(2)
   if (!id || !title || !href) die(S.linkUsage())
+  if (HREF_SCHEME.test(href) && !HREF_ALLOW.test(href)) die(S.linkScheme(href))
   const { store, row } = findCard(id)
   const links = Array.isArray(row.card.links) ? [...row.card.links] : []
   const dup = links.some((l) => l && String(l.href) === href)

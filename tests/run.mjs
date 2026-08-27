@@ -2492,6 +2492,63 @@ console.log('T51 截图文件名不进 shell')
   ok(readFileSync(join(fx.kb, 'shots.html'), 'utf8').includes('&quot;'), '文件名原样转义后进了截图廊')
 }
 
+// ============ T52 href 只认 http/https/mailto 与相对路径(esc 挡逃逸,挡不住 scheme)============
+console.log('T52 链接协议白名单')
+{
+  const fx = mkFixture('fx52', { 'c1.html': demoHtml('c1') })
+  const kb = fx.kb
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+  const bl = rd(blP)
+  bl.tiers = { 1: '核心' }
+  bl.instance.ghRepo = 'o/r'
+  bl.items = [{
+    id: 'BL-1', status: Object.keys(bl.statuses)[0], priority: Object.keys(bl.priorities)[0], tier: '1',
+    date: '2026-01-01', title: '甲',
+    links: [
+      { title: '坏的', href: 'javascript:alert(9)//"><img src=y onerror=alert(2)>' },
+      { title: '也坏', href: 'data:text/html,<script>alert(1)</script>' },
+      { title: '好的', href: 'https://example.com/x' },
+      { title: '相对', href: 'demos/c1.html' },
+      { title: '锚点', href: '#BL-1' },
+      { title: '邮件', href: 'mailto:a@b.c' },
+    ],
+  }]
+  wr(blP, bl)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'gen 照常跑完(坏链接不是硬失败,是渲染成不可点)', r.stderr)
+  ok(/协议不在白名单|not allowed/.test(r.stderr), 'stderr 点名说了哪个链接被拦下')
+  const idx = readFileSync(join(kb, 'index.html'), 'utf8')
+  ok(!idx.includes('href="javascript:') && !idx.includes('href="data:'), 'javascript: / data: 都没落进 href')
+  ok(idx.includes('href="https://example.com/x"') && idx.includes('href="demos/c1.html"') && idx.includes('href="#BL-1"') && idx.includes('href="mailto:a@b.c"'),
+    'http(s) / 相对路径 / 锚点 / mailto 原样放行')
+
+  // 发布进度表的 PR url 同样过白名单
+  const cfg = rd(cfgP)
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  for (const f of ['manifest.json', 'decisions-manifest.json', 'backlog-manifest.json']) {
+    const o = rd(join(kb, f))
+    o.instance.ghRepo = 'o/r'; o.instance.branch = 'main'
+    wr(join(kb, f), o)
+  }
+  wr(join(kb, 'release-manifest.json'), {
+    instance: { ghRepo: 'o/r', branch: 'main' },
+    stages: [{ id: 'dev', label: 'dev' }, { id: 'test', label: 'test' }, { id: 'prod', label: 'prod' }],
+    releases: [],
+    prs: [{ number: 7, title: 't', state: 'open', draft: false, base: 'main', branch: 'b', url: 'javascript:alert(7)', createdAt: '2026-01-01T00:00:00Z', mergedAt: null, closedAt: null, cards: [] }],
+  })
+  const r2 = runGen(NEW_SCRIPTS, kb)
+  const idx2 = r2.status === 0 ? readFileSync(join(kb, 'index.html'), 'utf8') : ''
+  ok(r2.status === 0 && !idx2.includes('href="javascript:alert(7)"'), 'release-manifest 里手写的 PR url 也过同一条白名单', r2.stderr.slice(0, 160))
+
+  // CLI 在坏值进卡文件之前就拦下
+  const rc = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), 'card', 'link', 'BL-1', '坏的', 'javascript:alert(1)', '--dir', kb], { encoding: 'utf8' })
+  ok(rc.status === 1 && /白名单|not allowed/.test(rc.stderr), 'ddd card link 拒绝 javascript: 链接')
+  ok(!readFileSync(blP, 'utf8').includes('javascript:alert(1)'), '拒绝之后卡文件里没有这条链接')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })
