@@ -3410,6 +3410,24 @@ const REL_CSS = !REL ? '' : `
   .rellk i { display: inline-block; width: 13px; height: 7px; border-radius: 99px; margin: 0 3px 0 9px; }
   .rellk i:first-child { margin-left: 0; }
   .relmore { margin-left: auto; max-width: 62ch; }
+  /* hover peek(v0.15.2):压成几像素的方块也说得出自己是谁 —— 自绘卡顶掉原生 title(截断、要等、两层浮层打架) */
+  .relpb:focus-visible, .relsp:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 1px; z-index: 2; }
+  .relpeek { position: fixed; z-index: 65; left: 0; top: 0; max-width: 320px; width: max-content; padding: 8px 10px;
+     border: 1px solid var(--line-strong); border-radius: 9px; background: var(--card); color: var(--ink);
+     box-shadow: 0 1px 2px rgba(${SHADOW_INK},.04), 0 10px 24px rgba(${SHADOW_INK},.09);
+     font-size: 11.5px; line-height: 1.5; }
+  .relpeek[hidden] { display: none; }
+  .relpkh { display: flex; align-items: baseline; gap: 6px; }
+  .relpkh b { flex: none; font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .relpkt { min-width: 0; color: var(--mut); }
+  .relpkm { margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; color: var(--faint); }
+  .relpkm code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .relpkk { margin-top: 5px; }
+  .relpka { margin-top: 4px; color: var(--mut); font-variant-numeric: tabular-nums; }
+  .relpkl { margin-top: 5px; display: grid; gap: 2px; }
+  .relpkr { display: flex; gap: 6px; }
+  .relpkr b { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .relpkr > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 820px) { .relseg { margin-left: 0; } .relmore { margin-left: 0; } }`
 // 运行期:筛选 / 搜索 / 排序 / 版本折叠 / 视图切换 / 时间线绘制 / syncedAt 换算。
 // 两视图共用同一份 REL_D 与同一个 pass():筛选一次,表格与时间线看到的是同一批 PR。
@@ -3525,11 +3543,79 @@ const REL_JS = !REL ? '' : `
       var d = bb.item.d, cls = 'relpb relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '')
       if (q) cls += pass(d) ? ' hit' : ' dim'
       var txt = !lbl ? '' : bb.w >= 84 ? '#' + d.n + ' ' + d.t.slice(0, Math.floor((bb.w - 30) / 9)) : bb.w >= 26 ? '#' + d.n : ''
-      var ttl = '#' + d.n + ' ' + d.t + (d.k.length ? ' · 关联卡 ' + d.k.join(' / ') : '')
-      return '<a class="' + cls + '" href="' + xe(href(d.n)) + '" target="_blank" rel="noopener" title="' + xe(ttl) + '"'
-        + ' style="left:' + bb.x + 'px;top:' + (top + bb.lane * TL.row) + 'px;width:' + bb.w + 'px">' + xe(txt) + '</a>'
+      // 原生 title 撤了(v0.15.2):它截断长标题、要等一秒才出、还与自绘 peek 变成两层浮层。
+      // tabindex 显式给上:href 取不到时 <a> 不可聚焦,键盘就摸不到这个方块了。
+      return '<a class="' + cls + '" href="' + xe(href(d.n)) + '" target="_blank" rel="noopener" tabindex="0"'
+        + ' data-relpk="' + d.n + '" style="left:' + bb.x + 'px;top:' + (top + bb.lane * TL.row) + 'px;width:' + bb.w + 'px">' + xe(txt) + '</a>'
     }
+    // ———— hover peek(v0.15.2)————
+    // 「当天开当天合」的方块常只有几个像素、连号都写不下,原来只有原生 title 兜着 —— 截断、要等、还慢。
+    // 换成一张自绘卡:内容全从已烤入的 D 与表格那一行现取(状态·日期 / 分支 / 验收分子都在那儿),不烤第二份。
+    var pk = document.createElement('div')
+    pk.className = 'relpeek'
+    pk.hidden = true
+    pk.setAttribute('role', 'tooltip')
+    document.body.appendChild(pk) // 挂 body:时间线自己在横向滚动容器里,卡跟着滚就贴不住锚点了
+    var pkFor = null, pkT = 0, pkH = 0
+    function pkClear() { if (pkT) { clearTimeout(pkT); pkT = 0 } if (pkH) { clearTimeout(pkH); pkH = 0 } }
+    function pkHide() { pkClear(); pkFor = null; pk.hidden = true }
+    function pkSoon() { pkClear(); pkH = setTimeout(pkHide, 120) } // 留一手:鼠标要挪进卡里点关联卡芯片
+    function pkCell(n, sel) { var tr = rows[n], c = tr && tr.querySelector(sel); return c ? c.textContent.trim() : '' }
+    function pkPr(n) { // 一条 PR:号 + 完整标题 + 状态·日期 + 分支 + 关联卡 + 验收 n/N
+      var d = byN[n]
+      if (!d) return ''
+      var out = ['<div class="relpkh"><b>PR #' + d.n + '</b><span class="relpkt">' + xe(d.t) + '</span></div>']
+      var st = pkCell(n, '.rc-d'), br = pkCell(n, '.rc-b'), meta = [], k
+      if (st) meta.push('<span>' + xe(st) + '</span>')
+      if (br) meta.push('<code>' + xe(br) + '</code>')
+      if (meta.length) out.push('<div class="relpkm">' + meta.join('') + '</div>')
+      if (d.k.length) {
+        var chips = []
+        for (k = 0; k < d.k.length; k++) chips.push('<a class="relcard" href="#' + xe(d.k[k]) + '">' + xe(d.k[k]) + '</a>')
+        out.push('<div class="relpkk">' + chips.join('') + '</div>')
+      }
+      var ac = rows[n] && rows[n].querySelector('.rc-a [data-acc]') // 分子是验收那份数据现算的,取的是此刻的值
+      if (ac) out.push('<div class="relpka">验收 <b>' + xe(ac.textContent.trim()) + '</b></div>')
+      return out.join('')
+    }
+    function pkDay(gid, dy) { // 折叠带上的一段 = 那条带的那一天:把这天的 PR 列出来(封 10 条)
+      var list = byG[gid] || [], hit = [], nm = gid, k
+      for (k = 0; k < G.length; k++) if (G[k].g === gid) nm = G[k].nm
+      for (k = 0; k < list.length; k++) if (anc(list[k]) === dy) hit.push(list[k])
+      hit.sort(function (a, b) { return a.n - b.n })
+      var out = ['<div class="relpkh"><b>' + xe(nm) + '</b><span class="relpkt">' + md(dy) + ' · ' + hit.length + ' 个 PR</span></div>']
+      var li = []
+      for (k = 0; k < hit.length && k < 10; k++) li.push('<span class="relpkr"><b>#' + hit[k].n + '</b><span>' + xe(hit[k].t) + '</span></span>')
+      out.push('<div class="relpkl">' + li.join('') + '</div>')
+      if (hit.length > 10) out.push('<div class="relpkm">还有 ' + (hit.length - 10) + ' 个 · 点带头展开看全</div>')
+      return out.join('')
+    }
+    function pkPlace(el) { // 贴元素上方;顶不下就翻到下面,右边越界就往左收(卡宽 CSS 里封在 320px)
+      var r = el.getBoundingClientRect(), w = pk.offsetWidth || 260, h = pk.offsetHeight || 90
+      var l = r.left, t = r.top - h - 8
+      if (t < 8) t = r.bottom + 8
+      if (l + w > window.innerWidth - 8) l = window.innerWidth - w - 8
+      if (l < 8) l = 8
+      pk.style.left = l + 'px'
+      pk.style.top = t + 'px'
+    }
+    function pkShow(el) {
+      var html = el.dataset.relpk ? pkPr(el.dataset.relpk) : pkDay(el.dataset.relpkg, el.dataset.relpkd)
+      if (!html) return
+      pkFor = el
+      pk.innerHTML = html
+      pk.hidden = false
+      pkPlace(el)
+    }
+    function pkOver(el, wait) { // 鼠标停够 150ms 才浮出:扫过一排方块不该抖出一串卡。键盘获焦不等
+      pkClear()
+      pkFor = el
+      if (!wait) { pkShow(el); return }
+      pkT = setTimeout(function () { pkT = 0; if (pkFor === el) pkShow(el) }, 150)
+    }
+    function pkAt(ev) { return ev.target.closest ? ev.target.closest('[data-relpk],[data-relpkd]') : null }
     function drawTl() {
+      pkHide() // 重画就换了一批 DOM 节点:还开着的卡指着的锚点已经不在了
       var now = new Date(), tms = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()), k, j, g
       var t0 = tms - 59 * 864e5
       // 窗口按全部带算,不跟着段筛选缩放 —— 筛一下就换一套刻度,横向就没得比了
@@ -3583,7 +3669,8 @@ const REL_JS = !REL ? '' : `
           for (var sd in g.d) {
             if (ax.x[sd] === undefined) continue
             var hh = Math.min(17, Math.round(3 + g.d[sd] * 0.55))
-            body.push('<div class="relsp relc s-' + g.sg + ' q' + g.q + '" style="left:' + ax.x[sd] + 'px;width:'
+            body.push('<div class="relsp relc s-' + g.sg + ' q' + g.q + '" tabindex="0"'
+              + ' data-relpkg="' + xe(g.g) + '" data-relpkd="' + sd + '" style="left:' + ax.x[sd] + 'px;width:'
               + Math.max(2, ax.w[sd] - 1) + 'px;top:' + (24 - hh) + 'px;height:' + hh + 'px"></div>')
           }
         }
@@ -3642,6 +3729,7 @@ const REL_JS = !REL ? '' : `
     }
     pane.addEventListener('click', function (ev) {
       var t = ev.target
+      pkHide() // 点了就是要动作,不是要读:让位(点方块本身也一样,链接照走)
       if (!t.closest) return
       var vb = t.closest('[data-relv]')
       if (vb) { setView(vb.dataset.relv, true); return }
@@ -3676,6 +3764,26 @@ const REL_JS = !REL ? '' : `
       var gb = t.closest('.relgb')
       if (gb) { var g = gb.closest('tr').dataset.relgh; open[g] = !open[g]; renderTable() }
     })
+    // peek 的触发面委托在时间线容器上:每次 drawTl 都整块换掉 innerHTML,委托绑一次就管到底。
+    // mouseenter / focusin 都不冒泡,所以走捕获 —— 捕获阶段照样经过祖先,委托成立。
+    host.addEventListener('mouseenter', function (ev) { var el = pkAt(ev); if (el) pkOver(el, true) }, true)
+    host.addEventListener('mouseleave', function (ev) { if (pkAt(ev)) pkSoon() }, true)
+    host.addEventListener('focusin', function (ev) { var el = pkAt(ev); if (el) pkOver(el, false) })
+    host.addEventListener('focusout', function (ev) { if (pkAt(ev)) pkSoon() })
+    host.addEventListener('pointerdown', function (ev) { // 触摸屏没有 hover:第一下只出卡,第二下才走链接
+      if (ev.pointerType !== 'touch') return
+      var el = pkAt(ev)
+      if (!el || (el === pkFor && !pk.hidden)) return
+      ev.preventDefault()
+      pkOver(el, false)
+    })
+    pk.addEventListener('mouseenter', pkClear) // 鼠标挪进卡里就别收:关联卡芯片要点得到
+    pk.addEventListener('mouseleave', pkHide)
+    pk.addEventListener('click', pkHide) // 点了芯片要切 pane,卡该让位(不 preventDefault,链接照走)
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') pkHide() })
+    var pksc = pane.querySelector('.reltlsc')
+    if (pksc) pksc.addEventListener('scroll', pkHide) // 滚一下锚点就跑了,与其错位不如收起
+    window.addEventListener('scroll', pkHide)
     qbox.addEventListener('input', function () { // 搜到了却折在带里看不见,比没搜到更伤:有命中的带自动展开
       var v = (qbox.value || '').trim(), k
       if (v && !bSnap) { bSnap = {}; for (k in bOpen) bSnap[k] = bOpen[k] } // 搜索前的展开状态先存一份
