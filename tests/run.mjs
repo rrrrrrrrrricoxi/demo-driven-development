@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。777 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。795 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -24,7 +24,10 @@
 // 150ms 防抖与捕获委托 / 触摸两下 / z-index 压得住 tabrail / 不引新色 / part 里一个字不多)、
 // tab 条吸顶 stickyTabs(四拍冻结 / position: sticky 落点跟 --ddd-hubh / 底色不透 / 横向滚动没动 /
 // z 层与 hubbar·懒加载进度线不打架 / 深链锚点补偿代入实高盖得过两条吸顶栏 / 文档库导航与 scrollspy
-// 一并让开 / 与 tabRail 同开时 rail 让位)等。
+// 一并让开 / 与 tabRail 同开时 rail 让位)、
+// 时间线左栏(四拍冻结 / 整格 role=button+aria-expanded 而非只有文字那颗钮 / 点击与 Enter·Space
+// 共用一个 toggleBand 且重画后交还焦点 / 左栏宽只有一处字面值,轴行与带行读同一个 --relgut
+// 并画同样的右边框 / TL.lbl 与 --relgut 同一个数)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -3409,6 +3412,102 @@ console.log('T62 tab 条吸顶 stickyTabs')
   cfg.stickyTabs = false
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, fx62.kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
+// ============ T63 时间线左栏:整格可点 + 与轴行同一套栅格(releaseTab 关档照旧四拍冻结)============
+console.log('T63 时间线左栏整格可点 / 轴行对齐')
+{
+  const fx63 = mkFixture('fx63', { 's.html': demoHtml('s') })
+  const cfgP = join(fx63.kb, 'kanban.config.json'), idxP = join(fx63.kb, 'index.html')
+  const relP = join(fx63.kb, 'release-manifest.json')
+  const mP = join(fx63.kb, 'manifest.json'), decP = join(fx63.kb, 'decisions-manifest.json'), blP = join(fx63.kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  wr(relP, REL_MANIFEST)
+  const cfg = rd(cfgP)
+
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, fx63.kb)
+  const offSha = sha(idxP)
+  ok(!readFileSync(idxP, 'utf8').includes('relgut'), '未配 releaseTab:壳里零时间线左栏痕迹')
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx63.kb)
+  ok(sha(idxP) === offSha, 'releaseTab:false 与未配逐字节相同(冻结)')
+
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx63.kb)
+  ok(r.status === 0, 'releaseTab:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- ① 整格是触发面:role / tabindex / aria-expanded / title 都在 .relgut 那一层 ----
+  ok(/<div class="relgut" role="button" tabindex="0" aria-expanded="' \+ \(op \? 'true' : 'false'\)/.test(on),
+    '左栏整格就是触发面:role=button + tabindex,aria-expanded 跟着展开态走')
+  ok(on.includes(`+ '" data-relbd="' + xe(g.g) + '" title="' + xe(g.sf || '') + '" style="height:' + H + 'px">'`),
+    'data-relbd 与 title 一并搬上整格(提示原样不变),格高仍是整条带的高')
+  {
+    const draw = on.slice(on.indexOf('function drawTl()'), on.indexOf('function toggleBand('))
+    ok(draw.length > 500 && draw.includes(`'<span class="relbh">'`) && draw.includes('</span></span></span>') && !draw.includes('<button'),
+      '带头那两行退成 <span>:交互语义只留在整格那一层,不再往里嵌一颗按钮', draw.length + ' 字符')
+  }
+  ok(on.includes(`var bh = t.closest('.relgut')`) && !on.includes(`t.closest('.relbh')`),
+    '点击委托认整格(.relgut),不再只认文字那颗钮 —— 展开后那片底色也点得动')
+  ok(/if \(ev\.key !== 'Enter' && ev\.key !== ' ' && ev\.key !== 'Spacebar'\) return/.test(on) &&
+    on.includes(`ev.target.closest('.relgut')`) && /ev\.preventDefault\(\) \/\/ 空格的默认动作是翻页/.test(on),
+    'role=button 自己认 Enter / Space(那一手原生 <button> 才白送),空格拦下翻页')
+  ok(/function toggleBand\(id, keep\) \{/.test(on) && count(on, 'toggleBand(') === 3 &&
+    on.includes(`gs[k].dataset.relbd === id) { gs[k].focus(); return }`),
+    '点击与键盘共用同一个 toggleBand;键盘那次重画后把焦点还回同一条带的格子(drawTl 整片换 DOM)')
+  ok(/\.relgut \{[^}]*cursor: pointer/.test(on) && /\.relgut:hover::after \{ opacity: \.05; \}/.test(on) &&
+    /\.relgut:focus-visible \{ outline:/.test(on),
+    '整格 cursor: pointer + hover 整格轻微高亮 + 键盘可见焦点圈')
+
+  // ---- ② 左栏宽只定义一处;轴行与带行读同一个变量、画同样的右边框 ----
+  {
+    const styleAll = on.slice(on.indexOf('<style>'), on.indexOf('</style>'))
+    const cut = styleAll.indexOf('/* 时间线(v0.13.1 重做)')
+    const end = styleAll.indexOf('@media (max-width: 820px)', cut)
+    const tlCss = styleAll.slice(cut, end)
+    ok(cut > 0 && count(tlCss, '--relgut:') === 1 && count(tlCss, '200px') === 1,
+      `左栏宽只在一处落成字面值(--relgut: 200px),别处一律读变量`, `${count(tlCss, '--relgut:')} 处定义 / ${count(tlCss, '200px')} 处字面`)
+    ok(count(tlCss, 'width: var(--relgut)') === 3,
+      '轴行左栏 / 带左栏 / 带内小标题三处都读同一个变量', count(tlCss, 'width: var(--relgut)') + ' 处')
+    const same = (cls) => new RegExp('\\.' + cls + ' \\{[^}]*position: sticky; left: 0;[^}]*border-right: 1px solid var\\(--line\\)').test(tlCss)
+    ok(same('reltlag') && same('relgut'),
+      '轴行左栏与带左栏同一套:同 sticky、同右边框 —— 同一个滚动容器,横滚时两条分隔线咬在一起')
+  }
+  ok(on.includes(`'<div class="reltlax" style="width:' + ax.W + 'px"><div class="reltlag"></div>'`),
+    '轴行开头真的落了一格 .reltlag(v0.15.4 那一截是空的,日期会滑到带名底下)')
+  {
+    const cssW = Number((on.match(/--relgut: (\d+)px/) || [, '0'])[1])
+    const jsW = Number((on.match(/var TL = \{ lbl: (\d+),/) || [, '0'])[1])
+    ok(cssW > 0 && cssW === jsW, `轴的起点偏移 TL.lbl(${jsW})与左栏宽 --relgut(${cssW}px)是同一个数`)
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  { // lazy 档:时间线是运行期画的,左栏这套全在壳里
+    cfg.lazyTabs = true
+    wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, fx63.kb)
+    const lzOn = readFileSync(idxP, 'utf8')
+    const pRel = readFileSync(join(fx63.kb, 'parts', 'release.html'), 'utf8')
+    ok(lzOn.includes('.relgut {') && lzOn.includes('class="relgut"') && !pRel.includes('relgut') && !pRel.includes('reltlag'),
+      'lazy 档:左栏的样式与绘制都在壳里,parts/release.html 一个字不多')
+    cfg.lazyTabs = false
+    wr(cfgP, cfg)
+  }
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx63.kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
 }
 
