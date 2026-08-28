@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。750 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。776 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -14,13 +14,17 @@
 // 链接顺手写 pr / export 与拆分前的 manifest 深比较相等 / 只读目录下原文件零改动)、
 // 线别分段熬得过懒注入(委托监听 + 每次现查 + onPaneInjected 同步高亮)、
 // 左侧竖向 tab 导航 tabRail(四拍冻结 / 清单与 tab 条同一份 / show 与徽章两处同步 / 显隐三道门 /
-// 点了落到 tab 条而不是 pane 顶 + 键盘获焦不被收走)、
+// 点了落到 tab 条而不是 pane 顶 + 键盘获焦不被收走 + 与 sticky 顶栏的交接空档:rootMargin 压到
+// hubbar 下沿、判定量 bottom、scroll 兜底、resize 重建观察器)、
 // 总览落地页 overviewTab(四拍冻结 × lazy 开关 / 各行随数据源出没 / 迭代史折叠含原任务表 / 深链先展开折叠)、
 // 决策路径入文档库 pathTab:"docs"(四拍冻结 / refs 文档页 + Hub 条目 / 相对链接各退一级 / #path 改落文档库 / out 撞名硬报错)、
 // 验收/发布进度也进 parts(壳里零烤入数据 / 数据块随 part 走 / init 幂等 / 跨 part 取分子 /
 // #acc-*、#pr-* 深链映射 / LAZY_BYTES 五项对账 / 守卫缺件自愈 / 单独关一个 tab 只清一份)、
 // 时间线 hover peek(四拍冻结 / 原生 title 撤干净 / 条与段都可聚焦 / 内容现取不烤第二份 /
-// 150ms 防抖与捕获委托 / 触摸两下 / z-index 压得住 tabrail / 不引新色 / part 里一个字不多)等。
+// 150ms 防抖与捕获委托 / 触摸两下 / z-index 压得住 tabrail / 不引新色 / part 里一个字不多)、
+// tab 条吸顶 stickyTabs(四拍冻结 / position: sticky 落点跟 --ddd-hubh / 底色不透 / 横向滚动没动 /
+// z 层与 hubbar·懒加载进度线不打架 / 深链锚点补偿代入实高盖得过两条吸顶栏 / 文档库导航与 scrollspy
+// 一并让开 / 与 tabRail 同开时 rail 让位)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -2769,8 +2773,8 @@ console.log('T55 左侧竖向 tab 导航 tabRail')
   ok(/setLine[\s\S]{0,4000}?\.railitem\[data-pane\][\s\S]{0,200}?r\.textContent = t\.textContent/.test(on),
     'setLine 重算 tab 徽章后,rail 文案直接抄 tab 按钮的现值(一份口径)')
   ok(on.includes("typeof IntersectionObserver !== 'function'") && on.includes("matchMedia('(min-width: 1200px)')") &&
-    on.includes('e.boundingClientRect.top < 0'),
-    'IO 缺席则静默不显示;窄屏永不显示;只认向上滑出视口')
+    !on.includes('e.boundingClientRect.top < 0'),
+    'IO 缺席则静默不显示;窄屏永不显示;旧的「只认向上滑出」条件已撤(0.15.3)')
   // rail 的 CSS 是样式表最后一段(TABRAIL_CSS 挂在尾链末端),从它的段头切到 </style> 即整段
   const railCss = on.slice(on.indexOf('/* ============ 左侧竖向 tab 导航'), on.indexOf('</style>'))
   ok(railCss.includes('.tabrail { display: none; }') && railCss.includes('@media (min-width: 1200px)') &&
@@ -2787,13 +2791,27 @@ console.log('T55 左侧竖向 tab 导航 tabRail')
       '点 rail 项:落点算式量的是 tab 条(bar),贴 hubbar 下沿停住', railClick.slice(-140))
     ok(!/pane-'\s*\+\s*name/.test(railClick) && !/pane\.getBoundingClientRect/.test(railClick),
       '点 rail 项:不再滚到 pane 顶(那会把 tab 条顶出视口,rail 也跟着隐,两头都看不见)')
-    ok(/\}, \{ threshold: 0 \}\)\.observe\(bar\)/.test(railJs),
-      'IO 阈值显式写 0:tab 条露出一丝就算「在视口」,rail 让位')
-    ok(/var held = false/.test(railJs) && /rail\.hidden = !\(held \|\| \(past && wide\.matches\)\)/.test(railJs) &&
+    ok(/rootMargin: '-' \+ hubH \+ 'px 0px 0px 0px', threshold: 0 \}\)/.test(railJs) && /io\.observe\(bar\)/.test(railJs),
+      'IO 的 root 顶边压到 hubbar 实高(rootMargin 引用 hubH),阈值仍显式 0', railJs.slice(railJs.indexOf('rootMargin'), railJs.indexOf('rootMargin') + 90))
+    ok(/var held = false/.test(railJs) && /rail\.hidden = !\(held \|\| \(gone && wide\.matches\)\)/.test(railJs) &&
       railJs.includes("matches(':focus-visible')") && railJs.includes("rail.addEventListener('focusout'"),
       '键盘焦点还落在 rail 里就先不收走(只认 :focus-visible,鼠标点不算)')
     ok(railCss.includes('.railitem:hover, .railitem:focus-visible'),
       'rail 项键盘获焦有可见样式(与 hover 同一档)')
+    // ---- 0.15.3:sticky hubbar 与 IO 视口之间的交接空档 ----
+    ok(/var gone = bar\.getBoundingClientRect\(\)\.bottom <= hubH \+ 1/.test(railJs),
+      '显隐判定量的是 tab 条底边(bottom ≤ hubH):钻进 sticky 顶栏底下就算离场,不再要求 top < 0')
+    const railCode = railJs.replace(/\/\/[^\n]*/g, '') // 注释里在讲旧判定的坏处,别把它当代码抓
+    ok(!/boundingClientRect\.top/.test(railCode) && !/isIntersecting/.test(railCode),
+      '不再读 IO entry 的 top/isIntersecting —— 谁触发都回到同一句实测判定,也不管滚动方向')
+    ok(/window\.addEventListener\('scroll', function \(\) \{[\s\S]{0,200}?requestAnimationFrame\([\s\S]{0,80}?apply\(\)/.test(railJs) &&
+      railJs.includes("{ passive: true }"),
+      '有 scroll 兜底且 rAF 节流(IO 只在边界翻转时回调,抖动靠这一路补齐)')
+    ok(/window\.addEventListener\('resize', function \(\) \{ cancelAnimationFrame\(rearm\); rearm = requestAnimationFrame\(arm\) \}\)/.test(railJs),
+      'resize 重建观察器:rootMargin 建时定死,hubbar 换行改高得重来')
+    ok(railCss.includes('animation: railin .12s ease-out') && railCss.includes('@keyframes railin') &&
+      /translateX\(-8px\)/.test(railCss) && railCss.includes('@media (prefers-reduced-motion: reduce)'),
+      'rail 浮出走 120ms 从左 8px 淡入(display:none 起步只能用 animation),reduced-motion 下关掉')
   }
   {
     const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
@@ -3286,6 +3304,107 @@ console.log('T61 时间线 hover peek')
   cfg.releaseTab = false
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, fx61.kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
+// ============ T62 tab 条吸顶 stickyTabs(opt-in;关档逐字节冻结;吸顶层加高后各处补偿跟着加)============
+console.log('T62 tab 条吸顶 stickyTabs')
+{
+  const fx62 = mkFixture('fx62', { 's.html': demoHtml('s') })
+  const cfgP = join(fx62.kb, 'kanban.config.json'), idxP = join(fx62.kb, 'index.html')
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, fx62.kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('--ddd-hubh') && !off.includes('--ddd-tabh') && !off.includes('stickyTabs'),
+    '未配 stickyTabs:壳里零吸顶痕迹')
+  ok(off.includes('[id] { scroll-margin-top: 58px; }'), '未配时锚点补偿仍是老的定值 58px(旧板不动)')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.stickyTabs = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx62.kb)
+  ok(sha(idxP) === offSha, 'stickyTabs:false 与未配逐字节相同(冻结)')
+
+  cfg.stickyTabs = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, fx62.kb)
+  ok(r.status === 0, 'stickyTabs:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+  ok(/\.tabbar \{ position: sticky; top: var\(--ddd-hubh, 56px\); z-index: 50;/.test(on),
+    'CSS:tab 条 position: sticky,落点跟 --ddd-hubh(hubbar 实高)走,z 层 50')
+  ok(/\.tabbar \{ position: sticky[\s\S]{0,200}?background: var\(--bg\); box-shadow: 0 14px 0 var\(--bg\)/.test(on),
+    '吸顶条底色 = hubbar 同一枚 --bg(不透明),下沿 14px margin 用同色投影盖住,不动布局')
+  ok(!/\.tabbar \{ position: sticky[\s\S]{0,200}?#[0-9a-fA-F]{3}/.test(on),
+    '吸顶条零硬编码色值:暗档跟着同一条 light-dark 链走')
+  ok(on.includes('overflow-x: auto; scrollbar-width: none;') && on.includes('white-space: nowrap; flex: none;'),
+    'tab 条原有的横向滚动 / nowrap 一条没动(sticky 与元素自身的 overflow-x 不冲突)')
+  // z 层不打架:hubbar 60 > 吸顶 tab 条 50;懒加载进度线 70 与发布 peek 65 都在 tab 条之上
+  ok(on.includes('.hubbar { position: sticky; top: 0; z-index: 60;'), 'hubbar 仍在 tab 条之上(60 > 50)')
+  {
+    const c2 = JSON.parse(readFileSync(cfgP, 'utf8'))
+    c2.lazyTabs = true
+    wr(cfgP, c2)
+    const rl = runGen(NEW_SCRIPTS, fx62.kb)
+    const onl = readFileSync(idxP, 'utf8')
+    ok(rl.status === 0 && /#lazybar \{ position: fixed; top: 0;[^}]*z-index: 70;/.test(onl),
+      'lazyTabs 同开:顶部进度线 z 70,压得住吸顶的 tab 条(50),不打架')
+    c2.lazyTabs = false
+    wr(cfgP, c2)
+    runGen(NEW_SCRIPTS, fx62.kb)
+  }
+  // ---- 深链落点:吸顶层从「只有 hubbar」变成「hubbar + tab 条」,补偿算式必须把 tab 条高度也减掉 ----
+  {
+    const px = (s) => [...s.matchAll(/(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]))
+    const grabAnchor = (s) => ((s.match(/\n  \[id\] \{ scroll-margin-top: ([^;]+);/) || [])[1] || '') // 通配那条,不是 .dseg[id]
+    const anchorOn = grabAnchor(on), anchorOff = grabAnchor(off)
+    ok(anchorOn.includes('var(--ddd-hubh, 56px)') && anchorOn.includes('var(--ddd-tabh, 44px)'),
+      '深链锚点补偿 = hubbar 高 + tab 条高 + 呼吸(不再是写死的 58px)', anchorOn)
+    // 拿兜底值当实测值代进算式:补偿必须盖过两条吸顶栏之和,否则卡头被 tab 条压住
+    const sumOn = px(anchorOn).reduce((a, b) => a + b, 0)
+    const stack = 56 + 44 // hubbar + tab 条
+    ok(sumOn >= stack && sumOn > px(anchorOff)[0],
+      `代入实高后补偿(${sumOn}px)盖得过 hubbar+tab 条(${stack}px),且比老的 ${px(anchorOff)[0]}px 大`)
+    ok(/rs\.setProperty\('--ddd-hubh', hubH \+ 'px'\)/.test(on) &&
+      /rs\.setProperty\('--ddd-tabh', tabH \+ 'px'\)/.test(on) &&
+      /if \(tabbarEl && tabbarEl\.offsetHeight\) tabH = tabbarEl\.offsetHeight/.test(on) &&
+      /const tabbarEl = document\.querySelector\('\.tabbar'\)/.test(on),
+      '两个高度都是现量的(tab 条取 offsetHeight),不是猜的常数')
+    ok(/window\.addEventListener\('load', docsNavSync\)/.test(on) &&
+      /window\.addEventListener\('resize', \(\) => \{ cancelAnimationFrame\(navRaf\); navRaf = requestAnimationFrame\(docsNavSync\) \}\)/.test(on),
+      '量高挂在 load 与 resize(rAF 节流)上 —— hubbar flex-wrap 换行改高时落点跟着改')
+    // 文档库那条自己也吸顶的导航切片,以及它的锚点/scrollspy 边界,一并让开 tab 条
+    ok(/\.docsnav \{ position: sticky; top: calc\(var\(--hubh, 41px\) \+ var\(--ddd-tabh, 44px\)\);/.test(on),
+      '文档库导航切片吸顶落点让开 tab 条(否则两条吸顶栏叠在一处)')
+    ok(/\.dseg\[id\] \{ scroll-margin-top: calc\(var\(--hubh, 41px\) \+ var\(--dnavh, 0px\) \+ var\(--ddd-tabh, 44px\) \+ 12px\); \}/.test(on),
+      '文档库段锚点补偿也加上 tab 条高度')
+    ok(/rootMargin: '-' \+ \(hubH \+ dnavH \+ 10 \+ tabH\) \+ 'px 0px -62% 0px'/.test(on),
+      '文档库 scrollspy 的判定边界跟着下移一个 tab 条')
+  }
+  // ---- tabRail 同开:rail 让位(tab 条根本不走,再浮一条就是多余) ----
+  {
+    const c3 = JSON.parse(readFileSync(cfgP, 'utf8'))
+    c3.tabRail = true
+    wr(cfgP, c3)
+    const rr = runGen(NEW_SCRIPTS, fx62.kb)
+    const both = readFileSync(idxP, 'utf8')
+    ok(rr.status === 0 && count(both, 'class="tabrail"') === 0 && !both.includes('railitem'),
+      'stickyTabs 与 tabRail 同开:rail 一点不渲染', `exit ${rr.status}`)
+    ok(both.includes('.tabbar { position: sticky'), '同开时吸顶那条照旧在(让位的是 rail,不是吸顶)')
+    c3.tabRail = false
+    wr(cfgP, c3)
+    runGen(NEW_SCRIPTS, fx62.kb)
+  }
+  {
+    const sc = readFileSync(idxP, 'utf8').match(/<script>([\s\S]*?)<\/script>/g)
+      .map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  cfg.stickyTabs = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, fx62.kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
 }
 

@@ -9,6 +9,54 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.3] - 2026-08-28
+
+### Added
+- **`config.stickyTabs`: the tab bar freezes under the hub bar.** Scroll a long
+  pane and the tab bar was gone — switching panes meant scrolling all the way
+  back up. `stickyTabs: true` makes `.tabbar` `position: sticky` at the hub
+  bar's measured height (`--ddd-hubh`, remeasured on load and on resize through
+  a rAF, because the hub bar's flex-wrap changes height with the window), so
+  the tabs stay one click away wherever you are on the page. It sits at
+  `z-index: 50` — under the hub bar (60), the lazy-load progress line (70) and
+  the release peek card (65), over everything in the panes — takes the hub
+  bar's own `--bg` so cards do not show through, and paints its 14px bottom
+  margin with a same-colour shadow rather than changing the layout (turning
+  that margin into padding would push the underline away from the tabs and
+  break the active tab's -1px overlap). Horizontal scrolling of the tab bar
+  itself is untouched: `overflow-x` on the sticky element does not affect its
+  own stickiness.
+
+  Everything that used to compensate for one sticky bar now compensates for
+  two: the global anchor offset becomes
+  `calc(var(--ddd-hubh) + var(--ddd-tabh) + 12px)` instead of a flat `58px`, so
+  a deep link no longer parks the card's header behind the tab bar; the docs
+  library's own sticky nav strip and its scroll-spy boundary move down by the
+  tab bar's height as well. `--ddd-tabh` is measured from the live element next
+  to the existing hub-bar measurement, not guessed.
+
+  With `tabRail` also on, the rail is suppressed — the two are answers to the
+  same problem ("the tab bar left" versus "the tab bar never leaves"), and
+  `stickyTabs` is now the recommended one. Unset or `false` leaves the output
+  byte-for-byte frozen.
+
+### Fixed
+- **The tab rail's hand-off gap.** The hub bar is `position: sticky`, but the
+  IntersectionObserver watching the tab bar used the viewport as its root — so
+  while the tab bar slid *under* the hub bar it still counted as intersecting,
+  and the extra `boundingClientRect.top < 0` condition kept the rail hidden.
+  For that whole stretch neither the tab bar nor the rail was on screen. The
+  observer now carries `rootMargin: '-<hub height>px 0px 0px 0px'` so the
+  covered strip stops counting as visible, and the decision is a single
+  measured test — `bar.getBoundingClientRect().bottom <= hubH + 1` — shared by
+  the observer, a rAF-throttled `scroll` fallback (for boundary jitter) and the
+  media-query listener, with no scroll-direction condition left. The observer
+  is rebuilt on resize, since `rootMargin` is fixed at construction time and
+  the hub bar's height is not. Clicking a rail item still lands the tab bar
+  against the hub bar's lower edge, which now puts its bottom edge below
+  `hubH`, so the rail retracts on its own. The rail also fades in from 8px to
+  the left over 120ms, skipped under `prefers-reduced-motion`.
+
 ## [0.15.2] - 2026-08-27
 
 ### Added

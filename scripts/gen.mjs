@@ -4013,7 +4013,11 @@ const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.h
 // rail 清单不另立一份 —— 就地从下面那段 tabbar 标记解析出来:tab 增减只有一处要改,
 // 两边永远说不出不一样的话(截图那项在 rail 里同样是一项,照旧出站跳转)。
 // 关 = HTML / CSS / JS / 两处同步全为空串,产物逐字节冻结。
-const TABRAIL = cfg.tabRail === true
+// ———— tab 条吸顶(v0.15.3,config.stickyTabs:布尔,默认关)————
+// tab 条自己冻在 hubbar 下沿:滚到哪儿都看得见、一键就切,鼠标不必跑到屏幕左缘。
+// 与 tabRail 是同一个问题的两种答法 —— 「tab 条走了才补一条」对「tab 条根本不走」;同开时 rail 让位。
+const STICKY = cfg.stickyTabs === true
+const TABRAIL = cfg.tabRail === true && !STICKY
 const TABBAR_HTML = `<div class="tabbar">
     <button class="tab tab-active" data-pane="progress">${OVERVIEW ? '总览' : '进度看板'}</button>
     ${PATH_ON ? `<button class="tab" data-pane="path">决策路径</button>` : ''}
@@ -4037,8 +4041,11 @@ const TABRAIL_CSS = !TABRAIL ? '' : `
   @media (min-width: 1200px) {
     .tabrail:not([hidden]) { position: fixed; left: 8px; top: calc(var(--hubh, 41px) + 8px); z-index: 55;
       display: flex; flex-direction: column; gap: 1px; width: 120px; padding: 5px;
-      background: var(--bg); border: 1px solid var(--line-strong); border-radius: 10px; }
+      background: var(--bg); border: 1px solid var(--line-strong); border-radius: 10px;
+      animation: railin .12s ease-out; } /* 从 display:none 里冒出来,transition 跑不了,只能用 animation */
   }
+  @keyframes railin { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .tabrail:not([hidden]) { animation: none; } }
   .railitem { appearance: none; border: 0; background: none; cursor: pointer; font: inherit; font-size: 11.5px;
     font-weight: 600; line-height: 1.5; color: var(--mut); text-align: left; text-decoration: none;
     padding: 4px 7px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -4058,14 +4065,30 @@ const TABRAIL_JS = !TABRAIL ? '' : `
     var bar = document.querySelector('.tabbar')
     if (!rail || !bar || typeof IntersectionObserver !== 'function') return // 没 IO 的旧浏览器:静默不出现
     var wide = window.matchMedia('(min-width: 1200px)') // 窄屏没有左侧留白,rail 永不显示
-    var past = false
     var held = false // 键盘焦点还落在 rail 里:先别收走,否则焦点掉回 body,人就断了线
-    var apply = function () { rail.hidden = !(held || (past && wide.matches)) }
-    new IntersectionObserver(function (es) {
-      var e = es[es.length - 1]
-      past = !e.isIntersecting && e.boundingClientRect.top < 0 // 只认「向上滑出去」,别的方向离场不算
-      apply()
-    }, { threshold: 0 }).observe(bar) // 阈值 0:tab 条露出一丝就算「在视口」,rail 立刻让位给它
+    // 判定只认一件事:tab 条底边有没有钻到 hubbar 下沿以上 —— 那时它在人眼里已经没了。
+    // 旧的「!isIntersecting && top < 0」有个交接空档:hubbar 是 sticky 顶栏,IO 的 root 却是整个视口,
+    // tab 条滑进顶栏底下那一段仍算 intersecting,于是 tab 条看不见、rail 也不出来,两头落空。
+    // 现在按实测 rect 判,谁触发的(IO / 滚动兜底 / 媒体查询)都走这一句,也不再管滚动方向。
+    var apply = function () {
+      var gone = bar.getBoundingClientRect().bottom <= hubH + 1
+      rail.hidden = !(held || (gone && wide.matches))
+    }
+    var io = null
+    var arm = function () { // rootMargin 在建观察器时就定死,hubbar 换行改了高就得重建
+      if (io) io.disconnect()
+      // root 顶边压到 hubbar 下沿:被顶栏盖住的那段不再算「在视口」,IO 恰好在交接点回调
+      io = new IntersectionObserver(apply, { rootMargin: '-' + hubH + 'px 0px 0px 0px', threshold: 0 })
+      io.observe(bar) // 阈值 0:tab 条在顶栏下露出一丝就算在场,rail 让位给它
+    }
+    arm()
+    var raf = 0 // 滚动兜底:IO 只在边界翻转时回调,边界抖动或 rootMargin 过期都靠这一路补齐(rAF 节流)
+    window.addEventListener('scroll', function () {
+      if (raf) return
+      raf = requestAnimationFrame(function () { raf = 0; apply() })
+    }, { passive: true })
+    var rearm = 0
+    window.addEventListener('resize', function () { cancelAnimationFrame(rearm); rearm = requestAnimationFrame(arm) })
     if (wide.addEventListener) wide.addEventListener('change', apply)
     // 只认键盘焦点(:focus-visible):鼠标点按钮在部分浏览器里也会得焦点,那种不该把 rail 钉住
     rail.addEventListener('focusin', function (ev) {
@@ -4085,6 +4108,28 @@ const TABRAIL_JS = !TABRAIL ? '' : `
       window.scrollTo({ top: Math.max(0, bar.getBoundingClientRect().top + window.scrollY - hubH - 8) })
     })
   })()`
+
+// tab 条吸顶的样式与各处补偿(全部 STICKY 门控,关档逐字节冻结)。
+// 背景取 hubbar 同一枚 --bg:两条吸顶栏连成一片,底下滚过的卡片不透上来。
+// margin-bottom 那 14px 是透明的,内容会从缝里穿过去 —— 用一层同色投影盖住,不动布局(改 padding 会把
+// 下沿那条线推离 tab,active tab 的 -1px 压线就对不上了)。
+// z 50:低于 hubbar(60)、懒加载进度线(70)、发布 peek(65),高于卡片;与 .docsnav 同层但错开位置,不打架。
+const STICKY_CSS = !STICKY ? '' : `
+  /* ============ tab 条吸顶(v0.15.3,config.stickyTabs)============ */
+  .tabbar { position: sticky; top: var(--ddd-hubh, 56px); z-index: 50;
+    background: var(--bg); box-shadow: 0 14px 0 var(--bg); }`
+// 锚点补偿:吸顶层从「只有 hubbar」变成「hubbar + tab 条」,深链落点不加上 tab 条高度,卡头就被盖住。
+const STICKY_ANCHOR = !STICKY ? '58px' : 'calc(var(--ddd-hubh, 56px) + var(--ddd-tabh, 44px) + 12px)'
+const STICKY_DSEG = !STICKY ? '' : ' + var(--ddd-tabh, 44px)'
+// 文档库那条导航切片也得让开 tab 条,否则两条吸顶栏叠在一处
+const STICKY_DOCSNAV = !STICKY ? 'var(--hubh, 41px)' : 'calc(var(--hubh, 41px) + var(--ddd-tabh, 44px))'
+const STICKY_SPY = !STICKY ? '' : ' + tabH'
+const STICKY_TABH_DECL = !STICKY ? '' : ', tabH = 44'
+const STICKY_TABBAR_EL = !STICKY ? '' : `\n  const tabbarEl = document.querySelector('.tabbar')`
+const STICKY_SETVARS = !STICKY ? '' : `
+    if (tabbarEl && tabbarEl.offsetHeight) tabH = tabbarEl.offsetHeight
+    rs.setProperty('--ddd-hubh', hubH + 'px') // tab 条落点 = hubbar 实高(与 --hubh 同一次实测,给吸顶自己一个名字)
+    rs.setProperty('--ddd-tabh', tabH + 'px') // 锚点补偿要连 tab 条一起减`
 
 const html = `<!doctype html>
 <!-- ddd-gen v${GEN_VER} -->
@@ -4229,7 +4274,7 @@ const html = `<!doctype html>
   /* ———— 文档库 Hub(D46 方案B):四段卡片墙 + 阅读顺序 stepper + 已读进度 ———— */
   /* 导航切片吸顶(BL-C43):stepper+chips 冻在 hubbar 之下,滚到中下部仍能看当前段/跳段/切线;
      top 不写死 —— hubbar flex-wrap 换行高度可变,JS 量高写 --hubh;背景不透明防卡片叠影;z 低于 hubbar(60)高于卡片 */
-  .docsnav { position: sticky; top: var(--hubh, 41px); z-index: 50; background: var(--bg);
+  .docsnav { position: sticky; top: ${STICKY_DOCSNAV}; z-index: 50; background: var(--bg);
     padding: 2px 0 8px; border-bottom: 1px solid var(--line); margin: 14px 0 10px; }
   .hstepper { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 2px; }
   .hstep { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-strong); background: var(--card);
@@ -4256,7 +4301,7 @@ const html = `<!doctype html>
   .docstatus b { color: var(--mut); font-weight: 600; }
   .dseg { margin-top: 26px; }
   /* 锚点补偿 = hubbar + docsnav 实高(JS 量高写变量)+ 12px 呼吸;.dseg[id] 提特异度,防后面的 [id] 通配盖掉 */
-  .dseg[id] { scroll-margin-top: calc(var(--hubh, 41px) + var(--dnavh, 0px) + 12px); }
+  .dseg[id] { scroll-margin-top: calc(var(--hubh, 41px) + var(--dnavh, 0px)${STICKY_DSEG} + 12px); }
   .dseghead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 11px; padding-bottom: 7px; border-bottom: 1px solid var(--line-strong); }
   .dseghead .dsn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%;
     color: #fff; font-size: 11.5px; font-weight: 700; align-self: center; }
@@ -4423,7 +4468,7 @@ const html = `<!doctype html>
 
 ${PATH_CSS_A}
 
-  [id] { scroll-margin-top: 58px; } /* 锚点跳转别钻到吸顶栏底下 */
+  [id] { scroll-margin-top: ${STICKY_ANCHOR}; } /* 锚点跳转别钻到吸顶栏底下 */
   .flash-target { animation: flashpulse 1.6s ease; border-radius: 12px; }
   @keyframes flashpulse { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 18% { box-shadow: 0 0 0 3px ${tk('flash-glow')}; } }
 
@@ -4489,7 +4534,7 @@ ${PATH_CSS_B}
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -4884,20 +4929,20 @@ ${DLIVE_JS}    const card = e.target.closest('.doccard')
           const k = en.target.dataset.seg
           if (steps[k]) steps[k].classList.add('active')
         })
-      }, { rootMargin: '-' + (hubH + dnavH + 10) + 'px 0px -62% 0px', threshold: 0 })
+      }, { rootMargin: '-' + (hubH + dnavH + 10${STICKY_SPY}) + 'px 0px -62% 0px', threshold: 0 })
       docsPaneEl.querySelectorAll('.dseg').forEach((sec) => io.observe(sec))
     }
   }
   // ———— 导航吸顶量高(BL-C43):hubbar/docsnav 都因 flex-wrap 换行高度可变,吸顶 top、锚点补偿、scrollspy 边界一律量出来 ————
   const hubbarEl = document.querySelector('.hubbar')
-  const docsnavEl = docsPaneEl ? docsPaneEl.querySelector('.docsnav') : null
-  let hubH = 41, dnavH = 0
+  const docsnavEl = docsPaneEl ? docsPaneEl.querySelector('.docsnav') : null${STICKY_TABBAR_EL}
+  let hubH = 41, dnavH = 0${STICKY_TABH_DECL}
   function docsNavSync() {
     if (hubbarEl && hubbarEl.offsetHeight) hubH = hubbarEl.offsetHeight
     if (docsnavEl && docsnavEl.offsetHeight) dnavH = docsnavEl.offsetHeight // pane display:none 时量得 0:保留旧值,切进 docs tab 再补量
     const rs = document.documentElement.style
     rs.setProperty('--hubh', hubH + 'px')
-    rs.setProperty('--dnavh', dnavH + 'px')
+    rs.setProperty('--dnavh', dnavH + 'px')${STICKY_SETVARS}
     buildDocSpy()
   }
   docsNavSync()

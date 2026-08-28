@@ -257,7 +257,24 @@ app/kanban/
 
 反悔用 `node <plugin>/scripts/cards-join.mjs --dir app/kanban`(同样自带 gen 比对与回滚)。
 
-## 左侧竖向 tab 导航(tabRail,v0.14.1:opt-in)
+## tab 条吸顶(stickyTabs,v0.15.3:opt-in,**推荐**)
+
+`config.stickyTabs` 缺省关;设 `true` 后 tab 条不再随页面滚走,而是冻在 hubbar 下沿 —— 长 pane 翻到
+中段也能一眼看见、一键就切,不用滚回顶端,鼠标也不用跑到屏幕左缘。
+
+- **落点是量出来的**:hubbar 会 flex-wrap 换行、高度可变,所以 tab 条的 `top` 跟 `--ddd-hubh` 走,
+  load 与 resize 时(rAF 节流)现量 `.hubbar` 的 offsetHeight 写进去。
+- **底色不透**:取 hubbar 同一枚 `--bg`,下方卡片不会透上来;下沿那 14px 外边距用同色投影盖住,
+  不动布局(改成 padding 会把下沿那条线推离 tab,active tab 的 -1px 压线就对不上了)。
+- **层不打架**:z 50 —— 低于 hubbar(60)、懒加载进度线(70)、发布 peek(65),高于 pane 里的一切。
+  tab 条自己的横向滚动照旧(sticky 与元素自身的 `overflow-x` 不冲突)。
+- **吸顶层高了,补偿跟着高**:深链锚点补偿从写死的 58px 改成
+  `calc(var(--ddd-hubh) + var(--ddd-tabh) + 12px)`,否则卡头正好被 tab 条盖住;文档库那条自己也吸顶的
+  导航切片、以及它的 scrollspy 判定边界,一并让开一个 tab 条的高度。`--ddd-tabh` 同样是现量的。
+- **与 tabRail 二选一**:两个开关同开时 rail 不渲染 —— tab 条根本不走,再浮一条就是多余。
+- **字节冻结**:不配或 `false` 时输出逐字节不变。
+
+## 左侧竖向 tab 导航(tabRail,v0.14.1:opt-in,已被 stickyTabs 取代)
 
 `config.tabRail` 缺省关;设 `true` 后:板子往下滑、tab 条从视口顶端离开之后,页面左侧留白里浮出
 一条竖排 tab 导航(同样的文案与「· N」徽章、当前 tab 高亮、点一下就切)。
@@ -268,9 +285,11 @@ app/kanban/
 - **点击 = 同一条路**:走 tab 按钮那个 `show()` + `history.replaceState`,深链、懒加载 pane 行为不变;
   切完滚到 **tab 条**、贴 hubbar 下沿停住(v0.15.1)。落 pane 顶的话 tab 条正好被顶出视口,而 rail 只在
   tab 条滑出时才在 —— 两头都看不见就丢了方位;停在 tab 条上,tab 条露出来,rail 按规则自行让位。
-- **三道显隐门**:tab 条向上离开视口才出现(`IntersectionObserver`,阈值 0 —— tab 条露出一丝就算在视口,
-  rail 让位);窗口窄于 1200px 没有左侧留白,永不出现;浏览器没有 `IntersectionObserver` 就静默不出现。
-  键盘焦点还落在 rail 里时(`:focus-visible`)先不收走,免得焦点掉回 body。
+- **三道显隐门**:tab 条底边钻到 hubbar 下沿以上才出现 —— hubbar 是 sticky 顶栏,而 IO 的 root 是整个
+  视口,tab 条滑进顶栏底下那一段仍算「在视口」,于是曾有一段两头落空的交接空档(v0.15.3 修:IO 带
+  `rootMargin` 把 root 顶边压到 hubbar 实高,判定改量 `bottom`,另加一路 rAF 节流的 `scroll` 兜底,
+  resize 时重建观察器);窗口窄于 1200px 没有左侧留白,永不出现;浏览器没有 `IntersectionObserver`
+  就静默不出现。键盘焦点还落在 rail 里时(`:focus-visible`)先不收走,免得焦点掉回 body。
 - **不跟人抢地方**:它住在内容列之外的留白里,验收 pane 的分组目录、文档库的左导航都在列内,互不遮挡。
 - **字节冻结**:不配或 `false` 时输出逐字节不变。
 
