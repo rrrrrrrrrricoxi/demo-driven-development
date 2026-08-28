@@ -3297,6 +3297,9 @@ const OV_SETLINE = !OVERVIEW ? '' : `
 // 深链落进折叠区(总览页底的迭代史)时先把沿途的 details 全打开,否则跳到 display:none 元素 = 毫无反应
 const OV_ROUTE = !OVERVIEW ? '' : `
     for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true`
+// 时间线左栏宽只在这一处定义:CSS 变量 --relgut 与轴的起点偏移 TL.lbl 都从它来。
+// 分成两处写就是 v0.15.4 那个「轴的分隔线与带的分隔线差几十像素」—— 一改一漏,画面就对不上。
+const REL_GUT = 200
 const REL_CSS = !REL ? '' : `
   /* ============ 发布进度 tab(v0.12.0,config.releaseTab)============ */
   .relbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 9px; }
@@ -3361,10 +3364,15 @@ const REL_CSS = !REL ? '' : `
   /* 时间线(v0.13.1 重做):一版一带,折叠只占带头,展开走泳道打包;轴按当天繁忙度加宽 */
   .relwf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
   .reldrg { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .reltlw { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); overflow: hidden; }
+  /* 左栏宽在这里定义一次(--relgut);往下凡是左栏,一律读 var(--relgut) */
+  .reltlw { --relgut: ${REL_GUT}px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); overflow: hidden; }
   .reltlsc { overflow-x: auto; overflow-y: hidden; }
   .reltli { position: relative; }
   .reltlax { position: relative; height: 26px; border-bottom: 1px solid var(--line); }
+  /* 轴行也有自己的左栏格:同宽、同 sticky、同右边框 —— 横滚时两条分隔线咬在一起,
+     日期标签也不会滑到带名底下去(v0.15.5 之前轴行这一截是空的,分隔线各走各的) */
+  .reltlag { position: sticky; left: 0; z-index: 3; width: var(--relgut); height: 100%;
+     background: var(--card); border-right: 1px solid var(--line); }
   .reltlgl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
   .reltltk { position: absolute; top: 15px; height: 8px; width: 1px; background: var(--line-strong); }
   .reltlx { position: absolute; top: 4px; font-size: 10.5px; color: var(--faint); white-space: nowrap;
@@ -3375,20 +3383,26 @@ const REL_CSS = !REL ? '' : `
      background: var(--card); border-radius: 3px; padding: 0 3px; }
   .relbd { position: relative; border-bottom: 1px solid var(--line); }
   .relbd:last-child { border-bottom: 0; }
-  /* 带头整条 sticky:横向滚到七月了,带名与「155 PR · 05-10→07-14」还在原地 */
-  .relgut { position: sticky; left: 0; z-index: 3; width: 200px; background: var(--card); border-right: 1px solid var(--line); }
+  /* 带头整条 sticky:横向滚到七月了,带名与「155 PR · 05-10→07-14」还在原地。
+     整格(与带同高)就是折叠/展开的触发面 —— 展开后带头下面那片底色也是这条带,点它得算数 */
+  .relgut { position: sticky; left: 0; z-index: 3; width: var(--relgut); background: var(--card);
+     border-right: 1px solid var(--line); cursor: pointer; }
   .relbd.on .relgut { background: var(--brand-soft); }
-  .relbh { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 9px;
-     appearance: none; font: inherit; text-align: left; border: 0; background: none; cursor: pointer; color: var(--mut); }
-  .relbh:hover { color: var(--ink); }
+  /* hover 高亮走一层 currentColor 薄膜:折叠(白底)与展开(brand-soft 底)是两种底色,
+     一层薄膜对两种都成立,暗档里 ink 翻浅也自然变成「提亮」,不用为此新造颜色 */
+  .relgut::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: currentColor; opacity: 0; }
+  .relgut:hover::after { opacity: .05; }
+  .relgut:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -2px; z-index: 4; }
+  .relbh { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 9px; color: var(--mut); }
+  .relgut:hover .relbh { color: var(--ink); }
   .relbc { flex: none; width: 9px; font-size: 10px; color: var(--faint); }
   .relbt { flex: 1 1 auto; min-width: 0; line-height: 1.15; }
   /* 两行:带名一行、「N PR · 起→止」一行 —— 挤在一行里就是 0.13.0 那个被截成「155 PR · 05-10→…」的样子。
-     省略号只是宿主写了超长 label 时的兜底,正常数据在 200px 里放得下。 */
+     省略号只是宿主写了超长 label 时的兜底,正常数据在 --relgut 那点宽里放得下。 */
   .relbn, .relbm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .relbn { font-size: 12px; font-weight: 600; color: var(--ink); }
   .relbm { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .relsub { position: absolute; left: 0; width: 200px; padding: 0 9px; font-size: 9.5px; line-height: 13px; color: var(--faint); }
+  .relsub { position: absolute; left: 0; width: var(--relgut); padding: 0 9px; font-size: 9.5px; line-height: 13px; color: var(--faint); }
   .relrg { position: absolute; height: 3px; border-radius: 2px; }
   .relsp { position: absolute; border-radius: 1px; }
   .relpb { position: absolute; height: 11px; border-radius: 3px; display: block; text-decoration: none; overflow: hidden;
@@ -3532,7 +3546,7 @@ const REL_JS = !REL ? '' : `
     // 锚点日与 gen 烤日桶时同一条规则:开着看 createdAt,合了看 mergedAt,关掉看 closedAt
     function anc(d) { return String(d.s === 'open' ? d.c : d.m || d.x || d.c).slice(0, 10) }
     // 时间线的全部尺寸都在这一处:轴(lbl/base/slot/quiet)、泳道(lanes/row/min/gap)、带(head/sub/pad)
-    var TL = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48 }
+    var TL = { lbl: ${REL_GUT}, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48 }
     var DAYC = {}, byG = {} // 全局日计数(轴宽只看它,展开/折叠/筛选都不让轴跳)与带 → PR
     for (i = 0; i < G.length; i++) for (var gd in G[i].d) DAYC[gd] = (DAYC[gd] || 0) + G[i].d[gd]
     for (i = 0; i < D.length; i++) { if (!byG[D[i].gp]) byG[D[i].gp] = []; byG[D[i].gp].push(D[i]) }
@@ -3632,7 +3646,8 @@ const REL_JS = !REL ? '' : `
       var sp = {}
       for (k = 0; k < days.length; k++) if (days[k].slice(8) === '01') sp[days[k]] = 'mo'
       for (k = 0; k < RELS.length; k++) { var rd = String(RELS[k].at).slice(0, 10); if (ax.x[rd] !== undefined) sp[rd] = 'tag' }
-      var ticks = relTicks(days, ax, sp, TL.tick), out = ['<div class="reltlax" style="width:' + ax.W + 'px">']
+      // 轴行开头先落一格左栏(与带的左栏同宽同 sticky):分隔线对得上,日期也滑不进带名区
+      var ticks = relTicks(days, ax, sp, TL.tick), out = ['<div class="reltlax" style="width:' + ax.W + 'px"><div class="reltlag"></div>']
       for (k = 0; k < ticks.length; k++) {
         if (!ticks[k].txt) { out.push('<div class="reltltk" style="left:' + ticks[k].x + 'px"></div>'); continue }
         out.push('<div class="reltlgl" style="left:' + ticks[k].x + 'px"></div>')
@@ -3656,13 +3671,16 @@ const REL_JS = !REL ? '' : `
         var mp = op ? relPack(multi, ax, TL) : { used: 0, bars: [] }
         var sg2 = op ? relGrid(byDay, ax, TL) : { used: 0, bars: [] }
         var H = relBandH(mp.used, sg2.used, TL, op)
-        var body = [], gut = ['<div class="relgut" style="height:' + H + 'px">'
-          + '<button type="button" class="relbh" data-relbd="' + xe(g.g) + '" title="' + xe(g.sf || '') + '">'
+        // 触发面 = 整格(role/tabindex/aria/title/data 都挂这一层),里头那两行只是字:
+        // 展开后带头底下那片底色也是这条带,只有文字那几行能点就是「看着能点、点了不动」
+        var body = [], gut = ['<div class="relgut" role="button" tabindex="0" aria-expanded="' + (op ? 'true' : 'false')
+          + '" data-relbd="' + xe(g.g) + '" title="' + xe(g.sf || '') + '" style="height:' + H + 'px">'
+          + '<span class="relbh">'
           + '<span class="relbc">' + (op ? '▾' : '▸') + '</span><span class="relbt">'
           + '<b class="relbn">' + xe(g.nm) + '</b><span class="relbm">' + (q ? hit + ' / ' + g.n : g.n) + ' PR'
           + (g.lo ? ' · ' + md(g.lo) + '→' + md(g.hi) : '')
           // 窗口切掉一部分时说清楚,别让人以为「这条带就这些」
-          + (inwin < g.n ? ' · 窗口内 ' + inwin : '') + '</span></span></button>']
+          + (inwin < g.n ? ' · 窗口内 ' + inwin : '') + '</span></span></span>']
         if (!op && g.lo) { // 折叠态:一条跨度条 + 每天一个小竖标(横向也用起来)
           var rg = relBar(ax, g.lo < ax.t0 ? ax.t0 : g.lo, g.hi > ax.t1 ? ax.t1 : g.hi, 4)
           if (rg) body.push('<div class="relrg relc s-' + g.sg + ' q' + g.q + '" style="left:' + rg.x0 + 'px;width:' + rg.w + 'px;top:24px"></div>')
@@ -3702,6 +3720,16 @@ const REL_JS = !REL ? '' : `
       var lg = pane.querySelector('.rellk'), lgh = []
       for (k = 0; k < G.length; k++) lgh.push('<i class="relc s-' + G[k].sg + ' q' + G[k].q + '"></i>' + xe(G[k].nm))
       lg.innerHTML = lgh.join('')
+    }
+    // 折叠/展开的唯一入口:整格点击与键盘 Enter / Space 都落这里。
+    // drawTl 把整片 DOM 换掉,键盘来的那次得把焦点还回同一条带的格子,不然连按两下就没了着落。
+    function toggleBand(id, keep) {
+      if (id === undefined) return
+      bOpen[id] = !bOpen[id]
+      drawTl()
+      if (!keep) return
+      var gs = host.querySelectorAll('.relgut'), k
+      for (k = 0; k < gs.length; k++) if (gs[k].dataset.relbd === id) { gs[k].focus(); return }
     }
     function setView(v, save) {
       view = v === 'timeline' ? 'timeline' : 'table'
@@ -3749,8 +3777,8 @@ const REL_JS = !REL ? '' : `
         drawTl()
         return
       }
-      var bh = t.closest('.relbh') // 只认带头那颗钮:条本身是 <a>,点了要去 GitHub
-      if (bh) { var bid = bh.dataset.relbd; bOpen[bid] = !bOpen[bid]; drawTl(); return }
+      var bh = t.closest('.relgut') // 只认左栏那一格:条本身是 <a> 且在格子外面,点了照旧去 GitHub
+      if (bh) { toggleBand(bh.dataset.relbd); return }
       var sh = t.closest('[data-relsort]')
       if (sh) {
         var kk = sh.dataset.relsort
@@ -3763,6 +3791,14 @@ const REL_JS = !REL ? '' : `
       }
       var gb = t.closest('.relgb')
       if (gb) { var g = gb.closest('tr').dataset.relgh; open[g] = !open[g]; renderTable() }
+    })
+    // role="button" 的格子得自己认 Enter / Space —— 那一手是原生 <button> 才白送的
+    host.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return
+      var gt = ev.target.closest ? ev.target.closest('.relgut') : null
+      if (!gt) return
+      ev.preventDefault() // 空格的默认动作是翻页
+      toggleBand(gt.dataset.relbd, true)
     })
     // peek 的触发面委托在时间线容器上:每次 drawTl 都整块换掉 innerHTML,委托绑一次就管到底。
     // mouseenter / focusin 都不冒泡,所以走捕获 —— 捕获阶段照样经过祖先,委托成立。

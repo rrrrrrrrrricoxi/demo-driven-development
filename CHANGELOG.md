@@ -9,6 +9,28 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.5] - 2026-08-28
+
+### Fixed
+- **The release timeline's band gutter is clickable as a whole cell.** Expanding
+  a band grows its left column to the band's full height, but only the two lines
+  of text in it toggled — the tinted area below them looked like part of the same
+  control and did nothing. The gutter cell itself is now the trigger
+  (`role="button"`, `tabindex="0"`, `aria-expanded`, `cursor: pointer`, a hover
+  wash over the whole cell, and Enter/Space from the keyboard, which puts focus
+  back on the same band after the redraw). The heading inside is now plain text,
+  and the `title` tooltip moved with the trigger, so nothing else about the band
+  head changed.
+- **The axis row and the bands share one gutter width.** The date axis started
+  its days at a hard-coded `TL.lbl` while the band gutters took their width from
+  CSS, and the axis row had no gutter cell at all — so its divider sat tens of
+  pixels off the bands', and scrolling sideways slid date labels under the band
+  names. The width is now defined once (`REL_GUT` → the `--relgut` custom
+  property, which `.relgut`, `.relsub` and the axis all read, and which `TL.lbl`
+  is generated from), and the axis row renders its own sticky gutter cell with
+  the same right border. Both stick to the same scroll container, so the two
+  dividers stay aligned at every scroll offset.
+
 ## [0.15.4] - 2026-08-28
 
 ### Changed
