@@ -25,7 +25,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `releaseTab`, `richText`, `backlogArchive`, `wip`, `cardsDir`, `tabRail`, `overviewTab`, `pathTab`.
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `releaseTab`, `richText`, `backlogArchive`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -283,7 +283,30 @@ was and exits non-zero. `cards-join.mjs` is the way back, with the same check.
 Upgrade every session before splitting — an older `gen` cannot see the card
 directory. Left unset, output is byte-identical to a board without the feature.
 
-## Left tab rail (optional)
+## Sticky tab bar (optional, recommended)
+
+Set `config.stickyTabs` to `true` and the tab bar freezes under the hub bar
+instead of scrolling away: deep in a long pane the tabs are still there, one
+click from any other pane, with no trip back to the top and no reach for the
+screen edge. Its resting height is the hub bar's measured height, published as
+`--ddd-hubh` and remeasured on load and on resize (through a rAF), because the
+hub bar wraps to two lines on a narrow window. The bar takes the hub bar's own
+background so cards do not show through, and sits at `z-index: 50` — below the
+hub bar (60), the lazy-load progress line (70) and the release peek card (65),
+above everything inside the panes. Its own horizontal scrolling is unchanged.
+
+Everything that compensated for one sticky bar now compensates for two: the
+global anchor offset becomes `calc(var(--ddd-hubh) + var(--ddd-tabh) + 12px)`,
+so a deep link no longer parks the card's header behind the tab bar, and the
+doc library's sticky nav strip and its scroll-spy boundary move down by the tab
+bar's height as well. `--ddd-tabh` is measured from the live element.
+
+With `tabRail` also set, the rail is suppressed: the two are answers to the
+same problem, and there is nothing for the rail to stand in for once the tab
+bar never leaves. Left unset, output is byte-identical to a board without the
+feature.
+
+## Left tab rail (optional, superseded by `stickyTabs`)
 
 Set `config.tabRail` to `true` and, once the tab bar has scrolled off the top,
 a narrow vertical copy of it appears in the left margin: same labels, same
@@ -299,6 +322,11 @@ would push the tab bar just above the fold, and the rail, which exists only
 while the bar is off the top, would then step aside by its own rule, so both
 ways back would disappear at once. While keyboard focus is inside the rail it
 stays put.
+The rail appears the moment the tab bar's bottom edge passes under the hub
+bar — the observer's root is inset from the top by the hub bar's height, so the
+strip the sticky hub bar covers no longer counts as visible, and the same
+measured test backs a rAF-throttled `scroll` fallback. It fades in from 8px to
+the left over 120ms, skipped under `prefers-reduced-motion`.
 Below 1200px there is no margin to put it in, so it never appears; without
 `IntersectionObserver` it stays silent as well. Left unset, output is
 byte-identical to a board without the feature.
