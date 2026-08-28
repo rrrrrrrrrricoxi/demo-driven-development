@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。776 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。777 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -1522,6 +1522,10 @@ console.log('T39 done 卡归档')
   ok(!blPane.includes('id="BL-3"') && !blPane.includes('id="BL-4"'), 'Backlog 不再列 done 卡')
   ok(arPane.includes('id="BL-3"') && arPane.includes('id="BL-4"'), '归档 pane 收下两张 done 卡')
   ok(arPane.indexOf('id="BL-4"') < arPane.indexOf('id="BL-3"'), '归档顺序仍是日期新→旧(与 Backlog 同一把尺)')
+  {
+    const arH1 = arPane.match(/<h1>([\s\S]*?)<\/h1>/)
+    ok(!!arH1 && !arH1[1].includes('Backlog') && arH1[1].includes('归档'), '归档 h1 不含 Backlog:归档了的卡就不叫 Backlog 了')
+  }
   ok(!blPane.includes('data-k="done"'), 'Backlog 状态筛选芯片去掉 done')
   ok(on.includes(", 'archive'])") && on.includes('#pane-archive .lcard'), '归档进 PANES(深链 #archive)+ 时间筛选选择器')
   ok(on.includes("pane.id === 'pane-archive'"), '线别筛空归档时组头一并收起')

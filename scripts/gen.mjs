@@ -1787,10 +1787,10 @@ const backlogPane = `
 // 没有自己的工具条:归档是「翻旧账」的地方,全局搜索 + 线别/时间筛选足够,再加一排控件是噪音。
 const archivePane = !ARCH ? '' : `
   <div class="topbar">
-    <h1>${esc(b.instance.label || BRAND + ' · Backlog')} · 归档</h1>
+    <h1>${esc(BRAND)} · 归档</h1>
     <span class="branch">branch: ${esc(b.instance.branch)}</span>
   </div>
-  <p class="archnote">已落地的卡从 Backlog 移到这里。渲染、全局搜索、线别与时间筛选都照旧,深链(<code>#卡号</code>)直接落到这一页。</p>
+  <p class="archnote">已落地的卡从 Backlog 收进这里,不再排队。渲染、全局搜索、线别与时间筛选都照旧,深链(<code>#卡号</code>)直接落到这一页。</p>
   ${b.groups.filter((g) => g.id === ARCH_ST).map((g) => blSection(g, archItems)).join('')}
   <p class="pane-empty">当前筛选下归档里没有卡片。</p>
   <div class="legend">${blLegend}</div>

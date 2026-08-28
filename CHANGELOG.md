@@ -9,6 +9,17 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.4] - 2026-08-28
+
+### Changed
+- **The archive pane's title no longer says "Backlog."** A `backlogArchive`
+  board's archive tab read `<brand> · Backlog · 归档` — a card that has landed
+  and left the backlog was still being introduced as backlog. The `<h1>` is now
+  just `<brand> · 归档`, matching how every other pane (docs, acceptance,
+  release) names itself off `BRAND` alone. The note under it now says the
+  cards are done queuing, not merely moved. The tab label ("归档 · N") is
+  unchanged, and boards without `backlogArchive` see no difference.
+
 ## [0.15.3] - 2026-08-28
 
 ### Added
