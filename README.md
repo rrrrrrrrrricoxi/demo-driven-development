@@ -18,12 +18,14 @@ This plugin packages the SEE-IT half as a workflow:
 
 - Two skills. `ddd-workflow` is the day-to-day rhythm: scene-fit check, demo, human review, then code, verify, PR. `kanban-init` scaffolds a new board, merges scattered demos into one, or takes over a legacy hand-rolled board.
 - Two hooks. A Stop guard regenerates the board when inputs change and blocks demos that aren't linked to any card. A second hook nudges card status after `gh pr` actions. Both check whether the project actually uses this plugin before doing anything, so they stay silent everywhere else.
-- `gen.mjs` builds the kanban (`index.html`) from four manifest JSONs, renders project markdown into board-local pages, and injects a back-navigation bar into each demo.
+- `gen.mjs` builds the kanban (`index.html`) from four fixed manifest JSONs (iterations, backlog, decisions, decision path), plus the acceptance and release manifests when those tabs are switched on. It also renders project markdown into board-local pages and injects a back-navigation bar into each demo.
 - `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
 - `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
 - `retire-stale-caches.mjs` defuses superseded plugin versions that long-lived sessions are still pinned to (see "Upgrading").
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
+
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `releaseTab`, `richText`, `backlogArchive`, `wip`, `cardsDir`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -73,6 +75,18 @@ Release history is in [CHANGELOG.md](CHANGELOG.md); the process for cutting a re
 
 A mature board's `index.html` can reach hundreds of thousands of characters. `TOKEN-ECONOMY.md` is the cost discipline that keeps Claude from ever reading generated files: verify from the source of truth (manifests, markdown sources, generator exit codes) instead. `kanban-init` wires deny rules into the target project, so the discipline is enforced rather than advisory.
 
+## Document library sections (optional)
+
+Every `config.docs[]` entry carries a `category`, and the document library sorts those categories into four fixed sections, read top to bottom: 地基 (groundwork: data models, calibrations, decision logs), 流程 (process: review, planning, handover), 操作 (operations: environments and deployment), 存档 (archive: session logs and whatever is left, greyed at the end). The default mapping covers all seven categories the board knows about, and `config.docSegments` overrides it one category at a time, so `{"评审与审计": "地基"}` moves reviews up into groundwork. The sections themselves are not configurable: they are part of the hub's design, not a general grouping DSL. A category nobody mapped lands in the archive, with a warning. Left unset, the defaults apply and output is byte-identical to a board without the key.
+
+## Theming (optional)
+
+Drop a `theme.css` next to `kanban.config.json` and `gen` inlines it as the last `<style>` of every page it writes (the board, the doc pages, the screenshot gallery), where it outranks everything above it. `templates/theme.css.example` is the place to start: every token at its factory value, in two `:root` blocks, one for the board and one for the doc and gallery pages, so you can copy it whole and change only the lines you mean to. Six sets of semantic colors (status, backlog status, priority, tier, decision status, doc sections) are baked into the HTML as `style="--c:…"` attributes where no stylesheet can reach them; those go through `config.themeColors` instead, as in `{"STATUS_COLOR": {"done": "#146152"}}`. With neither configured, output is byte-identical to a board without the feature.
+
+## Session tags (optional)
+
+When several sessions work the same board in parallel, `config.sessionTags` records who owns which card: `{"dev": {"label": "dev", "desc": "product work", "color": "#3b82c4"}}`, insertion order preserved, `label` defaulting to the id and `color` to the next entry in a quiet built-in palette. A card claims one or more tags through a `session` field holding space-separated ids. Each tag renders as a small seal on the card and as a filter chip in the toolbar, single-select and intersected with the lane, search and time filters like every other chip. A tag the config never declared renders grey with a warning rather than breaking the build. An empty object counts as unset; left unset, output is byte-identical to a board without the feature.
+
 ## Lanes (optional)
 
 Most boards do not need this. When a board tracks parallel timelines or eras (say A archived, B history, C current), set `config.lanes` to an object (`ids`, `titles`, `hints`, and so on) and give each card an explicit `line`. The kanban then renders per-lane filter chips and hints. Left unset, lanes are off and output is byte-identical to a board without the feature. See the kanban-init skill for the full shape.
@@ -114,8 +128,21 @@ in place, packing its pull requests into at most six shared lanes so the
 expanded height has a ceiling. The date axis is not linear — a quiet day gets a
 few pixels and a day with many pull requests is widened to fit them side by
 side, which is where the old one-row-per-pull-request timeline was spending
-2400px of height for no information. The data comes from
-`release-manifest.json`, written by:
+2400px of height for no information.
+
+Hovering a bar or a square floats a peek card beside it after 150ms, and so
+does tabbing onto one: the number and full title, status and date, branch, the
+linked card chips (clicking one switches pane, as in the table) and the
+acceptance `n/N` when that pull request has a checklist. A pull request opened
+and merged the same day is a square a few pixels wide, so the card is the only
+place any of that fits. On a folded version band each segment stands for one
+day, and its card lists that day's pull requests, ten at most. `Esc` or moving
+away dismisses it, the card stays put while the pointer is inside it so the
+chips stay reachable, and touch gets the two-tap pattern. Every field is read
+from the row already in the table below, so nothing is baked a second time, and
+the bars carry no native `title` for a browser tooltip to stack underneath.
+
+The data comes from `release-manifest.json`, written by:
 
 ```
 node <plugin>/scripts/pr-sync.mjs [--dir <kanban>] [--dry-run] [--limit N]
@@ -266,6 +293,12 @@ acceptance pane's section index or the doc library's own left navigation. The
 list is not a second copy to keep in sync — it is parsed out of the tab bar at
 generation time, so a tab added or removed shows up in both places at once, and
 the badges are copied from the tab buttons whenever a filter recomputes them.
+A click scrolls to the tab bar itself, parking it against the bottom edge of
+the sticky hub bar, rather than to the top of the pane. Landing on the pane top
+would push the tab bar just above the fold, and the rail, which exists only
+while the bar is off the top, would then step aside by its own rule, so both
+ways back would disappear at once. While keyboard focus is inside the rail it
+stays put.
 Below 1200px there is no margin to put it in, so it never appears; without
 `IntersectionObserver` it stays silent as well. Left unset, output is
 byte-identical to a board without the feature.
@@ -309,7 +342,7 @@ it. Left unset, output is byte-identical to a board without the feature.
 ## Card CLI
 
 ```
-node <plugin>/scripts/ddd.mjs card new backlog|decision [--title "…"] [--line C] [--session dev]
+node <plugin>/scripts/ddd.mjs card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev]
 node <plugin>/scripts/ddd.mjs card set <id> <field> <value> [--json]
 node <plugin>/scripts/ddd.mjs card status <id> <status> [--no-note]
 node <plugin>/scripts/ddd.mjs card note <id> "<text>"
@@ -342,7 +375,12 @@ that have such a field; decision cards do not, so there only the status changes,
 and `card note` says so rather than writing somewhere the board never reads.
 `card link` dedupes by href and writes a link to this repository's pull request
 into the `pr` field too. A new card with no `--line` lands in the board's default
-lane, since a card with no lane is invisible in every lane view.
+lane, since a card with no lane is invisible in every lane view. A backlog card
+with no `--tier` takes whichever tier is most common among the board's non-`done`
+cards, ties going to the one listed earlier in `tiers`, an empty board falling
+back to the first key. The first key on its own would be a poor default: on a
+board taken over from a hand-rolled one it is usually an init leftover that no
+live card uses. An explicit `--tier` wins over the computed default.
 
 Every write goes through a temp file and a rename, keeps the card's existing key
 order, slots only new keys into place, and ends with two-space indentation and a
