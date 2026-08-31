@@ -1213,6 +1213,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   ok(/1 张卡的正文字段超过 800 字/.test(g1.stdout), '总数只数点得着的卡', g1.stdout.slice(0, 260))
   ok(!/有 900 字/.test(g1.stdout) && !/- BL-1 的 approach/.test(g1.stdout),
     '一行到底:不报字数,也不铺逐卡清单(v0.15.7)', g1.stdout.slice(0, 260))
+  ok(/⚠ 看板守卫:1 张卡的正文字段超过 800 字/.test(g1.stdout),
+    '非阻断通知带 ⚠ 前缀(与其它 notice 同一形制;阻断的那几条才不带)', g1.stdout.slice(0, 260))
 
   // ---- 终态卡不点名(v0.15.6,TERMINAL 与 settle.mjs 同一份口径)----
   bl.items.push({ id: 'BL-9', status: 'done', priority: Object.keys(bl.priorities)[0], tier: '1', title: 'e',
