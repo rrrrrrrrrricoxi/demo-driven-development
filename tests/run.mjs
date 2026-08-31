@@ -1210,6 +1210,40 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   touch(idxP)
   const g1 = runStop(NEW_SCRIPTS, fx35.root)
   ok(g1.status === 0 && /BL-1 的 approach 有 900 字/.test(g1.stdout), '超 800 字且无 detail → 一条非阻断 notice,点名到字段', `${g1.status} ${g1.stdout.slice(0, 260)}`)
+  ok(/1 张卡的正文字段超过 800 字/.test(g1.stdout), '总数只数点得着的卡', g1.stdout.slice(0, 260))
+
+  // ---- 终态卡不点名(v0.15.6,TERMINAL 与 settle.mjs 同一份口径)----
+  bl.items.push({ id: 'BL-9', status: 'done', priority: Object.keys(bl.priorities)[0], tier: '1', title: 'e',
+    problem: 'p', approach: '收'.repeat(900), area: 'x', source: 's' })
+  dec.entries.push({ id: 'D9', code: 'D9', status: 'live', date: '2026-01-01', title: 'u', question: '问'.repeat(900), decision: '已落地' })
+  wr(blP, bl)
+  wr(decP, dec)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  touch(idxP)
+  const g1t = runStop(NEW_SCRIPTS, fx35.root)
+  ok(g1t.status === 0 && !/BL-9/.test(g1t.stdout) && !/D9/.test(g1t.stdout),
+    '终态卡(backlog done / 决策 live)超长而无 detail 也不点名 —— 收了的卡不会再改写', g1t.stdout.slice(0, 300))
+  ok(/BL-1 的 approach 有 900 字/.test(g1t.stdout), '同一轮里非终态的长正文卡照点不误(跳过的是终态,不是这条审计)')
+  ok(/1 张卡的正文字段超过 800 字/.test(g1t.stdout), '总数也跟着跳过:两张终态卡不计入', g1t.stdout.slice(0, 300))
+  dec.entries[1].status = 'closed'
+  wr(decP, dec)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  touch(idxP)
+  const g1c = runStop(NEW_SCRIPTS, fx35.root)
+  ok(!/D9/.test(g1c.stdout) && /1 张卡的正文字段超过 800 字/.test(g1c.stdout), 'closed 与 live 同样跳过(终态三值都认)', g1c.stdout.slice(0, 300))
+  dec.entries[1].status = Object.keys(dec.statuses)[0] // 同一张卡改成非终态 → 立刻点得到名,证明跳过只由 status 决定
+  wr(decP, dec)
+  runGen(NEW_SCRIPTS, fx35.kb)
+  touch(idxP)
+  const g1n = runStop(NEW_SCRIPTS, fx35.root)
+  ok(/D9 的 question 有 900 字/.test(g1n.stdout) && /2 张卡的正文字段超过 800 字/.test(g1n.stdout),
+    '把它改回非终态,同一张卡当场被点名,总数也涨回 2', g1n.stdout.slice(0, 300))
+  bl.items.pop()
+  dec.entries.pop()
+  wr(blP, bl)
+  wr(decP, dec)
+  runGen(NEW_SCRIPTS, fx35.kb)
+
   bl.items[0].detail = '证据都在这儿'
   wr(blP, bl)
   runGen(NEW_SCRIPTS, fx35.kb)
