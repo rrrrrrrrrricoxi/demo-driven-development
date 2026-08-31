@@ -215,10 +215,10 @@ link syntax or HTML, and escaping runs before any of it — a card can quote a
 first-paragraph preview and the full text, with a quiet *expand · N more
 characters* button between them. The same switch enables an optional `detail`
 card field for the long trail of evidence, rendered after every other field as
-a collapsed block. A non-blocking guard notice names cards whose prose runs
-past 800 characters with no `detail` to move it into — cards already in a
-terminal status (`done`, `live`, `closed`) are skipped, since they will not be
-rewritten. Left unset, output is byte-identical to a board without the
+a collapsed block. A non-blocking guard notice counts, in one line, the cards
+whose prose runs past 800 characters with no `detail` to move it into, and
+points at the longest one — cards already in a terminal status (`done`, `live`,
+`closed`) are skipped, since they will not be rewritten. Left unset, output is byte-identical to a board without the
 feature.
 
 ## Archive tab (optional)

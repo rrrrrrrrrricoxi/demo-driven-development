@@ -1209,13 +1209,15 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   runGen(NEW_SCRIPTS, fx35.kb)
   touch(idxP)
   const g1 = runStop(NEW_SCRIPTS, fx35.root)
-  ok(g1.status === 0 && /BL-1 的 approach 有 900 字/.test(g1.stdout), '超 800 字且无 detail → 一条非阻断 notice,点名到字段', `${g1.status} ${g1.stdout.slice(0, 260)}`)
+  ok(g1.status === 0 && /最长:BL-1 的 approach/.test(g1.stdout), '超 800 字且无 detail → 一条非阻断 notice,指到最长的那张的字段', `${g1.status} ${g1.stdout.slice(0, 260)}`)
   ok(/1 张卡的正文字段超过 800 字/.test(g1.stdout), '总数只数点得着的卡', g1.stdout.slice(0, 260))
+  ok(!/有 900 字/.test(g1.stdout) && !/- BL-1 的 approach/.test(g1.stdout),
+    '一行到底:不报字数,也不铺逐卡清单(v0.15.7)', g1.stdout.slice(0, 260))
 
   // ---- 终态卡不点名(v0.15.6,TERMINAL 与 settle.mjs 同一份口径)----
   bl.items.push({ id: 'BL-9', status: 'done', priority: Object.keys(bl.priorities)[0], tier: '1', title: 'e',
     problem: 'p', approach: '收'.repeat(900), area: 'x', source: 's' })
-  dec.entries.push({ id: 'D9', code: 'D9', status: 'live', date: '2026-01-01', title: 'u', question: '问'.repeat(900), decision: '已落地' })
+  dec.entries.push({ id: 'D9', code: 'D9', status: 'live', date: '2026-01-01', title: 'u', question: '问'.repeat(1200), decision: '已落地' })
   wr(blP, bl)
   wr(decP, dec)
   runGen(NEW_SCRIPTS, fx35.kb)
@@ -1223,7 +1225,7 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   const g1t = runStop(NEW_SCRIPTS, fx35.root)
   ok(g1t.status === 0 && !/BL-9/.test(g1t.stdout) && !/D9/.test(g1t.stdout),
     '终态卡(backlog done / 决策 live)超长而无 detail 也不点名 —— 收了的卡不会再改写', g1t.stdout.slice(0, 300))
-  ok(/BL-1 的 approach 有 900 字/.test(g1t.stdout), '同一轮里非终态的长正文卡照点不误(跳过的是终态,不是这条审计)')
+  ok(/最长:BL-1 的 approach/.test(g1t.stdout), '同一轮里非终态的长正文卡照点不误 —— 最长指针落在它身上,而不是更长的那张终态卡')
   ok(/1 张卡的正文字段超过 800 字/.test(g1t.stdout), '总数也跟着跳过:两张终态卡不计入', g1t.stdout.slice(0, 300))
   dec.entries[1].status = 'closed'
   wr(decP, dec)
@@ -1236,8 +1238,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   runGen(NEW_SCRIPTS, fx35.kb)
   touch(idxP)
   const g1n = runStop(NEW_SCRIPTS, fx35.root)
-  ok(/D9 的 question 有 900 字/.test(g1n.stdout) && /2 张卡的正文字段超过 800 字/.test(g1n.stdout),
-    '把它改回非终态,同一张卡当场被点名,总数也涨回 2', g1n.stdout.slice(0, 300))
+  ok(/最长:D9 的 question/.test(g1n.stdout) && /2 张卡的正文字段超过 800 字/.test(g1n.stdout),
+    '把它改回非终态,同一张卡当场夺回最长指针,总数也涨回 2', g1n.stdout.slice(0, 300))
   bl.items.pop()
   dec.entries.pop()
   wr(blP, bl)
@@ -1249,7 +1251,7 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   runGen(NEW_SCRIPTS, fx35.kb)
   touch(idxP)
   const g2 = runStop(NEW_SCRIPTS, fx35.root)
-  ok(g2.status === 0 && !/approach 有 900 字/.test(g2.stdout), '卡上有了 detail 就不再点名')
+  ok(g2.status === 0 && !/正文字段超过 800 字/.test(g2.stdout), '卡上有了 detail 就不再点名')
   delete bl.items[0].detail
   wr(blP, bl)
   cfg.richText = false
@@ -1257,7 +1259,7 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   runGen(NEW_SCRIPTS, fx35.kb)
   touch(idxP)
   const g3 = runStop(NEW_SCRIPTS, fx35.root)
-  ok(g3.status === 0 && !/approach 有 900 字/.test(g3.stdout), 'richText 关着时不做正文长度审计(detail 本就不渲染,催也白催)')
+  ok(g3.status === 0 && !/正文字段超过 800 字/.test(g3.stdout), 'richText 关着时不做正文长度审计(detail 本就不渲染,催也白催)')
 
   // ---- 关回 + 撤字段:逐字节回到冻结基线 ----
   bl.items[0].approach = LONG
@@ -2707,15 +2709,16 @@ console.log('T53 更新日期批量取')
   const idx = readFileSync(join(kb, 'index.html'), 'utf8')
   ok(idx.includes('data-doc="a.html" data-line="" data-updated="2026-05-03"'), '文档取的是最后一次提交日,不是第一次')
   ok(idx.includes('data-doc="b.html" data-line="" data-updated="2026-04-02"'), '同一批 git log 里另一篇文档各归各的日期')
-  const today = new Date()
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  ok(idx.includes(`data-doc="c.html" data-line="" data-updated="${todayStr}"`), '没提交过的文档退回文件 mtime(降级链没断)')
+  // 期望值与产品同源:gen 的 mtime 降级档一律 statSync(...).mtime.toISOString().slice(0, 10)(UTC),
+  // 本地时区格式化会让 UTC+N 的机器在「本地已跨日、UTC 还没跨」的那几个钟头里假红。
+  const mtimeDay = (p) => statSync(p).mtime.toISOString().slice(0, 10)
+  ok(idx.includes(`data-doc="c.html" data-line="" data-updated="${mtimeDay(join(root, 'docs', 'c.md'))}"`), '没提交过的文档退回文件 mtime(降级链没断)')
   const shots = readFileSync(join(kb, 'shots.html'), 'utf8')
   ok(shots.includes('>d1-one.png</span><span class="dt">2026-03-01<'), '截图取自己那次提交日')
   ok(shots.includes('>d1-two.png</span><span class="dt">2026-04-02<'), '同一批里另一张截图各归各的日期')
   writeFileSync(join(kb, 'shots', 'd1-three.png'), 'z') // untracked
   runGen(NEW_SCRIPTS, kb)
-  ok(readFileSync(join(kb, 'shots.html'), 'utf8').includes(`>d1-three.png</span><span class="dt">${todayStr}<`), '没提交过的截图退回文件 mtime')
+  ok(readFileSync(join(kb, 'shots.html'), 'utf8').includes(`>d1-three.png</span><span class="dt">${mtimeDay(join(kb, 'shots', 'd1-three.png'))}<`), '没提交过的截图退回文件 mtime')
 }
 
 // ============ T54 线别分段熬得过懒注入(事件委托 + 每次现查;静态 NodeList 是 BL-C105 的根)============

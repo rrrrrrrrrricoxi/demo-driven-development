@@ -31,9 +31,8 @@ const zh = {
     `⚠ 看板守卫:验收清单 ${list} 里条目 id「${id}」重复 —— 勾选状态按 id 存,重复即互相顶掉,请改成唯一 id。`,
   accUnknownCard: (list, id) =>
     `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
-  richLongText: (hits, total) =>
-    `⚠ 看板守卫:${total} 张卡的正文字段超过 800 字,却没有 detail 字段 —— 卡正文留结论(problem ≤ 2 句、approach 结论先行、note 只记时间线),逐文件证据与灰盒记录移进 detail:\n` +
-    hits.map((h) => `  - ${h.id} 的 ${h.key} 有 ${h.n} 字`).join('\n'),
+  richLongText: (worst, total) =>
+    `看板守卫:${total} 张卡的正文字段超过 800 字且无 detail(最长:${worst.id} 的 ${worst.key})—— 卡正文留结论,长证据与灰盒记录移进 detail。`,
   respSettle: (ids, total) =>
     `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账(挑着收加 --only 卡号)。\n  这一轮不该收的卡(PR 只落了一半),在卡上写 "settleHold": "理由" —— 它从此不进清单、不出芯片,守卫这条也不再点它。`,
   respReopen: (ids, total) =>
@@ -354,9 +353,8 @@ const en = {
     `⚠ Kanban guard: acceptance checklist ${list} has a duplicate item id "${id}" — tick state is stored by id, so duplicates overwrite each other. Make the ids unique.`,
   accUnknownCard: (list, id) =>
     `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
-  richLongText: (hits, total) =>
-    `⚠ Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail field — keep the card body to conclusions (problem ≤ 2 sentences, approach conclusion-first, note a dated timeline) and move file-by-file evidence into detail:\n` +
-    hits.map((h) => `  - ${h.id}: ${h.key} is ${h.n} characters`).join('\n'),
+  richLongText: (worst, total) =>
+    `Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail (longest: ${worst.key} on ${worst.id}) — keep the card body to conclusions and move long evidence into detail.`,
   respSettle: (ids, total) =>
     `⚠ Kanban guard: ${total} card(s) have all their pull requests merged but are still in a non-final status (unsettled): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Run \`node <plugin>/scripts/pr-sync.mjs --settle\` for the full list (card → suggested status), then add --write to settle them (add --only <ids> to pick some).\n  For a card that should not be settled this round (its pull request only landed half the work), put "settleHold": "reason" on it — it then leaves the list, drops its chip, and this notice stops naming it.`,
   respReopen: (ids, total) =>

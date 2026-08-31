@@ -9,6 +9,27 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.7] - 2026-09-01
+
+### Changed
+- **The long-prose audit notice is one line.** It used to print a header
+  followed by a bulleted list of up to five cards, each with its longest field
+  and that field's character count, plus the three writing rules the skills
+  already carry. In a terminal that is a paragraph asking to be skimmed for one
+  fact: is there anything to tidy, and where do I start. The notice now says
+  exactly that — how many cards carry a prose field over 800 characters with no
+  `detail`, and which card and field is the longest — in a single sentence with
+  no per-card list and no character counts. The audit itself is unchanged: same
+  800-character threshold, same terminal-card skip, same non-blocking notice,
+  same count.
+
+### Fixed
+- **A timezone-dependent test.** The doc- and screenshot-mtime fallback test
+  built its expected date from the local calendar while `gen` formats an mtime
+  in UTC, so on a machine east of UTC the two assertions failed for the first
+  hours of every local day. The test now derives the expected date from the
+  file's own mtime the way the product does. No product behaviour changed.
+
 ## [0.15.6] - 2026-09-01
 
 ### Fixed
