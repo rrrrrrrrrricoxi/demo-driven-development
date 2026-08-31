@@ -18,6 +18,8 @@
 //      各出一条非阻断 notice;清单 JSON 坏了也只报一条,不崩、不拦。
 //   4. 正文长度审计(v0.13.0,只在 config.richText 开时):某长文本字段 > 800 字且卡无 detail
 //      字段 → 一条非阻断 notice,最多点名 5 张(摘要与细节分家的写法规矩见 ddd-workflow)。
+//      v0.15.6 起跳过终态卡(TERMINAL,与 settle.mjs 同一份口径):已 done / live / closed 的卡
+//      不会再改写,点名它们只会让这条通知永远缩不掉。
 //   5. 进度响应审计(v0.13.0,只在 release-manifest.json 在场时):关联 PR 全合了却没收账的卡、
 //      已收账却还有 PR 开着的卡,各出一条非阻断 notice(各最多点名 5 张 + 总数)。收账动作在
 //      pr-sync.mjs --settle,守卫只提示 —— 静默改 manifest 会跟并行会话抢写。
@@ -42,7 +44,7 @@ import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
-import { settleHold, settleOf } from './settle.mjs'
+import { TERMINAL, settleHold, settleOf } from './settle.mjs'
 import { CARD_KINDS, cardsDirOf, scanCardDir } from './cards.mjs'
 
 const KANBAN = detect()
@@ -249,6 +251,7 @@ const orphans = demos.filter((f) => !covered.has(f))
     ]) {
       for (const c of cardsOf(f, k, sub)) {
         if (!c || c.detail) continue
+        if (TERMINAL.has(String(c.status || ''))) continue // 终态卡(done / live / closed)不会再改写,点名只会让这条通知永远缩不掉
         let worst = null // 一张卡只点一次,报最长的那个字段(点名是为了让人动手,不是为了铺满屏)
         for (const key of fields) {
           const n = typeof c[key] === 'string' ? c[key].length : 0

@@ -9,6 +9,20 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.6] - 2026-09-01
+
+### Fixed
+- **The long-prose audit skips cards in a terminal status.** The guard notice
+  that names cards whose prose runs past 800 characters with no `detail` counted
+  every card, including the `done`, `live` and `closed` ones — cards that have
+  landed and will never be rewritten. On a board with any history the notice was
+  mostly a list of archived cards, and no amount of work could make it shrink,
+  so it stopped reading as an ask. The audit now skips terminal cards, reusing
+  the same `TERMINAL` set the settle judgements use (`settle.mjs`), so only
+  cards someone might still edit get named and the total counts only those. The
+  message, the 800-character threshold and the five-card cap are unchanged, and
+  nothing about the generated board moved.
+
 ## [0.15.5] - 2026-08-28
 
 ### Fixed
