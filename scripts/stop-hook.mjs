@@ -17,9 +17,10 @@
 //      current 指向的 PR 没清单 / 同一 PR 落进两份清单 / 条目 id 重复 / cards 引用不存在的卡号,
 //      各出一条非阻断 notice;清单 JSON 坏了也只报一条,不崩、不拦。
 //   4. 正文长度审计(v0.13.0,只在 config.richText 开时):某长文本字段 > 800 字且卡无 detail
-//      字段 → 一条非阻断 notice,最多点名 5 张(摘要与细节分家的写法规矩见 ddd-workflow)。
+//      字段 → 一条非阻断 notice(摘要与细节分家的写法规矩见 ddd-workflow)。
 //      v0.15.6 起跳过终态卡(TERMINAL,与 settle.mjs 同一份口径):已 done / live / closed 的卡
 //      不会再改写,点名它们只会让这条通知永远缩不掉。
+//      v0.15.7 起这条通知只一行:张数 + 最长的那张(卡号 + 字段),不铺逐卡清单、不报字数。
 //   5. 进度响应审计(v0.13.0,只在 release-manifest.json 在场时):关联 PR 全合了却没收账的卡、
 //      已收账却还有 PR 开着的卡,各出一条非阻断 notice(各最多点名 5 张 + 总数)。收账动作在
 //      pr-sync.mjs --settle,守卫只提示 —— 静默改 manifest 会跟并行会话抢写。
@@ -236,14 +237,15 @@ const orphans = demos.filter((f) => !covered.has(f))
   }
 }
 
-// ---- ④ 正文长度审计(v0.13.0,只在 config.richText 开时跑):超长字段而无 detail 的卡点名 ----
+// ---- ④ 正文长度审计(v0.13.0,只在 config.richText 开时跑):超长字段而无 detail 的卡记数 ----
 // detail 字段本身受 richText 门控,没开的板催也白催。全部非阻断 —— 正文长短是写法问题,不是错误。
+// 通知只一行(v0.15.7):张数 + 最长的那张,逐卡清单与字数在终端里是噪音,写法规矩在 skills 里。
 {
   let richOn = false
   try { richOn = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8')).richText === true } catch {}
   if (richOn) {
     const LONG = 800
-    const hits = []
+    let total = 0, worst = null // 一行通知只需要这两样:张数,与最长的那张(卡号 + 字段)
     for (const [f, k, sub, fields] of [
       ['manifest.json', 'tasks', null, ['problem', 'approach', 'notes']],
       ['backlog-manifest.json', 'items', 'backlog', ['problem', 'approach', 'note']],
@@ -252,18 +254,17 @@ const orphans = demos.filter((f) => !covered.has(f))
       for (const c of cardsOf(f, k, sub)) {
         if (!c || c.detail) continue
         if (TERMINAL.has(String(c.status || ''))) continue // 终态卡(done / live / closed)不会再改写,点名只会让这条通知永远缩不掉
-        let worst = null // 一张卡只点一次,报最长的那个字段(点名是为了让人动手,不是为了铺满屏)
+        let hit = null // 一张卡只算一次,取最长的那个字段
         for (const key of fields) {
           const n = typeof c[key] === 'string' ? c[key].length : 0
-          if (n > LONG && (!worst || n > worst.n)) worst = { key, n }
+          if (n > LONG && (!hit || n > hit.n)) hit = { key, n }
         }
-        if (worst) hits.push({ id: String((c.id ?? '?')), key: worst.key, n: worst.n })
+        if (!hit) continue
+        total++
+        if (!worst || hit.n > worst.n) worst = { id: String(c.id ?? '?'), key: hit.key, n: hit.n }
       }
     }
-    if (hits.length) {
-      hits.sort((a, b) => b.n - a.n)
-      notices.push(S.richLongText(hits.slice(0, 5), hits.length))
-    }
+    if (total) notices.push(S.richLongText(worst, total))
   }
 }
 
