@@ -9,6 +9,15 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.8] - 2026-09-01
+
+### Fixed
+- **The long-prose audit notice carries its `⚠` again.** Collapsing it to one
+  line in 0.15.7 dropped the leading `⚠ `, which is how every non-blocking guard
+  notice marks itself apart from the blocking ones — without it the line read
+  like a message that had stopped the session. Restored in both language tables;
+  the wording is otherwise unchanged.
+
 ## [0.15.7] - 2026-09-01
 
 ### Changed
