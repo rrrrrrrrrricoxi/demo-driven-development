@@ -9,6 +9,26 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.13] - 2026-09-01
+
+### Changed
+- **The backlog sort control drops to four chips: 最近立卡 / 最近更新 / 最早立卡 /
+  按编号.** 0.15.12 shipped 默认 and 最近立卡 as separate chips on the theory that
+  one meant "the order the board baked" and the other "by card date". They are
+  the same order — `blByStatus` sorts by card date, newest first, before
+  rendering — so the two differed only in how same-day ties broke, and two
+  buttons that look interchangeable read as a bug rather than a choice. 最近立卡
+  is now that one chip: it is the default, it sorts by `data-ord`, and it
+  restores the injected DOM order exactly. The id-ascending tie-break variant is
+  gone; ties stay as the board baked them.
+
+  A stored `cdate-desc` from 0.15.12 is no longer in the accepted list, so the
+  existing unknown-value path drops it back to the default — no migration, no
+  stuck board. The localStorage key is unchanged (`<brand>_bl_sort`), as is
+  everything else: the segmented buttons, `data-udate` / `data-ord`, DOM
+  reordering inside each status section, and byte-identical output when the key
+  is off.
+
 ## [0.15.12] - 2026-09-01
 
 ### Added

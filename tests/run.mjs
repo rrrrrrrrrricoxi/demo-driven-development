@@ -25,9 +25,10 @@
 // tab 条吸顶 stickyTabs(四拍冻结 / position: sticky 落点跟 --ddd-hubh / 底色不透 / 横向滚动没动 /
 // z 层与 hubbar·懒加载进度线不打架 / 深链锚点补偿代入实高盖得过两条吸顶栏 / 文档库导航与 scrollspy
 // 一并让开 / 与 tabRail 同开时 rail 让位)、
-// Backlog 排序分段 backlogSort(四拍冻结 / 分段替掉 Backlog 那只下拉而决策的原样留着 / 五档次序 /
-// data-udate·data-ord 两枚派生属性 / 比较器从壳里抠出来穷举:默认还原、更新新→旧、同日按编号小→大、
-// 空日期沉底、全打平退编号 / 记忆键 <brand>_bl_sort / 拆卡后更新日与建卡日各说各的 /
+// Backlog 排序分段 backlogSort(四拍冻结 / 分段替掉 Backlog 那只下拉而决策的原样留着 / 四档次序 /
+// data-udate·data-ord 两枚派生属性 / 比较器从壳里抠出来穷举:「最近立卡」= 按 data-ord 原样还原
+// (烤入顺序本就是建卡日新→旧,不占两颗钮)、更新新→旧、同日退编号、空日期沉底 /
+// 记忆键 <brand>_bl_sort 与 0.15.12 旧值 'cdate-desc' 的落回 / 拆卡后更新日与建卡日各说各的 /
 // cards-split 的等价门认得 data-udate)、
 // 时间线左栏(四拍冻结 / 整格 role=button+aria-expanded 而非只有文字那颗钮 / 点击与 Enter·Space
 // 共用一个 toggleBand 且重画后交还焦点 / 左栏宽只有一处字面值,轴行与带行读同一个 --relgut
@@ -3852,7 +3853,7 @@ console.log('T64 Backlog 排序分段 backlogSort')
   bl.tiers = { 1: '核心' }
   const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
   const item = (id, date, title) => ({ id, status: st, priority: pri, tier: '1', date, title, problem: 'p', approach: 'a', area: 'x', source: 's' })
-  // 同日期一对(BL-2 / BL-11):烤入顺序按编号大→小,「最近立卡」按编号小→大 —— 两档的区别正在这里
+  // 同日期一对(BL-2 / BL-11):烤入顺序同日按编号大→小,「最近立卡」照搬这个顺序(它就是烤入顺序)
   bl.items = [item('BL-2', '2026-03-03', '甲'), item('BL-11', '2026-03-03', '乙'), item('BL-7', '2026-01-01', '丙'), item('BL-4', '', '丁')]
   wr(blP, bl)
 
@@ -3883,11 +3884,13 @@ console.log('T64 Backlog 排序分段 backlogSort')
   ok(/<span class="tlab">排序<\/span>\s*<div class="lseg" id="blsortseg"/.test(on),
     '分段前面是一枚安静的「排序」小灰字(与「线别」那组同款 .tlab + .lseg,零新增 CSS)')
   ok([...segHtml.matchAll(/data-sort="([^"]+)"[^>]*>([^<]+)</g)].map((m) => m[1] + '=' + m[2]).join(' ') ===
-    'ord=默认 udate-desc=最近更新 cdate-desc=最近立卡 date-asc=最早立卡 id=按编号',
-    '五档次序:默认 / 最近更新 / 最近立卡 / 最早立卡 —— 后两档是原下拉里那两项,换控件不丢功能',
+    'ord=最近立卡 udate-desc=最近更新 date-asc=最早立卡 id=按编号',
+    '四档次序:最近立卡 / 最近更新 / 最早立卡 / 按编号 —— 后两档是原下拉里那两项,换控件不丢功能',
     segHtml)
+  ok(!segHtml.includes('>默认<') && !segHtml.includes('cdate-desc'),
+    '没有单独的「默认」钮:烤入顺序本就是建卡日新→旧,两颗点着没区别的钮读起来像坏的')
   ok(/data-sort="ord" class="on"/.test(segHtml) && count(segHtml, 'class="on"') === 1,
-    '默认档预先亮着(装了这个开关的板,不点就跟以前一模一样)')
+    '「最近立卡」预先亮着,它就是默认档(装了这个开关的板,不点就跟以前一模一样)')
   ok(!on.includes('.blsortseg {') && !on.includes('.sortseg'), '没有为它新写一条 CSS(借的是线别分段那套)')
 
   // ---- 派生属性 ----
@@ -3897,33 +3900,38 @@ console.log('T64 Backlog 排序分段 backlogSort')
   ok(cards.every((c) => c.udate === c.date), '没拆卡的板:更新日期 = 建卡日期(两把尺量出同一个数,不是漏了)')
   // 烤入顺序 = blByStatus 的 byDateDesc(同日按编号大→小),data-ord 记的正是它渲染出来的位次
   ok(cards.map((c) => c.id + ':' + c.ord).join(' ') === 'BL-11:0 BL-2:1 BL-7:2 BL-4:3',
-    'data-ord = 分区内烤入位次 0..n-1(「默认」这一档靠它原样还原)', cards.map((c) => c.id + ':' + c.ord).join(' '))
+    'data-ord = 分区内烤入位次 0..n-1(「最近立卡」靠它原样还原)', cards.map((c) => c.id + ':' + c.ord).join(' '))
+  ok(cards.map((c) => c.date).join(' ') === '2026-03-03 2026-03-03 2026-01-01 ',
+    '烤入位次本身就是建卡日新→旧 —— 所以「最近立卡」== 原样还原,不是两回事',
+    cards.map((c) => c.date).join(' '))
 
   // ---- 运行期比较器:从壳里原样抠出来跑 ----
   {
     const s = on.indexOf('\n  const tbNum = ')
     const e = on.indexOf('\n  const toolbars = []')
     const src = on.slice(s, e)
-    ok(src.includes('BLS_KEY') && src.includes('tbNewCmp'), '抠得到那段(比较器与记忆键都在壳里)')
-    const F = new Function(src + '\n  return { tbOrdCmp, tbNewCmp, tbIdAsc, BLS_KEY, BLS_OK, TB_SORT_LABEL }')()
+    ok(src.includes('BLS_KEY') && src.includes('tbUdCmp'), '抠得到那段(比较器与记忆键都在壳里)')
+    const F = new Function(src + '\n  return { tbOrdCmp, tbUdCmp, tbIdAsc, BLS_KEY, BLS_OK, TB_SORT_LABEL }')()
     ok(F.BLS_KEY === 'htest_bl_sort', '记忆键走 LS_PREFIX 老规矩:<brand>_bl_sort', F.BLS_KEY)
-    ok(F.BLS_OK.join(' ') === 'ord udate-desc cdate-desc date-asc id', 'BLS_OK 就是分段那五档(存了别的值一律不认)')
-    ok(F.TB_SORT_LABEL['ord'] === '板面顺序' && F.TB_SORT_LABEL['udate-desc'] === '更新新→旧' && F.TB_SORT_LABEL['cdate-desc'] === '立卡新→旧',
-      'meta 行说得出这三档各叫什么(不是空白)')
+    ok(F.BLS_OK.join(' ') === 'ord udate-desc date-asc id', 'BLS_OK 就是分段那四档(存了别的值一律不认)')
+    ok(F.BLS_OK.indexOf('cdate-desc') < 0,
+      '0.15.12 存下的 cdate-desc 不在白名单里 —— 接线那句会把它落回默认档「最近立卡」,而不是卡住')
+    ok(F.TB_SORT_LABEL['ord'] === '立卡新→旧' && F.TB_SORT_LABEL['udate-desc'] === '更新新→旧' && F.TB_SORT_LABEL['cdate-desc'] === undefined,
+      'meta 行说得出这两档各叫什么,旧那一档的名字不再留着')
     const el = (id, udate, date, ord) => ({ id, dataset: { udate, date, ord: String(ord) } })
     // 烤入顺序:同日按编号大→小(BL-11 在 BL-2 前);无日期沉底
     const deck = [el('BL-11', '2026-05-05', '2026-03-03', 0), el('BL-2', '2026-01-09', '2026-03-03', 1),
       el('BL-7', '2026-09-09', '2026-01-01', 2), el('BL-4', '', '', 3)]
     const order = (cmp) => deck.slice().sort(cmp).map((x) => x.id).join(' ')
-    ok(order(F.tbOrdCmp) === 'BL-11 BL-2 BL-7 BL-4', '默认:按 data-ord 还原成烤入顺序', order(F.tbOrdCmp))
-    ok(order(F.tbNewCmp('udate')) === 'BL-7 BL-11 BL-2 BL-4', '最近更新:更新日新→旧,没日期的沉底', order(F.tbNewCmp('udate')))
-    ok(order(F.tbNewCmp('date')) === 'BL-2 BL-11 BL-7 BL-4', '最近立卡:建卡日新→旧,同日按编号小→大(BL-2 在 BL-11 前)', order(F.tbNewCmp('date')))
-    ok(order(F.tbNewCmp('date')) !== order(F.tbOrdCmp),
-      '同日那一对上「最近立卡」与「默认」看得出区别 —— 否则两颗钮点着像坏的')
+    ok(order(F.tbOrdCmp) === 'BL-11 BL-2 BL-7 BL-4',
+      '最近立卡:按 data-ord 还原成烤入顺序(建卡日新→旧,同日编号大→小,无日期沉底)', order(F.tbOrdCmp))
+    ok(order(F.tbUdCmp) === 'BL-7 BL-11 BL-2 BL-4', '最近更新:更新日新→旧,没日期的沉底', order(F.tbUdCmp))
+    ok(order(F.tbUdCmp) !== order(F.tbOrdCmp),
+      '两把尺量出的确实是两个序 —— 「最近更新」不是「最近立卡」的换皮')
     ok(order(F.tbIdAsc) === 'BL-2 BL-4 BL-7 BL-11', '按编号:前缀字母序 + 数字小→大(11 排在 7 之后,不是字符串序)', order(F.tbIdAsc))
-    // 稳定性:全同日 + 全同 udate 时,三档都退回编号,不会随机
+    // 稳定性:全同日 + 全同 udate 时退回编号,不会随机
     const tie = [el('A-3', '2026-01-01', '2026-01-01', 0), el('A-1', '2026-01-01', '2026-01-01', 1)]
-    ok(tie.slice().sort(F.tbNewCmp('udate')).map((x) => x.id).join(' ') === 'A-1 A-3', '全打平时退到编号,结果是定的')
+    ok(tie.slice().sort(F.tbUdCmp).map((x) => x.id).join(' ') === 'A-1 A-3', '全打平时退到编号,结果是定的')
   }
   {
     const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))

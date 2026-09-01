@@ -1555,11 +1555,13 @@ const tbPrefix = (id) => (String(id).match(/^[A-Za-z]+/) || [''])[0]
 // 并多出「最近更新」一档 —— 按卡文件最后改动日排,这是下拉里原先没有的。原下拉三档一档不少,
 // 只是换了控件:排序不是新能力,新的是「更新日期」这把尺和「一眼看得见当前按什么排」。
 const BLSORT = cfg.backlogSort === true
-// [值, 钮面, title];第一档即默认档(= 板面烤入顺序,谁都不动)
+// [值, 钮面, title];第一档即默认档。
+// 「最近立卡」= 'ord' = 按 data-ord 还原板面烤入顺序 —— 烤入顺序本来就是建卡日新→旧
+// (同日按编号大→小),所以「板面顺序」与「按建卡日排」说的是同一件事,不该占两颗钮:
+// 两颗点着没区别的钮,读起来像坏的。这一档同时是「原样还回去」的那一档。
 const BLSORT_MODES = [
-  ['ord', '默认', '板面烤入的顺序'],
+  ['ord', '最近立卡', '建卡日期,新→旧(= 板面烤入的顺序)'],
   ['udate-desc', '最近更新', '卡文件最后改动日,新→旧'],
-  ['cdate-desc', '最近立卡', '建卡日期,新→旧'],
   ['date-asc', '最早立卡', '建卡日期,旧→新'],
   ['id', '按编号', '编号前缀 + 数字'],
 ]
@@ -1729,7 +1731,7 @@ const wtBlock = (list) =>
 // 排序要的两枚派生属性(BLSORT 关 = 空串,逐字节冻结):
 // data-udate = 卡文件最后改动日,缺则退回建卡日 —— 未拆卡的板上「最近更新」= 「最近立卡」,
 // 这一档照样点得动,只是两把尺量出同一个数(README 里说明白)。
-// data-ord = 分区内的烤入下标:排序是 DOM 重排不是重渲,「默认」这一档得原样还回去。
+// data-ord = 分区内的烤入下标:排序是 DOM 重排不是重渲,「最近立卡」那一档得原样还回去。
 const blSortAttr = (it, i) => !BLSORT ? '' : ` data-udate="${esc(cardUpd(it.id) || it.date || '')}" data-ord="${i}"`
 const blCard = (it, i) => `
   <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${blLine(it)}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}" data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${blSortAttr(it, i)}${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
@@ -2416,26 +2418,25 @@ const SESS_WIRE = !SESSION_ON ? '' : `\n    if (el('sesschips')) el('sesschips')
 const SESS_INIT = !SESSION_ON ? '' : `\n    try { const s = localStorage.getItem(SESS_KEY); if (s) state.session = s } catch (e) {}\n    if (state.session !== 'all') cards.forEach((c) => { if (!(c.dataset.session || '').split(' ').includes(state.session)) c.classList.add('flt-hide') })`
 
 // —— Backlog 排序注入点(v0.15.12,config.backlogSort;每处 off 均为 '',逐字节冻结)——
-const BLS_LABEL = !BLSORT ? '' : `, 'ord': '板面顺序', 'udate-desc': '更新新→旧', 'cdate-desc': '立卡新→旧'`
+const BLS_LABEL = !BLSORT ? '' : `, 'ord': '立卡新→旧', 'udate-desc': '更新新→旧'`
 const BLS_DEFS = !BLSORT ? '' : `
   const BLS_KEY = '${LS_PREFIX}_bl_sort'
   const BLS_OK = ${JSON.stringify(BLSORT_MODES.map(([k]) => k))}
   const tbIdAsc = (a, b) => tbPre(a.id).localeCompare(tbPre(b.id)) || tbNum(a.id) - tbNum(b.id) || a.id.localeCompare(b.id)
   const tbOrdCmp = (a, b) => (Number(a.dataset.ord) || 0) - (Number(b.dataset.ord) || 0)
-  // 「最近更新 / 最近立卡」:日期新→旧,无日期沉底,同日按编号小→大。同日的编号方向与烤入顺序
-  // (编号大→小)相反是有意的:两档因此看得出区别,「默认」到底是什么顺序也才说得清。
-  const tbNewCmp = (attr) => (a, b) => {
-    const da = a.dataset[attr] || '', db = b.dataset[attr] || ''
+  // 「最近更新」:更新日新→旧,无日期沉底,同日退到编号(结果是定的,不随 DOM 现状飘)
+  const tbUdCmp = (a, b) => {
+    const da = a.dataset.udate || '', db = b.dataset.udate || ''
     if (da === db) return tbIdAsc(a, b)
     if (!da) return 1
     if (!db) return -1
     return da < db ? 1 : -1
   }`
 const BLS_CMP = !BLSORT ? '' : `state.sort === 'ord' ? tbOrdCmp
-        : state.sort === 'udate-desc' ? tbNewCmp('udate')
-        : state.sort === 'cdate-desc' ? tbNewCmp('date')
+        : state.sort === 'udate-desc' ? tbUdCmp
         : `
-// 分段接线 + 记忆:默认档 'ord' = 烤入顺序,一次 DOM 都不动(没人的板因为装了这个开关而变样)
+// 分段接线 + 记忆:默认档 'ord' = 烤入顺序,一次 DOM 都不动(没人的板因为装了这个开关而变样)。
+// 存着的值不在 BLS_OK 里就落回默认档 —— 0.15.12 存下的 'cdate-desc' 正好走这条路回到「最近立卡」。
 const BLS_INIT = !BLSORT ? '' : `
     if (opts.pre === 'bl') {
       const seg = document.getElementById('blsortseg')
