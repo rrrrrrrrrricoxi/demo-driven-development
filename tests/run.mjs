@@ -1694,7 +1694,7 @@ console.log('T40 积压提醒 wip')
 // ============ T41 时间线重做:几何纯函数穷举 + 带的烤入 + 视图切换 ============
 console.log('T41 时间线重做')
 {
-  const { relAxis, relTicks, relBar, relPack, relGrid, relBandH } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+  const { relAxis, relTicks, relBar, relPack, relGrid, relBandH, relWindow } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
   const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
   const mkDays = (from, n) => {
     const out = [], t = Date.parse(from + 'T00:00:00Z')
@@ -1782,8 +1782,48 @@ console.log('T41 时间线重做')
     ok(relBandH(6, 6, O, true) * 1 + 5 * 30 + 26 < 600, '六条带里展开最深的一条,总高仍 < 600px')
     ok(6 * 30 + 26 < 220, '六条带全折叠 + 轴 = 206px < 220px')
   }
+  { // 五档时间窗(v0.15.9):全在浏览器按本地时钟算,gen 侧照旧零时间
+    const at = (d) => new Date(d + 'T10:00:00') // 本地时刻:窗口口径认的是本地日与本地星期
+    const wed = at('2026-09-02') // 周三
+    const far = [Date.parse('2026-01-05T00:00:00Z')] // 一条带的最早锚点日,远在 60 天之外
+    const near = [Date.parse('2026-08-31T00:00:00Z')]
+    const w = (k, now = wed, los = near) => relWindow(k, now, los)
+    ok(w('30').length === 30 && w('14').length === 14 && w('1').length === 1, '近 30 天 / 近 2 周 / 当日 = 30 / 14 / 1 天(含今天)',
+      [w('30').length, w('14').length, w('1').length].join(','))
+    ok(w('30')[0] === '2026-08-04' && w('30')[29] === '2026-09-02', '窗口右端永远是今天,左端 = 今天往回数 N−1 天', w('30')[0] + '→' + w('30')[29])
+    ok(w('14')[0] === '2026-08-20' && w('1')[0] === '2026-09-02', '近 2 周 / 当日 的左端', w('14')[0] + ' / ' + w('1')[0])
+    ok(['30', '14', 'week', '1', 'all'].every((k) => {
+      const d = w(k)
+      return d.every((x, i) => i === 0 || Date.parse(x + 'T00:00:00Z') - Date.parse(d[i - 1] + 'T00:00:00Z') === 864e5)
+    }), '五档都是一天一格、升序、无洞无重(轴不会因此撞刻度)')
+    // 本周:周一起算,所以周一 1 天、周日 7 天 —— 一周里逐天走一遍
+    const wk = ['2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06'] // 周一 → 周日
+    ok(wk.every((d, i) => relWindow('week', at(d), near).length === i + 1), '本周:周一 1 天 … 周日 7 天',
+      wk.map((d) => relWindow('week', at(d), near).length).join(','))
+    ok(wk.every((d) => relWindow('week', at(d), near)[0] === '2026-08-31'), '本周的左端一周不动 = 那个周一')
+    ok(relWindow('week', at('2026-08-31'), near).length === 1 && relWindow('1', at('2026-08-31'), near).length === 1,
+      '周一当天:本周与当日重合成同一个 1 天窗(合法,不是退化)')
+    ok(w('all').length === 60 && w('all', wed, near)[0] === '2026-07-05', '全时段:带都在 60 天内时仍给 60 天底(与从前的「全部」同一口径)', w('all').length + ' 天')
+    ok(w('all', wed, far)[0] === '2026-01-05' && w('all', wed, far).length === 241, '全时段:够到最早的一条带', w('all', wed, far)[0])
+    ok(relWindow('all', wed, [Date.parse('2027-01-01T00:00:00Z')]).length === 60, '带的日子比今天还新(时钟 / 时区):窗口不倒着长,60 天底还在')
+    // 1–2 天的极窄窗:轴 / 刻度 / 条 / 带高一个都不能出 NaN 或负数
+    for (const k of ['1', 'week']) {
+      const days = relWindow(k, at('2026-08-31'), near) // 周一 → 两档都是 1 天
+      const ax = relAxis(days, {}, O)
+      const tk = relTicks(days, ax, {}, 48)
+      ok(days.length === 1 && ax.W === O.lbl + O.quiet && ax.t0 === ax.t1, `「${k}」1 天窗:轴宽 = 左栏 + 一个安静日,首尾同日`, 'W=' + ax.W)
+      ok(tk.length === 1 && tk[0].k === 'wk' && tk[0].txt === true, '1 天窗恰好是周一:一个刻度,写字,不重复', JSON.stringify(tk.map((t) => t.d)))
+      ok(relBar(ax, '2026-07-01', '2026-07-20', O.min) === null, '整条带落在窗口外:不画(不是画成负宽)')
+      ok(relPack([{ n: 1, s: '2026-07-01', e: '2026-07-20' }], ax, O).bars.length === 0, '窗口外的 PR 打包不进泳道')
+      ok(relGrid({ '2026-07-01': [{ n: 1 }] }, ax, O).bars.length === 0, '窗口外的当日方块也不画')
+      const b = relBar(ax, days[0], days[0], O.min)
+      ok(b && Number.isFinite(b.x0) && b.w === O.min && b.x0 === O.lbl, '落在这一天的条:x / w 都是有限正数', JSON.stringify(b))
+      ok(relBandH(0, 0, O, true) === 36 && relBandH(0, 0, O, false) === 30, '窗口内 0 个 PR 的带:折叠 30、展开 36,不塌成负高')
+    }
+  }
 }
-{ // gen 侧:带的烤入 / 视图钮 / 几何内联 / 关档冻结
+{ // gen 侧:带的烤入 / 视图钮 / 窗口芯片 / 几何内联 / 关档冻结
+  const { relAxis, relTicks, relBar, relWindow } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
   const fx41 = mkFixture('fx41', { 's.html': demoHtml('s') })
   const cfgP = join(fx41.kb, 'kanban.config.json'), idxP = join(fx41.kb, 'index.html')
   const relP = join(fx41.kb, 'release-manifest.json')
@@ -1817,7 +1857,42 @@ console.log('T41 时间线重做')
   const on = readFileSync(idxP, 'utf8')
   ok(on.includes('data-relv="timeline">时间线') && on.includes('class="on" data-relv="table">表格'),
     '视图钮文案「时间线 | 表格」,默认表格(密度那版没上)')
-  ok(on.includes('data-relwin="60">近 60 天') && on.includes('data-relwin="all">全部'), '窗口芯片沿用近 60 天 / 全部')
+  { // 窗口芯片:五档,次序与默认都锁死(v0.15.9)
+    const chips = [...on.matchAll(/data-relwin="([^"]+)">([^<]+)</g)].map((m) => m[1] + '=' + m[2])
+    ok(chips.join(' ') === '30=近 30 天 14=近 2 周 week=本周 1=当日 all=全时段', '五档窗口芯片,次序与文案', chips.join(' '))
+    ok(on.includes('class="on" data-relwin="30">近 30 天'), '默认档 = 近 30 天(唯一带 .on 的那个)')
+    ok(!on.includes('近 60 天') && !on.includes('data-relwin="60"'), '旧的近 60 天一个字不留')
+    ok(on.includes("view = 'table', win = '30'"), '运行期初值与高亮的那一档是同一个')
+    ok(!on.includes('_rel_win'), '窗口档不进 localStorage(与视图不同,它不记 —— 每次开板都从近 30 天起)')
+  }
+  { // 字幕:五档都由 relWindow 现算,当日那档塌成单日形制。取的是壳里那一行真代码
+    const line = on.split('\n').find((l) => l.includes('dnr.textContent ='))
+    ok(!!line, '壳里有字幕那一行')
+    const cap = new Function('dnr', 'days', 'span', 'md', line + '\nreturn dnr.textContent')
+    const md = (s2) => String(s2).slice(5, 10)
+    const say = (k, now) => { const d = relWindow(k, now, [Date.parse('2026-07-01T00:00:00Z')]); return cap({}, d, d.length, md) }
+    const tue = new Date('2026-09-01T10:00:00')
+    ok(say('30', tue) === '08-03 → 09-01 · 30 天', '近 30 天的字幕', say('30', tue))
+    ok(say('14', tue) === '08-19 → 09-01 · 14 天', '近 2 周的字幕', say('14', tue))
+    ok(say('week', tue) === '08-31 → 09-01 · 2 天', '本周的字幕(周二 = 2 天)', say('week', tue))
+    ok(say('1', tue) === '09-01 · 1 天', '当日:首尾同一天,字幕塌成单日形制(不写 09-01 → 09-01)', say('1', tue))
+    ok(say('week', new Date('2026-08-31T10:00:00')) === '08-31 · 1 天', '周一的本周也走单日形制')
+    ok(/^07-01 → 09-01 · 63 天$/.test(say('all', tue)), '全时段:够到最早的一条带', say('all', tue))
+  }
+  { // 空窗口(今天落在所有 PR 活动之外):每条带都干干净净地退成「不画」,不出 NaN / 负宽
+    const G0 = JSON.parse(on.match(/\n {4}var G = (\[[\s\S]*?\])\n/)[1])
+    const O2 = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
+    const far = new Date('2030-01-02T10:00:00') // 离所有 PR 都很远的一天
+    for (const k of ['30', '14', 'week', '1']) {
+      const days = relWindow(k, far, G0.map((g) => Date.parse(g.lo + 'T00:00:00Z')))
+      const ax = relAxis(days, {}, O2)
+      const bars = G0.map((g) => relBar(ax, g.lo < ax.t0 ? ax.t0 : g.lo, g.hi > ax.t1 ? ax.t1 : g.hi, 4))
+      ok(days.length >= 1 && Number.isFinite(ax.W) && ax.W > 0, `空窗「${k}」:轴还在,宽是有限正数`, 'W=' + ax.W)
+      ok(bars.every((b) => b === null), `空窗「${k}」:每条带都退成不画(不是 NaN / 负宽)`, JSON.stringify(bars))
+      ok(G0.every((g) => Object.keys(g.d).every((d2) => ax.x[d2] === undefined)), `空窗「${k}」:窗口内计数为 0,带头写「窗口内 0」`)
+      ok(relTicks(days, ax, {}, 48).every((t) => Number.isFinite(t.x)), `空窗「${k}」:刻度 x 有限`)
+    }
+  }
   ok(!on.includes('reltlsvg') && !on.includes('rect.relb') && !on.includes('id="reltip"'),
     '旧时间线的 SVG 与浮层一个不留(死代码不留在产物里)')
   const G = JSON.parse(on.match(/\n {4}var G = (\[[\s\S]*?\])\n/)[1])

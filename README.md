@@ -128,7 +128,10 @@ in place, packing its pull requests into at most six shared lanes so the
 expanded height has a ceiling. The date axis is not linear — a quiet day gets a
 few pixels and a day with many pull requests is widened to fit them side by
 side, which is where the old one-row-per-pull-request timeline was spending
-2400px of height for no information.
+2400px of height for no information. Five chips set the window — Last 30 days,
+Last 2 weeks, This week (from the local Monday), Today, All time — starting at
+Last 30 days. The window is worked out in the browser from its own clock, so
+`gen` bakes no date and yesterday's `index.html` is still right today.
 
 Hovering a bar or a square floats a peek card beside it after 150ms, and so
 does tabbing onto one: the number and full title, status and date, branch, the

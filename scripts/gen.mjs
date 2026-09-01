@@ -3018,7 +3018,7 @@ const releasePane = !REL ? '' : `
     </table></div></div>
   </div>
   <div class="relview" data-relpane="timeline" hidden>
-    <div class="relwf"><div class="relf" data-relf="win"><button type="button" class="on" data-relwin="60">近 60 天</button><button type="button" data-relwin="all">全部</button></div><span class="reldrg"></span></div>
+    <div class="relwf"><div class="relf" data-relf="win"><button type="button" class="on" data-relwin="30">近 30 天</button><button type="button" data-relwin="14">近 2 周</button><button type="button" data-relwin="week">本周</button><button type="button" data-relwin="1">当日</button><button type="button" data-relwin="all">全时段</button></div><span class="reldrg"></span></div>
     <div class="reltlw"><div class="reltlsc"><div class="reltli" id="reltl"></div></div></div>
     <p class="rellg"><span class="rellk"></span><span class="relmore">横杠 = 开 PR → 合并,虚边 = 还开着;方块 = 当天开当天合,按号横排;竖线 = 版本 tag。轴按当天的繁忙度加宽,安静的日子挤在一起。点带头展开</span></p>
   </div>
@@ -3489,7 +3489,7 @@ const REL_JS = !REL ? '' : `
     var heads = tb.querySelectorAll('tr.relgh')
     for (i = 0; i < heads.length; i++) { ghs[heads[i].dataset.relgh] = heads[i]; open[heads[i].dataset.relgh] = heads[i].dataset.relopen === '1' }
     for (i = 0; i < D.length; i++) byN[D[i].n] = D[i]
-    var sortKey = 'd', sortDir = -1, sfil = 'all', view = 'table', win = '60'
+    var sortKey = 'd', sortDir = -1, sfil = 'all', view = 'table', win = '30'
     var p2 = function (n) { return (n < 10 ? '0' : '') + n }
     var xe = function (s) { return String(s).replace(/&/g, '&amp;').replace(/\\u003c/g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
 
@@ -3631,13 +3631,11 @@ const REL_JS = !REL ? '' : `
     function drawTl() {
       pkHide() // 重画就换了一批 DOM 节点:还开着的卡指着的锚点已经不在了
       var now = new Date(), tms = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()), k, j, g
-      var t0 = tms - 59 * 864e5
       // 窗口按全部带算,不跟着段筛选缩放 —— 筛一下就换一套刻度,横向就没得比了
-      if (win === 'all') for (k = 0; k < G.length; k++) { var lo = G[k].lo ? day(G[k].lo) : tms; if (lo < t0) t0 = lo }
-      if (t0 > tms) t0 = tms
-      var span = Math.round((tms - t0) / 864e5) + 1, today = dstr(tms), days = []
-      for (k = 0; k < span; k++) days.push(dstr(t0 + k * 864e5))
-      dnr.textContent = md(days[0]) + ' → ' + md(days[span - 1]) + ' · ' + span + ' 天'
+      var los = []
+      for (k = 0; k < G.length; k++) los.push(G[k].lo ? day(G[k].lo) : tms)
+      var days = relWindow(win, now, los), span = days.length, today = dstr(tms)
+      dnr.textContent = span === 1 ? md(days[0]) + ' · 1 天' : md(days[0]) + ' → ' + md(days[span - 1]) + ' · ' + span + ' 天'
       var ax = relAxis(days, DAYC, TL)
       var vis = []
       for (k = 0; k < G.length; k++) if (sfil === 'all' || G[k].sg === sfil) vis.push(G[k])
