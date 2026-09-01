@@ -9,6 +9,49 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.11] - 2026-09-01
+
+### Added
+- **Zoomed pull-request glyphs on the release timeline.** Once the axis fills
+  the panel (0.15.10), a short window means a wide day: *This week* on a 1880px
+  panel gives one day more than five hundred pixels. A pull request opened and
+  merged that day was still an 11px square pinned to the left of that cell —
+  too small to hit and impossible to read — and open-to-merge bars each stretched
+  the full track, three of them identical because all three merely "crossed one
+  day". The data is day-grained, so at that zoom the length of a bar carries no
+  information; a screen of solid blocks claims a precision the data does not have.
+
+  One number now picks the rendering for the whole screen: `pxPerDay`, the
+  filled track width divided by the days in the window. Below 40 nothing
+  changes — those windows render exactly as 0.15.10 did, byte for byte. From 40
+  to 120 the squares grow to `clamp(pxPerDay × 0.6, 12, 28)` and lay out
+  row-major inside the day cell (13px rows cannot hold a 28px square, and the
+  legend's "side by side" only becomes true here), while a bar keeps its real
+  span but renders as a solid cap at each end joined by a hairline, with a `‹`
+  at the window edge where the start is clipped. At 120 and above every pull
+  request becomes a labelled `#NNN` chip in its anchor day's cell — merge day
+  when merged, open day while still open, the same rule the axis widths already
+  use — packed by (open day → merge day) group so one whisker never points at
+  two spans, with the remainder of a full cell collapsing into a single `+N`.
+
+  The glyphs are the same `<a>` element as today's squares: same classes, same
+  `href`, same `data-relpk`, same `tabindex`, so clicking through to the pull
+  request, the hover peek and keyboard focus are one code path across all three
+  regimes rather than three. The `+N` chip carries the folded-band day hooks
+  instead, so hovering it lists that day's pull requests. Row and band heights
+  follow the taller glyphs, and both packers keep the six-row ceiling, so an
+  expanded band still has a bounded height. No animation, no new colour: the
+  hairline, the caps and the chip borders all read the lane colour that the
+  bands already carry.
+
+  Tests 900 → 944. Regime thresholds at 39.99 / 40 / 119.99 / 120, the square
+  clamp, chip width by digit count, row-major layout and its row cap, the `+N`
+  overflow rule, group packing (same span shares a row; open and merged do not;
+  rows that do not collide horizontally share one; a cap at six), cap/hairline
+  geometry including the clipped and too-short cases, and band heights per
+  regime. On a real 250-pull-request board, every window × panel width whose
+  `pxPerDay` is below 40 was diffed against 0.15.10 and is byte-identical.
+
 ## [0.15.10] - 2026-09-01
 
 ### Fixed

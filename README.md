@@ -130,7 +130,12 @@ narrow and a day with many pull requests is widened to fit them side by
 side, which is where the old one-row-per-pull-request timeline was spending
 2400px of height for no information. Those weights are relative: the axis is
 scaled to fill the panel, so a shorter window zooms in rather than stopping
-halfway across, and only a window too wide to fit scrolls sideways.
+halfway across, and only a window too wide to fit scrolls sideways. How wide a
+day ends up being then picks the glyphs: below 40px a day it renders as it
+always has; from 40 the squares grow with the day and a bar becomes a solid cap
+at each end joined by a hairline; from 120 every pull request is a labelled
+`#NNN` chip in its day's cell, with a whisker back to the day it was opened and
+a `+N` for whatever a cell cannot hold.
 Five chips set the window — Last 30 days,
 Last 2 weeks, This week (from the local Monday), Today, All time — starting at
 Last 30 days. The window is worked out in the browser from its own clock, so
@@ -140,8 +145,9 @@ Hovering a bar or a square floats a peek card beside it after 150ms, and so
 does tabbing onto one: the number and full title, status and date, branch, the
 linked card chips (clicking one switches pane, as in the table) and the
 acceptance `n/N` when that pull request has a checklist. A pull request opened
-and merged the same day is a square a few pixels wide, so the card is the only
-place any of that fits. On a folded version band each segment stands for one
+and merged the same day is a square a few pixels wide in a normal window, so
+the card is the only place any of that fits; zoomed in far enough the number is
+written on the glyph and the card is the rest of the story. On a folded version band each segment stands for one
 day, and its card lists that day's pull requests, ten at most. `Esc` or moving
 away dismisses it, the card stays put while the pointer is inside it so the
 chips stay reachable, and touch gets the two-tap pattern. Every field is read

@@ -119,10 +119,13 @@ export function relGrid(byDay, ax, o) {
 
 /**
  * 一条带的高度:折叠 = 带头;展开 = 带头 + 两组泳道(各自带一行小标题)+ 底衬。
- * m / s 都封了顶(见 relPack / relGrid),所以展开后的高度有上界,与带里有多少 PR 无关。
+ * m / s 都封了顶(见 relPack / relGrid / relGridBig),所以展开后的高度有上界,与带里有多少 PR 无关。
+ * rm / rs(v0.15.11)= 两组各自的行距,不传就是老的 o.row —— 放大档的方块 / 芯片比 13px 高,
+ * 带高必须跟着长,不然字形放大了却挤在原来的行距里。
  */
-export function relBandH(m, s, o, open) {
-  return o.head + (open ? (m ? o.sub + m * o.row + 2 : 0) + (s ? o.sub + s * o.row + 2 : 0) + o.pad : 0)
+export function relBandH(m, s, o, open, rm, rs) {
+  var a = rm || o.row, b = rs || o.row
+  return o.head + (open ? (m ? o.sub + m * a + 2 : 0) + (s ? o.sub + s * b + 2 : 0) + o.pad : 0)
 }
 
 /**
@@ -142,4 +145,131 @@ export function relWindow(win, now, los) {
   if (t0 > tms) t0 = tms // 带的日子比今天还新(时区 / 时钟)时窗口不倒着长
   for (i = 0; t0 + i * 864e5 <= tms; i++) out.push(new Date(t0 + i * 864e5).toISOString().slice(0, 10))
   return out
+}
+
+// ———— 放大之后的字形(v0.15.11)————
+// 轴按面板拉满(v0.15.10)之后,窗口越短一天越宽:本周两天时一天有五百多 px,而当天开当天合的
+// PR 仍是一枚 11px 的方块贴在格子最左边,点不中也读不出是谁;开→合的横杠则各自拉满整条轨,
+// 三条一样长——它们只是都「跨了一天」。数据是日粒度的,这个缩放下长度这一维已经不携带信息,
+// 满屏实心块反而在宣称一种数据没有的精度。三档字形由同一个「一天多少 px」驱动,窄窗口原样不动。
+
+/**
+ * 这一屏该用哪一套字形。track = 轨道宽(轴宽 − 左栏),days = 窗口天数。
+ * 0 = 现状(< 40px/天:方块 12px 定距、横杠整段实心,与 0.15.10 逐字节相同)
+ * 1 = 字形缩放(≥ 40:方块随日宽长大,横杠退成两端实心 + 细线)
+ * 2 = 日格芯片(≥ 120:每个 PR 一枚带号芯片,跨度退成一条 whisker)
+ * 40 这条线不是拍脑袋:40 × 0.6 = 24px,正好是方块还点得中的下限;120 是一格里放得下两枚芯片。
+ */
+export function relRegime(track, days) {
+  var px = days > 0 ? track / days : 0
+  return px >= 120 ? 2 : px >= 40 ? 1 : 0
+}
+
+/** 放大档的方块边长:clamp(日宽 × 0.6, 12, 28) —— 12 是现状那枚,28 是再大就抢戏 */
+export function relSqSize(track, days) {
+  var px = days > 0 ? track / days : 0
+  return Math.max(12, Math.min(28, Math.round(px * 0.6)))
+}
+
+/**
+ * 芯片宽:按全图最大的 PR 号算一次,整张图一个宽度 —— 列对得齐,四五位数的仓库也不被切掉半个号。
+ * 三位数(#248)= 42px,与 demo 逐格相同;每多一位加 8px。
+ */
+export function relChipW(maxN) {
+  return 12 + Math.ceil(7.5 * (String(maxN > 0 ? Math.floor(maxN) : 0).length + 1))
+}
+
+/**
+ * 字形缩放档的当日方块:先横后竖排进那一天的格子(13px 的行距装不下 28px 的方块,
+ * 排布只能从「先竖后横」翻过来 —— 日格宽了,横向本来就够)。
+ * 行数仍封顶 o.lanes:展开后的高度与 PR 数无关这一条不因放大而破。
+ */
+export function relGridBig(byDay, ax, size, o) {
+  var pitch = size + 4, out = [], used = 0, d, arr, cols, i, col, lane
+  for (d in byDay) {
+    if (ax.x[d] === undefined) continue
+    arr = byDay[d].slice().sort(function (a, b) { return a.n - b.n })
+    cols = Math.max(1, Math.floor((ax.w[d] - 4) / pitch))
+    for (i = 0; i < arr.length; i++) {
+      col = i % cols
+      lane = Math.floor(i / cols)
+      if (lane >= o.lanes) { lane = o.lanes - 1; col = cols - 1 } // 兜底:轴宽按全局计数算过,正常走不到这里
+      out.push({ n: arr[i].n, lane: lane, x: ax.x[d] + 2 + col * pitch, w: size, item: arr[i] })
+      if (lane + 1 > used) used = lane + 1
+    }
+  }
+  return { used: used, bars: out }
+}
+
+/**
+ * 芯片档的当日 PR:一格一行,按号横排;格子装不下的收进一枚 +N。
+ * 只画一行是有意的 —— 芯片本身就是「这一格里有谁」的答案,叠成一叠反而又要数。
+ */
+export function relGridChip(byDay, ax, cw) {
+  var pitch = cw + 6, out = [], d, arr, cols, show, i
+  for (d in byDay) {
+    if (ax.x[d] === undefined) continue
+    arr = byDay[d].slice().sort(function (a, b) { return a.n - b.n })
+    cols = Math.max(1, Math.floor((ax.w[d] - 8) / pitch))
+    show = arr.length > cols ? Math.max(1, cols - 1) : arr.length // 放不下就腾一格给 +N
+    for (i = 0; i < show; i++) out.push({ n: arr[i].n, lane: 0, x: ax.x[d] + 4 + i * pitch, w: cw, item: arr[i] })
+    if (arr.length > show) out.push({ more: arr.length - show, lane: 0, d: d, x: ax.x[d] + 4 + show * pitch, w: cw - 8 })
+  }
+  return { used: out.length ? 1 : 0, bars: out }
+}
+
+/**
+ * 芯片档的跨天 PR:按(开始日 → 结束日 → 开着没)分组,一组一行 —— 同一天开同一天合的
+ * 几个 PR 共用一行也共用一条 whisker,whisker 才不会含糊指向谁。
+ * 芯片落在**锚点日**那一格:合了的落合并日,还开着的落开 PR 那天 —— 与轴宽的日计数同一条口径
+ * (DAYC 按锚点日落桶),否则格子的宽与格子里的芯片数对不上。
+ * 细线连的是芯片块与跨度的另一端;开始日被窗口裁掉时留一个 ‹ 在左沿。
+ * @returns { used, rows: [{ lane, clip, open, x0, x1, cx, show, list }] } x0→x1 = 细线,cx = 芯片起点
+ */
+export function relPackChip(multi, ax, cw, o) {
+  var pitch = cw + 6, gm = {}, order = [], rows = [], ends = [], i, j, q, k, it, g, an, clip, cx, cols, show, blk, x0, x1, lo, hi
+  for (i = 0; i < multi.length; i++) {
+    it = multi[i]
+    if (it.e < ax.t0 || it.s > ax.t1) continue
+    k = it.s + '>' + it.e + (it.open ? '>o' : '')
+    if (!gm[k]) { gm[k] = { s: it.s, e: it.e, open: !!it.open, list: [] }; order.push(k) }
+    gm[k].list.push(it)
+  }
+  order.sort(function (a, b) {
+    var A = gm[a], B = gm[b]
+    return A.s < B.s ? -1 : A.s > B.s ? 1 : A.e < B.e ? -1 : A.e > B.e ? 1 : A.open === B.open ? 0 : A.open ? 1 : -1
+  })
+  for (i = 0; i < order.length; i++) {
+    g = gm[order[i]]
+    clip = g.s < ax.t0
+    an = g.open ? (clip ? ax.t0 : g.s) : g.e
+    if (ax.x[an] === undefined || ax.x[g.e] === undefined) continue
+    g.list.sort(function (a, b) { return a.n - b.n })
+    cx = g.open && clip ? o.lbl + 14 : ax.x[an] + 4 // 裁掉的那端给 ‹ 让出一点位置
+    cols = Math.max(1, Math.floor((ax.x[an] + ax.w[an] - cx - 4) / pitch))
+    show = g.list.length > cols ? Math.max(1, cols - 1) : g.list.length
+    blk = (show + (g.list.length > show ? 1 : 0)) * pitch - 6 // 芯片块占的横向
+    x0 = g.open ? cx + blk : (clip ? o.lbl + 11 : ax.x[g.s] + 5)
+    x1 = g.open ? ax.x[g.e] + ax.w[g.e] - 4 : cx
+    // 横向不打架的两组并作一行,行数照旧封顶 o.lanes —— 与 relPack 同一条规矩:
+    // 宁可两条挨一下,也不让一条带长到看不完(真挤到了,芯片各在自己那一格,含糊的只是细线)
+    lo = Math.min(x0, cx)
+    hi = Math.max(x1, cx + blk)
+    for (j = 0; j < ends.length; j++) if (ends[j] + o.gap <= lo) break
+    if (j >= o.lanes) { j = 0; for (q = 1; q < ends.length; q++) if (ends[q] < ends[j]) j = q }
+    ends[j] = hi
+    rows.push({ lane: j, clip: clip, open: g.open, an: an, cx: cx, show: show, list: g.list, x0: x0, x1: x1 })
+  }
+  return { used: ends.length > o.lanes ? o.lanes : ends.length, rows: rows }
+}
+
+/**
+ * 字形缩放档的横杠:两端实心帽 + 中间细线。真实区间原样保留,只是不再拿一整条实心块占满屏。
+ * 被窗口左缘裁掉的那一端不画帽,交给一个 ‹;短到两顶帽要碰上时退成一整条 —— 那时它本来就没虚长。
+ * @returns { solid: true, x, w } | { solid: false, a, aw, b, bw, lx, lw }
+ */
+export function relCaps(x, w, size, clip) {
+  if (w <= size * 2 + 4) return { solid: true, x: x, w: w }
+  var a = clip ? x + 10 : x, aw = clip ? 0 : size
+  return { solid: false, a: a, aw: aw, b: x + w - size, bw: size, lx: a + aw, lw: x + w - size - a - aw }
 }
