@@ -1700,7 +1700,8 @@ console.log('T40 积压提醒 wip')
 // ============ T41 时间线重做:几何纯函数穷举 + 带的烤入 + 视图切换 ============
 console.log('T41 时间线重做')
 {
-  const { relAxis, relTicks, relBar, relPack, relGrid, relBandH, relWindow } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+  const { relAxis, relTicks, relBar, relPack, relGrid, relBandH, relWindow,
+    relRegime, relSqSize, relChipW, relGridBig, relGridChip, relPackChip, relCaps } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
   const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
   const mkDays = (from, n) => {
     const out = [], t = Date.parse(from + 'T00:00:00Z')
@@ -1843,6 +1844,126 @@ console.log('T41 时间线重做')
     ok(relBandH(6, 6, O, true) * 1 + 5 * 30 + 26 < 600, '六条带里展开最深的一条,总高仍 < 600px')
     ok(6 * 30 + 26 < 220, '六条带全折叠 + 轴 = 206px < 220px')
   }
+  { // 放大之后的 PR 字形(v0.15.11):三档由同一个「一天多少 px」驱动,窄窗口一个像素都不动
+    ok(relRegime(39.99, 1) === 0 && relRegime(40, 1) === 1 && relRegime(119.99, 1) === 1 && relRegime(120, 1) === 2,
+      '档位线钉死:< 40 = 现状 / [40, 120) = 字形缩放 / ≥ 120 = 日格芯片(边界归上一档)',
+      [39.99, 40, 119.99, 120].map((x) => x + '→' + relRegime(x, 1)).join(' '))
+    ok(relRegime(1680, 60) === 0 && relRegime(1680, 30) === 1 && relRegime(1680, 14) === 2 && relRegime(1680, 1) === 2,
+      '1680px 轨道上:60 天(28px/天)不动、30 天(56)走 A、近 2 周(120)与当日走 B',
+      [60, 30, 14, 1].map((d) => d + '天=' + relRegime(1680, d)).join(' '))
+    ok(relRegime(0, 0) === 0 && relRegime(NaN, 5) === 0 && relRegime(1680, 0) === 0,
+      '量不到 / 零天:退回现状档,不是 NaN 档(pane 还藏着时轴本来就退自然宽)')
+    ok(relSqSize(1680, 30) === 28 && relSqSize(400, 10) === 24 && relSqSize(100, 10) === 12 && relSqSize(1680, 60) === 17,
+      '方块边长 = clamp(日宽 × 0.6, 12, 28):40px/天 正好 24(还点得中的下限),再宽封到 28',
+      [relSqSize(1680, 30), relSqSize(400, 10), relSqSize(100, 10), relSqSize(1680, 60)].join(','))
+    ok(relChipW(248) === 42 && relChipW(9) === 27 && relChipW(12345) === 57 && relChipW(0) === 27,
+      '芯片宽按全图最大的号算:三位数 42px(与 demo 逐格相同),每多一位加 8px —— 四五位数的仓库不切号',
+      [relChipW(248), relChipW(9), relChipW(12345)].join(','))
+    { // 字形缩放档的方块:先横后竖,行数仍封顶
+      const days = mkDays('2026-08-30', 3)
+      const ax = relAxis(days, {}, O, 600) // 三天各 200px
+      const arr = []
+      for (let i = 1; i <= 13; i++) arr.push({ n: i })
+      const g = relGridBig({ '2026-08-31': arr }, ax, 28, O) // 间距 32 → 6 列
+      ok(g.bars.length === 13 && g.used === 3, '13 枚 28px 方块 → 6 列 3 行,一枚不丢', g.bars.length + ' / ' + g.used)
+      ok(g.bars[0].lane === 0 && g.bars[5].lane === 0 && g.bars[6].lane === 1 && g.bars[6].x === ax.x['2026-08-31'] + 2,
+        '先横后竖:第 7 枚换行回到第一列(0.15.10 的先竖后横在 28px 的方块上会撞行)')
+      ok(g.bars.every((b) => b.w === 28 && b.x >= ax.x['2026-08-31'] && b.x + b.w <= ax.x['2026-08-31'] + ax.w['2026-08-31']),
+        '方块不越出当天的格子')
+      const nar = { x: { '2026-09-01': 200 }, w: { '2026-09-01': 40 }, W: 240, t0: '2026-09-01', t1: '2026-09-01' }
+      const many = []
+      for (let i = 1; i <= 20; i++) many.push({ n: i })
+      ok(relGridBig({ '2026-09-01': many }, nar, 28, O).used === O.lanes,
+        '窄格子里 20 枚也只占 6 行:放大不许把「展开高度有上界」这一条撑破')
+      ok(relGridBig({ '2026-07-01': [{ n: 1 }] }, ax, 28, O).bars.length === 0, '窗口外的那天整天跳过')
+    }
+    { // 芯片档的当日 PR:一格一行,放不下的收进一枚 +N
+      const days = mkDays('2026-09-01', 1)
+      const ax = relAxis(days, {}, O, 200) // 这一天 200px
+      const six = [], four = []
+      for (let i = 1; i <= 6; i++) six.push({ n: 240 + i })
+      for (let i = 1; i <= 4; i++) four.push({ n: 240 + i })
+      const g = relGridChip({ '2026-09-01': six }, ax, 42) // 间距 48 → 4 列
+      ok(g.used === 1 && g.bars.length === 4, '一格一行:4 列 → 画 3 枚 + 一枚 +N', g.bars.length + ' 枚')
+      ok(g.bars.filter((b) => b.more).length === 1 && g.bars.filter((b) => b.more)[0].more === 3,
+        '省略的那几个收进一枚 +3(3 枚画出来 + 3 枚收起来 = 6)',
+        JSON.stringify(g.bars.map((b) => b.more || b.n)))
+      ok(g.bars.filter((b) => b.more)[0].d === '2026-09-01', '+N 记着自己是哪一天的(悬停出的是那一天的清单)')
+      ok(g.bars.every((b, i) => i === 0 || b.x === g.bars[i - 1].x + 48), '按号横排,间距 = 芯片宽 + 6')
+      ok(g.bars.every((b) => b.x >= ax.x['2026-09-01'] && b.x + b.w <= ax.x['2026-09-01'] + ax.w['2026-09-01']),
+        '连 +N 在内都不越出当天的格子')
+      const g4 = relGridChip({ '2026-09-01': four }, ax, 42)
+      ok(g4.bars.length === 4 && !g4.bars.some((b) => b.more), '不多不少正好 4 枚:不为此挂一枚空的 +0')
+      ok(relGridChip({}, ax, 42).used === 0, '一个都没有的带:used = 0(不塌成负高)')
+    }
+    { // 芯片档的跨天 PR:按(开 → 合 → 开着没)分组,一组一行一条 whisker
+      const days = mkDays('2026-08-30', 3)
+      const ax = relAxis(days, {}, O, 600) // 三天各 200px,x = 200 / 400 / 600
+      const multi = [
+        { n: 2, s: '2026-08-30', e: '2026-09-01' },
+        { n: 1, s: '2026-08-30', e: '2026-09-01' },
+        { n: 3, s: '2026-08-31', e: '2026-09-01' },
+        { n: 4, s: '2026-08-30', e: '2026-09-01', open: true },
+      ]
+      const p = relPackChip(multi, ax, 42, O)
+      ok(p.used === 3, '同开同合的并作一行(1 与 2),开着的不与合了的并 → 3 行', p.used + ' 行')
+      ok(p.rows[0].list.map((x) => x.n).join(',') === '1,2', '一行里按号排,不按传进来的次序')
+      ok(p.rows.map((r) => r.lane).join(',') === '0,1,2', '横向都压着今天那一格 → 三组挤不进同一行,各占一行')
+      { // 横向不打架的两组并作一行:一组只在头两天,另一组只在末两天
+        const wide = mkDays('2026-08-25', 8)
+        const ax2 = relAxis(wide, {}, O, 1600) // 八天各 200px
+        const two = relPackChip([{ n: 1, s: '2026-08-25', e: '2026-08-26' }, { n: 2, s: '2026-08-30', e: '2026-09-01' }], ax2, 42, O)
+        ok(two.used === 1 && two.rows.every((r) => r.lane === 0), '左右分得开的两组并作一行(带高因此比一组一行更省)', two.used + ' 行')
+      }
+      { // 行数封顶:一堆各不相同、还都压着最后一天的跨度也只占 6 行(展开高度有上界不因芯片而破)
+        const wide = mkDays('2026-08-25', 8)
+        const ax2 = relAxis(wide, {}, O, 1600)
+        const mm = []
+        for (let i = 0; i < 7; i++) mm.push({ n: 100 + i, s: wide[i], e: wide[7] })
+        for (let i = 0; i < 7; i++) mm.push({ n: 200 + i, s: wide[i], e: wide[7], open: true })
+        const mp = relPackChip(mm, ax2, 42, O)
+        ok(mp.rows.length === 14 && mp.used === O.lanes, '14 组各占一份,但行数封顶 6 —— 再挤也不让一条带长到看不完',
+          mp.rows.length + ' 组 / ' + mp.used + ' 行')
+        ok(mp.rows.every((r) => r.lane < O.lanes), '没有一组越过行数上限')
+      }
+      ok(p.rows[0].cx === 604 && p.rows[0].x1 === 604 && p.rows[0].x0 === 205,
+        '合了的:芯片落在合并日那一格,细线从开 PR 那天牵到芯片',
+        [p.rows[0].x0, p.rows[0].x1, p.rows[0].cx].join('/'))
+      const op = p.rows.filter((r) => r.open)[0]
+      ok(op.cx === 204 && op.x1 === 796 && op.x0 === 246,
+        '还开着的:芯片落在开 PR 那天(与轴宽的锚点日口径同一条),细线从芯片往右牵到今天',
+        [op.x0, op.x1, op.cx].join('/'))
+      ok(p.rows.every((r) => r.an === (r.open ? '2026-08-30' : '2026-09-01')), '每行记着自己的锚点日(+N 的悬停清单要用)')
+      const clipped = relPackChip([{ n: 9, s: '2026-08-01', e: '2026-09-01' }], ax, 42, O)
+      ok(clipped.rows[0].clip === true && clipped.rows[0].x0 === O.lbl + 11,
+        '开始日被窗口左缘裁掉:细线从左沿起,留一个 ‹ 的位置')
+      ok(relPackChip([{ n: 9, s: '2026-07-01', e: '2026-07-20' }], ax, 42, O).used === 0, '整段落在窗口外:一行都不画')
+      const wide = relPackChip([{ n: 5, s: '2026-08-30', e: '2026-09-01' }, { n: 6, s: '2026-08-30', e: '2026-09-01' },
+        { n: 7, s: '2026-08-30', e: '2026-09-01' }, { n: 8, s: '2026-08-30', e: '2026-09-01' },
+        { n: 9, s: '2026-08-30', e: '2026-09-01' }], ax, 42, O)
+      ok(wide.used === 1 && wide.rows[0].show === 3 && wide.rows[0].list.length === 5,
+        '一行也放不下 5 枚:画 3 枚,余下 2 枚交给 +N(与当日那组同一条省略规则)',
+        wide.rows[0].show + ' / ' + wide.rows[0].list.length)
+    }
+    { // 横杠退成两端实心 + 细线
+      const c = relCaps(200, 100, 28, false)
+      ok(c.solid === false && c.a === 200 && c.aw === 28 && c.b === 272 && c.bw === 28 && c.lx === 228 && c.lw === 44,
+        '两端各一顶 28px 的帽,中间一条细线严丝合缝地连上', JSON.stringify(c))
+      ok(c.lx + c.lw === c.b && c.a + c.aw === c.lx, '细线两端正好咬住两顶帽(不留缝也不压帽)')
+      const cl = relCaps(200, 100, 28, true)
+      ok(cl.aw === 0 && cl.lx === 210 && cl.lx + cl.lw === cl.b, '左端被裁:不画起点帽,给 ‹ 让出 10px,细线照旧咬住右帽')
+      ok(relCaps(200, 60, 28, false).solid === true && relCaps(200, 61, 28, false).solid === false,
+        '短到两顶帽要碰上(≤ 2×28 + 4)就退回一整条 —— 那时它本来就没虚长')
+    }
+    { // 带高:放大档的行距更高,带高必须跟着长
+      ok(relBandH(2, 1, O, true) === relBandH(2, 1, O, true, O.row, O.row), '不传行距 = 老口径(0.15.10 的调用点不受影响)')
+      ok(relBandH(2, 1, O, true, 13, 32) === 126, '字形缩放档:方块那组按 28 + 4 的行距算高', String(relBandH(2, 1, O, true, 13, 32)))
+      ok(relBandH(2, 1, O, true, 22, 22) === 134, '芯片档:两组都按 18 + 4 的行距算高', String(relBandH(2, 1, O, true, 22, 22)))
+      ok(relBandH(6, 6, O, true, 22, 22) === 332 && relBandH(0, 0, O, true, 22, 22) === 36,
+        '放大档展开的上界仍有限(6 + 6 行芯片 = 332px),窗口内 0 个 PR 也不塌成负高',
+        String(relBandH(6, 6, O, true, 22, 22)))
+    }
+  }
   { // 五档时间窗(v0.15.9):全在浏览器按本地时钟算,gen 侧照旧零时间
     const at = (d) => new Date(d + 'T10:00:00') // 本地时刻:窗口口径认的是本地日与本地星期
     const wed = at('2026-09-02') // 周三
@@ -1937,6 +2058,23 @@ console.log('T41 时间线重做')
     ok(fitOf({ parentNode: null }, { lbl: 200 }) === -200, '容器还没挂上也不抛')
     ok(on.includes("if (name === 'release' && window.relSync) relSync()"), 'show(release) 会 relSync → render → drawTl:pane 一露面就按真宽重画(轴宽因此不必再单挂 resize 监听)')
     ok(on.includes('.reltlsc { overflow-x: auto'), '装不下时照旧由这一层横向滚(全时段在窄屏上不变)')
+  }
+  { // 放大之后的字形(v0.15.11):档位一屏只挑一次,挑的依据是那根已经拉满的轴
+    const rl = on.split('\n').find((l) => l.includes('var reg = relRegime('))
+    ok(/relRegime\(ax\.W - TL\.lbl, days\.length\)/.test(rl || ''),
+      '档位由「拉满后的轨道宽 ÷ 窗口天数」定,一屏只算一次(不是逐条 PR 各挑各的)', rl && rl.trim())
+    ok(on.includes('function relRegime') && on.includes('function relPackChip') && on.includes('function relGridChip')
+      && on.includes('function relGridBig') && on.includes('function relCaps'),
+      '三档的几何全内联进页面(测试 import 的与页面跑的还是同一份源码)')
+    ok(on.includes('reg === 2 ? relPackChip(multi, ax, cw, TL) : relPack(multi, ax, TL)')
+      && on.includes('reg === 1 ? relGridBig(byDay, ax, size, TL) : relGrid(byDay, ax, TL)'),
+      '现状档照旧走 relPack / relGrid,一个字都没绕道(< 40px/天 的产物因此逐字节不动)')
+    ok(on.includes('relBandH(mp.used, sg2.used, TL, op, rowM, rowS)'), '带高按这一档的行距算(字形长大了,行距不跟就压在一起)')
+    ok(on.includes('chip: 18 }') && on.includes('.relpb.relchip { height: 18px'),
+      '芯片高只写一处:运行期的 TL.chip 与 CSS 是同一个数(分成两处写就是 v0.15.4 那个对不上的老坑)')
+    ok(on.includes('--rellane: var(--accent)') && on.includes('.relwk { position: absolute; height: 1px'),
+      '泳道色顺手落一份 --rellane:细线要 background、‹ 与虚边芯片要 color,同一个色不新造')
+    ok(on.includes('放大') || on.includes('带号芯片'), '图例里说了这件事(不然那句「方块 = 当天开当天合」在放大档下就是假的)')
   }
   { // 字幕:五档都由 relWindow 现算,当日那档塌成单日形制。取的是壳里那一行真代码
     const line = on.split('\n').find((l) => l.includes('dnr.textContent ='))

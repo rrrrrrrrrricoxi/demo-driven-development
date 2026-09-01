@@ -3020,7 +3020,7 @@ const releasePane = !REL ? '' : `
   <div class="relview" data-relpane="timeline" hidden>
     <div class="relwf"><div class="relf" data-relf="win"><button type="button" class="on" data-relwin="30">近 30 天</button><button type="button" data-relwin="14">近 2 周</button><button type="button" data-relwin="week">本周</button><button type="button" data-relwin="1">当日</button><button type="button" data-relwin="all">全时段</button></div><span class="reldrg"></span></div>
     <div class="reltlw"><div class="reltlsc"><div class="reltli" id="reltl"></div></div></div>
-    <p class="rellg"><span class="rellk"></span><span class="relmore">横杠 = 开 PR → 合并,虚边 = 还开着;方块 = 当天开当天合,按号横排;竖线 = 版本 tag。轴按当天的繁忙度加宽,安静的日子挤在一起。点带头展开</span></p>
+    <p class="rellg"><span class="rellk"></span><span class="relmore">横杠 = 开 PR → 合并,虚边 = 还开着;方块 = 当天开当天合,按号横排;竖线 = 版本 tag。轴按当天的繁忙度加宽,安静的日子挤在一起;窗口短到一天够宽时方块随之长大,再宽就换成带号芯片。点带头展开</span></p>
   </div>
   <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>release-manifest.json</code> —— PR 状态与版本由 <code>pr-sync.mjs</code>(调 <code>gh</code>)写入,gen 本身不联网、不取时间;关联卡是每次生成时从三份 manifest 现查的。</p>`
 
@@ -3300,6 +3300,8 @@ const OV_ROUTE = !OVERVIEW ? '' : `
 // 时间线左栏宽只在这一处定义:CSS 变量 --relgut 与轴的起点偏移 TL.lbl 都从它来。
 // 分成两处写就是 v0.15.4 那个「轴的分隔线与带的分隔线差几十像素」—— 一改一漏,画面就对不上。
 const REL_GUT = 200
+// 芯片高同理只写一处:CSS 的 .relpb.relchip 与运行期的 TL.chip(行距 = 它 + 4)都从它来
+const REL_CHIP = 18
 const REL_CSS = !REL ? '' : `
   /* ============ 发布进度 tab(v0.12.0,config.releaseTab)============ */
   .relbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 9px; }
@@ -3407,11 +3409,13 @@ const REL_CSS = !REL ? '' : `
   .relsp { position: absolute; border-radius: 1px; }
   .relpb { position: absolute; height: 11px; border-radius: 3px; display: block; text-decoration: none; overflow: hidden;
      font-size: 9px; line-height: 11px; color: var(--card); padding: 0 2px; white-space: nowrap; }
-  /* 带色:三段沿用段芯片的颜色;版本带之间只差一档透明度,不为这张图新造强调色 */
-  .relc.s-dev { background: ${tk('warn-ink')}; }
-  .relc.s-test { background: var(--accent); }
-  .relc.s-prod { background: var(--brand); }
-  .relc.s-other { background: var(--faint); }
+  /* 带色:三段沿用段芯片的颜色;版本带之间只差一档透明度,不为这张图新造强调色。
+     同一个色值顺手落一份 --rellane:放大档里细线要 background、‹ 与虚边芯片要 color,
+     两种用法同一个色,不为此新造颜色也不在两处写死 */
+  .relc.s-dev { background: ${tk('warn-ink')}; --rellane: ${tk('warn-ink')}; }
+  .relc.s-test { background: var(--accent); --rellane: var(--accent); }
+  .relc.s-prod { background: var(--brand); --rellane: var(--brand); }
+  .relc.s-other { background: var(--faint); --rellane: var(--faint); }
   .relc.q3 { opacity: .78; }
   .relc.q2 { opacity: .56; }
   .relc.q1 { opacity: .4; }
@@ -3419,6 +3423,25 @@ const REL_CSS = !REL ? '' : `
   .relpb.dim { opacity: .16; }
   .relpb:hover { outline: 1.5px solid var(--ink); z-index: 2; }
   .relpb.hit { outline: 1.5px solid ${tk('gold-ink')}; z-index: 2; }
+  /* ——— 放大之后的字形(v0.15.11)——— 日宽 < 40px 时下面这些类一个都不出现,窄窗口的产物一字不变。
+     骨架照旧是那一层 <a class="relpb">:类 / href / data-relpk / tabindex 一字不差,
+     所以点击去 GitHub、悬停出卡、键盘聚焦、搜索命中的描边,三档共用同一套,不必各写一遍 */
+  .relc.relink { background: none; color: var(--rellane); } /* 泳道色当字色用(独立的 ‹) */
+  .relpb.relcb { background: none; border: 0; overflow: visible; } /* 两端实心 + 细线:壳只管命中面 */
+  .relcp, .relhr, .relcx { position: absolute; }
+  .relcp { top: 0; height: 11px; border-radius: 3px; background: var(--rellane); }
+  .relpb.open .relcp { border: 1px dashed var(--card); } /* 还开着:虚边留在帽上 */
+  .relhr { top: 4px; height: 2px; background: var(--rellane); }
+  .relcx, .relwx { font-size: 12px; font-weight: 700; line-height: 11px; color: var(--rellane); }
+  .relcx { left: 0; }
+  .relwx { position: absolute; }
+  .relwk { position: absolute; height: 1px; }     /* whisker:开 → 合的跨度退成一条细线 */
+  .relwt { position: absolute; width: 2px; height: 6px; border-radius: 1px; } /* 跨度另一端的小端标 */
+  .relpb.relchip { height: ${REL_CHIP}px; line-height: ${REL_CHIP}px; font-size: 11px; border-radius: 5px;
+     text-align: center; padding: 0; font-variant-numeric: tabular-nums; }
+  .relpb.relchip.open, .relpb.relchip.relovf { background: var(--card); color: var(--rellane); opacity: 1; }
+  .relpb.relchip.open { border: 1px dashed var(--rellane); }
+  .relpb.relchip.relovf { border: 1px solid var(--rellane); opacity: .75; }
   .rellg { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 9px 0 0; font-size: 11.5px; color: var(--faint); }
   .rellk { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   .rellk i { display: inline-block; width: 13px; height: 7px; border-radius: 99px; margin: 0 3px 0 9px; }
@@ -3546,10 +3569,12 @@ const REL_JS = !REL ? '' : `
     // 锚点日与 gen 烤日桶时同一条规则:开着看 createdAt,合了看 mergedAt,关掉看 closedAt
     function anc(d) { return String(d.s === 'open' ? d.c : d.m || d.x || d.c).slice(0, 10) }
     // 时间线的全部尺寸都在这一处:轴(lbl/base/slot/quiet)、泳道(lanes/row/min/gap)、带(head/sub/pad)
-    var TL = { lbl: ${REL_GUT}, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48 }
+    var TL = { lbl: ${REL_GUT}, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48, chip: ${REL_CHIP} }
     var DAYC = {}, byG = {} // 全局日计数(轴宽只看它,展开/折叠/筛选都不让轴跳)与带 → PR
     for (i = 0; i < G.length; i++) for (var gd in G[i].d) DAYC[gd] = (DAYC[gd] || 0) + G[i].d[gd]
     for (i = 0; i < D.length; i++) { if (!byG[D[i].gp]) byG[D[i].gp] = []; byG[D[i].gp].push(D[i]) }
+    var maxN = 0 // 芯片宽按全图最大的号算一次:整张图一个宽度,列对得齐(四五位数的仓库也不切号)
+    for (i = 0; i < D.length; i++) if (D[i].n > maxN) maxN = D[i].n
     var bOpen = { dev: true }, bSnap = null // 默认只展开 dev:在做的那条
     function hitsOf(g) { var out = [], k; for (k = 0; k < D.length; k++) if (D[k].gp === g.g && pass(D[k])) out.push(D[k]); return out }
     function href(n) { var a = rows[n] && rows[n].querySelector('.rc-n a'); return a ? a.getAttribute('href') : '' }
@@ -3561,6 +3586,46 @@ const REL_JS = !REL ? '' : `
       // tabindex 显式给上:href 取不到时 <a> 不可聚焦,键盘就摸不到这个方块了。
       return '<a class="' + cls + '" href="' + xe(href(d.n)) + '" target="_blank" rel="noopener" tabindex="0"'
         + ' data-relpk="' + d.n + '" style="left:' + bb.x + 'px;top:' + (top + bb.lane * TL.row) + 'px;width:' + bb.w + 'px">' + xe(txt) + '</a>'
+    }
+    // ———— 放大档的字形(v0.15.11)————
+    // 日宽 < 40px 时下面这几只一次都不被调用,窄窗口的产物与 0.15.10 逐字节相同。
+    // 骨架一律是同一层 <a class="relpb">:类 / href / data-relpk / tabindex 一字不差,所以
+    // 点击去 GitHub、悬停出卡、键盘聚焦、搜索命中的描边三档共用同一套 —— 不为放大另开一条交互路径。
+    function tlA(d, g, q, cls, style, txt) {
+      var c = cls + ' relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '')
+      if (q) c += pass(d) ? ' hit' : ' dim'
+      return '<a class="' + c + '" href="' + xe(href(d.n)) + '" target="_blank" rel="noopener" tabindex="0"'
+        + ' data-relpk="' + d.n + '" style="' + style + '">' + txt + '</a>'
+    }
+    function tlSq(bb, g, top, q, rowS, size) { // 方块随日宽长大,先横后竖排进那一天的格子
+      return tlA(bb.item.d, g, q, 'relpb', 'left:' + bb.x + 'px;top:' + (top + bb.lane * rowS + 1)
+        + 'px;width:' + size + 'px;height:' + size + 'px', '')
+    }
+    function tlCap(bb, g, top, q, size, clip) { // 横杠退成两端实心 + 细线;左端被裁就画一个 ‹
+      var c = relCaps(bb.x, bb.w, size, clip)
+      if (c.solid) return tlBar(bb, g, top, q, true) // 短到两顶帽要碰上:那时它本来就没虚长,原样一整条
+      return tlA(bb.item.d, g, q, 'relpb relcb', 'left:' + bb.x + 'px;top:' + (top + bb.lane * TL.row) + 'px;width:' + bb.w + 'px',
+        (c.aw ? '<i class="relcp" style="left:0;width:' + c.aw + 'px"></i>' : '<i class="relcx">‹</i>')
+        + '<i class="relhr" style="left:' + (c.lx - bb.x) + 'px;width:' + c.lw + 'px"></i>'
+        + '<i class="relcp" style="left:' + (c.b - bb.x) + 'px;width:' + c.bw + 'px"></i>')
+    }
+    function tlChip(it, g, x, y, q, cw) { // 号直接写在图上:不用悬停也不用点就知道是谁
+      return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', '#' + it.d.n)
+    }
+    // 放不下的收进一枚 +N。它不是某一条 PR,挂不上 data-relpk;改挂折叠带那副「带 + 那一天」的钩子,
+    // 悬停 / 聚焦弹的就是那一天的 PR 清单 —— 被收起来的几个正在里头,不必为此另造一张卡。
+    function tlOvf(n, g, dy, x, y, w) {
+      return '<span class="relpb relchip relovf relc s-' + g.sg + ' q' + g.q + '" tabindex="0" data-relpkg="' + xe(g.g)
+        + '" data-relpkd="' + dy + '" style="left:' + x + 'px;top:' + y + 'px;width:' + w + 'px">+' + n + '</span>'
+    }
+    function tlWhisk(r, g, top, rowM, q, cw) { // 一组(同开同合)共用一行一条细线,whisker 才不含糊指向谁
+      var out = [], y = top + r.lane * rowM + 1, cy = y + Math.round(TL.chip / 2), pitch = cw + 6, j
+      if (r.x1 > r.x0) out.push('<i class="relwk relc s-' + g.sg + ' q' + g.q + '" style="left:' + r.x0 + 'px;top:' + cy + 'px;width:' + (r.x1 - r.x0) + 'px"></i>')
+      if (r.clip) out.push('<i class="relwx relc relink s-' + g.sg + '" style="left:' + TL.lbl + 'px;top:' + (cy - 6) + 'px">‹</i>')
+      else out.push('<i class="relwt relc s-' + g.sg + ' q' + g.q + '" style="left:' + ((r.open ? r.x1 : r.x0) - 1) + 'px;top:' + (cy - 3) + 'px"></i>')
+      for (j = 0; j < r.show; j++) out.push(tlChip(r.list[j], g, r.cx + j * pitch, y, q, cw))
+      if (r.list.length > r.show) out.push(tlOvf(r.list.length - r.show, g, r.an, r.cx + r.show * pitch, y, cw - 8))
+      return out.join('')
     }
     // ———— hover peek(v0.15.2)————
     // 「当天开当天合」的方块常只有几个像素、连号都写不下,原来只有原生 title 兜着 —— 截断、要等、还慢。
@@ -3648,6 +3713,12 @@ const REL_JS = !REL ? '' : `
       var sp = {}
       for (k = 0; k < days.length; k++) if (days[k].slice(8) === '01') sp[days[k]] = 'mo'
       for (k = 0; k < RELS.length; k++) { var rd = String(RELS[k].at).slice(0, 10); if (ax.x[rd] !== undefined) sp[rd] = 'tag' }
+      // 一天多少 px 定这一屏的字形(v0.15.11):< 40 = 现状,≥ 40 = 方块长大 + 横杠退成两端实心,
+      // ≥ 120 = 每个 PR 一枚带号芯片。一屏只挑一次(逐条 PR 各挑各的就是一张图里两套字形)。
+      var reg = relRegime(ax.W - TL.lbl, days.length)
+      var size = relSqSize(ax.W - TL.lbl, days.length), cw = relChipW(maxN)
+      var rowM = reg === 2 ? TL.chip + 4 : TL.row
+      var rowS = reg === 2 ? TL.chip + 4 : reg === 1 ? size + 4 : TL.row
       // 轴行开头先落一格左栏(与带的左栏同宽同 sticky):分隔线对得上,日期也滑不进带名区
       var ticks = relTicks(days, ax, sp, TL.tick), out = ['<div class="reltlax" style="width:' + ax.W + 'px"><div class="reltlag"></div>']
       for (k = 0; k < ticks.length; k++) {
@@ -3665,14 +3736,19 @@ const REL_JS = !REL ? '' : `
           if (e0 > today) e0 = today // 合并时刻比这台机器的「今天」还新(时区 / 时钟):当天算
           if (e0 < s0) e0 = s0
           if (s0 === e0) { if (!byDay[s0]) byDay[s0] = []; byDay[s0].push({ n: d.n, s: s0, e: e0, d: d }) }
-          else multi.push({ n: d.n, s: s0, e: e0, d: d })
+          else multi.push({ n: d.n, s: s0, e: e0, d: d, open: d.s === 'open' })
           if (ax.x[anc(d)] !== undefined) inwin++
           if (q && pass(d)) hit++
         }
         var op = !!bOpen[g.g]
-        var mp = op ? relPack(multi, ax, TL) : { used: 0, bars: [] }
-        var sg2 = op ? relGrid(byDay, ax, TL) : { used: 0, bars: [] }
-        var H = relBandH(mp.used, sg2.used, TL, op)
+        var mp = !op ? { used: 0, bars: [] } : reg === 2 ? relPackChip(multi, ax, cw, TL) : relPack(multi, ax, TL)
+        var sg2 = !op ? { used: 0, bars: [] }
+          : reg === 2 ? relGridChip(byDay, ax, cw) : reg === 1 ? relGridBig(byDay, ax, size, TL) : relGrid(byDay, ax, TL)
+        var H = relBandH(mp.used, sg2.used, TL, op, rowM, rowS)
+        // 副标题数的是 PR 数,不是画出来的字形数:芯片档里跨天那组按行分,当日那组还含一枚 +N
+        var mcnt = 0, scnt = 0
+        if (mp.rows) { for (j = 0; j < mp.rows.length; j++) mcnt += mp.rows[j].list.length } else mcnt = mp.bars.length
+        for (j = 0; j < sg2.bars.length; j++) scnt += sg2.bars[j].more || 1
         // 触发面 = 整格(role/tabindex/aria/title/data 都挂这一层),里头那两行只是字:
         // 展开后带头底下那片底色也是这条带,只有文字那几行能点就是「看着能点、点了不动」
         var body = [], gut = ['<div class="relgut" role="button" tabindex="0" aria-expanded="' + (op ? 'true' : 'false')
@@ -3697,15 +3773,26 @@ const REL_JS = !REL ? '' : `
         if (op) {
           var top = TL.head
           if (mp.used) {
-            gut.push('<div class="relsub" style="top:' + (top + 1) + 'px">跨天 ' + mp.bars.length + ' 个 · ' + mp.used + ' 条泳道</div>')
+            gut.push('<div class="relsub" style="top:' + (top + 1) + 'px">跨天 ' + mcnt + ' 个 · '
+              + (mp.rows ? mp.used + ' 行芯片' : mp.used + ' 条泳道') + '</div>')
             top += TL.sub
-            for (j = 0; j < mp.bars.length; j++) body.push(tlBar(mp.bars[j], g, top, q, true))
-            top += mp.used * TL.row + 2
+            if (mp.rows) for (j = 0; j < mp.rows.length; j++) body.push(tlWhisk(mp.rows[j], g, top, rowM, q, cw))
+            else for (j = 0; j < mp.bars.length; j++) {
+              body.push(reg === 1 ? tlCap(mp.bars[j], g, top, q, size, mp.bars[j].item.s < ax.t0) : tlBar(mp.bars[j], g, top, q, true))
+            }
+            top += mp.used * rowM + 2
           }
           if (sg2.used) {
-            gut.push('<div class="relsub" style="top:' + (top + 1) + 'px">当天开当天合 ' + sg2.bars.length + ' 个 · 按号横排</div>')
+            gut.push('<div class="relsub" style="top:' + (top + 1) + 'px">当天开当天合 ' + scnt + ' 个 · '
+              + (reg === 2 ? '芯片' : '按号横排') + '</div>')
             top += TL.sub
-            for (j = 0; j < sg2.bars.length; j++) body.push(tlBar(sg2.bars[j], g, top, q, false))
+            for (j = 0; j < sg2.bars.length; j++) {
+              var sb = sg2.bars[j]
+              if (sb.more) body.push(tlOvf(sb.more, g, sb.d, sb.x, top + 1, sb.w))
+              else if (reg === 2) body.push(tlChip(sb.item, g, sb.x, top + 1, q, cw))
+              else if (reg === 1) body.push(tlSq(sb, g, top, q, rowS, size))
+              else body.push(tlBar(sb, g, top, q, false))
+            }
           }
         }
         gut.push('</div>')
