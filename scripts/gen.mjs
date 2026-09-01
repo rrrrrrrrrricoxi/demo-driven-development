@@ -1549,6 +1549,31 @@ const progressPane = `
 //  id 约定:<pre>chips / <pre>lineseg / <pre>dim / <pre>sort / <pre>search(clear) / <pre>clearall / <pre>meta / <pre>empty(clear)
 // ============================================================================
 const tbPrefix = (id) => (String(id).match(/^[A-Za-z]+/) || [''])[0]
+// ———— Backlog 排序控件(v0.15.12,config.backlogSort:布尔,默认关)————
+// 关 = 决策/Backlog 都用原来那只排序下拉,产物逐字节冻结。
+// 开 = 只有 Backlog 那只下拉换成一排分段钮(与线别分段同一套 .lseg 习语,零新增 CSS),
+// 并多出「最近更新」一档 —— 按卡文件最后改动日排,这是下拉里原先没有的。原下拉三档一档不少,
+// 只是换了控件:排序不是新能力,新的是「更新日期」这把尺和「一眼看得见当前按什么排」。
+const BLSORT = cfg.backlogSort === true
+// [值, 钮面, title];第一档即默认档(= 板面烤入顺序,谁都不动)
+const BLSORT_MODES = [
+  ['ord', '默认', '板面烤入的顺序'],
+  ['udate-desc', '最近更新', '卡文件最后改动日,新→旧'],
+  ['cdate-desc', '最近立卡', '建卡日期,新→旧'],
+  ['date-asc', '最早立卡', '建卡日期,旧→新'],
+  ['id', '按编号', '编号前缀 + 数字'],
+]
+// 分段钮不自带 .tgroup —— 它就落在原下拉那个 tgroup 里,与「线别」那组同款「小灰字 + 分段」
+const tbSortCtl = (pre) => !(BLSORT && pre === 'bl')
+  ? `<select id="${pre}sort" aria-label="排序">
+          <option value="date-desc">排序 · 日期新→旧</option>
+          <option value="date-asc">排序 · 日期旧→新</option>
+          <option value="id">排序 · 按编号</option>
+        </select>`
+  : `<span class="tlab">排序</span>
+        <div class="lseg" id="blsortseg" aria-label="排序方式">
+          ${BLSORT_MODES.map(([k, lbl, tip], i) => `<button type="button" data-sort="${esc(k)}"${i ? '' : ' class="on"'} title="${esc(tip)}">${esc(lbl)}</button>`).join('')}
+        </div>`
 // 状态 chips:计数是初始总数,运行期 refresh 按「除状态外的其余筛选维度」重算
 const tbChips = (groups, labels, colors, countOf) => groups
   .map((g) => {
@@ -1596,11 +1621,7 @@ const tbHtml = (pre, chips, dimOpts, dimAria, sessGroup = '') => SESSION_ON ? `
     </div>
     <div class="tbrow tbrow-act">
       <div class="tgroup">
-        <select id="${pre}sort" aria-label="排序">
-          <option value="date-desc">排序 · 日期新→旧</option>
-          <option value="date-asc">排序 · 日期旧→新</option>
-          <option value="id">排序 · 按编号</option>
-        </select>
+        ${tbSortCtl(pre)}
       </div>
       <div class="tsearch">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.2" stroke="#8a8884" stroke-width="1.4"/><path d="M9.4 9.4L12.5 12.5" stroke="#8a8884" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -1618,11 +1639,7 @@ const tbHtml = (pre, chips, dimOpts, dimAria, sessGroup = '') => SESSION_ON ? `
     <div class="tbrow">${tbLineSeg(pre)}${sessGroup}
       <div class="tgroup">
         <select id="${pre}dim" aria-label="${dimAria}">${dimOpts}</select>
-        <select id="${pre}sort" aria-label="排序">
-          <option value="date-desc">排序 · 日期新→旧</option>
-          <option value="date-asc">排序 · 日期旧→新</option>
-          <option value="id">排序 · 按编号</option>
-        </select>
+        ${tbSortCtl(pre)}
       </div>
       <div class="tsearch">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.2" stroke="#8a8884" stroke-width="1.4"/><path d="M9.4 9.4L12.5 12.5" stroke="#8a8884" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -1709,8 +1726,13 @@ const wtBlock = (list) =>
         )
         .join('')}</div>`
 
-const blCard = (it) => `
-  <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${blLine(it)}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}" data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
+// 排序要的两枚派生属性(BLSORT 关 = 空串,逐字节冻结):
+// data-udate = 卡文件最后改动日,缺则退回建卡日 —— 未拆卡的板上「最近更新」= 「最近立卡」,
+// 这一档照样点得动,只是两把尺量出同一个数(README 里说明白)。
+// data-ord = 分区内的烤入下标:排序是 DOM 重排不是重渲,「默认」这一档得原样还回去。
+const blSortAttr = (it, i) => !BLSORT ? '' : ` data-udate="${esc(cardUpd(it.id) || it.date || '')}" data-ord="${i}"`
+const blCard = (it, i) => `
+  <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${blLine(it)}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}" data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${blSortAttr(it, i)}${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
     ${rowHead({
       id: it.id,
       badge: `<span class="badge" style="--c:${escC(BL_STATUS_COLOR[it.status])}">${esc(b.statuses[it.status])}</span>`,
@@ -2392,6 +2414,45 @@ const SESS_METANOTE = !SESSION_ON ? '' : ` + (state.session !== 'all' ? ' · 未
 const SESS_CLEAR = !SESSION_ON ? '' : `\n      state.session = 'all'\n      try { localStorage.setItem(SESS_KEY, 'all') } catch (e) {}`
 const SESS_WIRE = !SESSION_ON ? '' : `\n    if (el('sesschips')) el('sesschips').querySelectorAll('.sesschip').forEach((sc) => sc.addEventListener('click', () => {\n      state.session = sc.dataset.sess\n      try { localStorage.setItem(SESS_KEY, state.session) } catch (e) {}\n      apply()\n    }))`
 const SESS_INIT = !SESSION_ON ? '' : `\n    try { const s = localStorage.getItem(SESS_KEY); if (s) state.session = s } catch (e) {}\n    if (state.session !== 'all') cards.forEach((c) => { if (!(c.dataset.session || '').split(' ').includes(state.session)) c.classList.add('flt-hide') })`
+
+// —— Backlog 排序注入点(v0.15.12,config.backlogSort;每处 off 均为 '',逐字节冻结)——
+const BLS_LABEL = !BLSORT ? '' : `, 'ord': '板面顺序', 'udate-desc': '更新新→旧', 'cdate-desc': '立卡新→旧'`
+const BLS_DEFS = !BLSORT ? '' : `
+  const BLS_KEY = '${LS_PREFIX}_bl_sort'
+  const BLS_OK = ${JSON.stringify(BLSORT_MODES.map(([k]) => k))}
+  const tbIdAsc = (a, b) => tbPre(a.id).localeCompare(tbPre(b.id)) || tbNum(a.id) - tbNum(b.id) || a.id.localeCompare(b.id)
+  const tbOrdCmp = (a, b) => (Number(a.dataset.ord) || 0) - (Number(b.dataset.ord) || 0)
+  // 「最近更新 / 最近立卡」:日期新→旧,无日期沉底,同日按编号小→大。同日的编号方向与烤入顺序
+  // (编号大→小)相反是有意的:两档因此看得出区别,「默认」到底是什么顺序也才说得清。
+  const tbNewCmp = (attr) => (a, b) => {
+    const da = a.dataset[attr] || '', db = b.dataset[attr] || ''
+    if (da === db) return tbIdAsc(a, b)
+    if (!da) return 1
+    if (!db) return -1
+    return da < db ? 1 : -1
+  }`
+const BLS_CMP = !BLSORT ? '' : `state.sort === 'ord' ? tbOrdCmp
+        : state.sort === 'udate-desc' ? tbNewCmp('udate')
+        : state.sort === 'cdate-desc' ? tbNewCmp('date')
+        : `
+// 分段接线 + 记忆:默认档 'ord' = 烤入顺序,一次 DOM 都不动(没人的板因为装了这个开关而变样)
+const BLS_INIT = !BLSORT ? '' : `
+    if (opts.pre === 'bl') {
+      const seg = document.getElementById('blsortseg')
+      state.sort = 'ord'
+      try { const s = localStorage.getItem(BLS_KEY); if (BLS_OK.indexOf(s) >= 0) state.sort = s } catch (e) {}
+      if (seg) seg.querySelectorAll('[data-sort]').forEach((sb) => {
+        sb.classList.toggle('on', sb.dataset.sort === state.sort)
+        sb.addEventListener('click', () => {
+          if (state.sort === sb.dataset.sort) return
+          state.sort = sb.dataset.sort
+          seg.querySelectorAll('[data-sort]').forEach((o) => o.classList.toggle('on', o === sb))
+          try { localStorage.setItem(BLS_KEY, state.sort) } catch (e) {}
+          apply()
+        })
+      })
+      if (state.sort !== 'ord') apply() // 记着的不是默认档才重排;默认档下这里什么都不做
+    }`
 
 // ============================================================================
 //  验收 pane(v0.12.0):当前 PR 面板 + 清单本体 + 已验收 + 没清单的 PR
@@ -4883,14 +4944,14 @@ ${PATH_CSS_B}
   // ———— 工具条工厂(D46 方案A,决策/Backlog 共用):状态多选 / 维度下拉 / 排序 / 标题+编号搜索;线别分段走全局 setLine ————
   const tbNum = (id) => parseInt(String(id).replace(/^\\D+/, ''), 10) || 0
   const tbPre = (id) => (String(id).match(/^[A-Za-z]+/) || [''])[0]
-  const TB_SORT_LABEL = { 'date-desc': '日期新→旧', 'date-asc': '日期旧→新', 'id': '按编号' }
+  const TB_SORT_LABEL = { 'date-desc': '日期新→旧', 'date-asc': '日期旧→新', 'id': '按编号'${BLS_LABEL} }
   const tbDateCmp = (dir) => (a, b) => {
     const da = a.dataset.date || '', db = b.dataset.date || ''
     if (!da && !db) return tbNum(b.id) - tbNum(a.id) // 都无日期:编号新→旧
     if (!da) return 1 // 无日期沉底
     if (!db) return -1
     return dir * (da < db ? -1 : da > db ? 1 : 0)
-  }
+  }${BLS_DEFS}
   const toolbars = []
   // opts:{ pane, pre, cardSel, dimAttr };控件 id 走 <pre>chips/<pre>dim/<pre>sort/… 约定(gen 期 tbHtml 同款)
   function initToolbar(opts) {
@@ -4909,7 +4970,7 @@ ${PATH_CSS_B}
         ${SESS_OK}c.classList.toggle('flt-hide', !(okS && okD && okQ${SESS_AND}))
       })
       // 排序:组内重排(看板保留状态分组,排序作用于每组内部;编号=前缀字母序+数字)
-      const cmp = state.sort === 'id'
+      const cmp = ${BLS_CMP}state.sort === 'id'
         ? (a, b) => tbPre(a.id).localeCompare(tbPre(b.id)) || tbNum(a.id) - tbNum(b.id) || a.id.localeCompare(b.id)
         : tbDateCmp(state.sort === 'date-asc' ? 1 : -1)
       pane.querySelectorAll('.group .cards').forEach((box) => {
@@ -4971,7 +5032,7 @@ ${PATH_CSS_B}
     })
     if (el('clearall')) el('clearall').addEventListener('click', clearAll)
     if (el('emptyclear')) el('emptyclear').addEventListener('click', clearAll)${SESS_WIRE}${SESS_INIT}
-    toolbars.push({ refresh, clearAll })
+    toolbars.push({ refresh, clearAll })${BLS_INIT}
   }
   ${LAZY ? LAZY_JS : `initToolbar({ pane: 'pane-decisions', pre: 'dec', cardSel: '.deccard', dimAttr: 'type' })
   initToolbar({ pane: 'pane-backlog', pre: 'bl', cardSel: '.blcard', dimAttr: 'priority' })`}

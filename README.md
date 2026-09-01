@@ -25,7 +25,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `releaseTab`, `richText`, `backlogArchive`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -246,6 +246,35 @@ lane and time filters, and deep links (`#CARD-ID`) reach the archive exactly as
 they reached the backlog. With `lazyTabs` on it becomes a third part file,
 `parts/archive.html`, with its own entry in the card → pane map, so a deep link
 to an archived card still fetches the right part. Left unset, output is
+byte-identical to a board without the feature.
+
+## Backlog sort control (optional)
+
+The backlog has been sortable since the toolbar landed, but the control was a
+`<select>` wedged between a filter dropdown and a search box, and it had no
+ruler for *when the card was last touched*. Set `config.backlogSort` to `true`
+and that dropdown becomes a row of segmented buttons under a quiet `排序`
+caption — the same `.tlab` + `.lseg` idiom as the lane filter, no new CSS —
+offering 默认 (board order) · 最近更新 (last updated) · 最近立卡 (card date,
+newest first) · 最早立卡 (card date, oldest first) · 按编号 (by id). The
+default is 默认, so turning the key on changes nobody's board until they pick
+something; the last two are the old dropdown's remaining options, kept so the
+swap loses nothing.
+
+*Last updated* is the per-card file date that `cardsDir` boards already show as
+the grey `更新 MM-DD` stamp — one batched `git log`, falling back to mtime. It
+is baked onto each backlog card as `data-udate`, alongside `data-ord`, the
+card's position inside its section. **On a board without `cardsDir` there is no
+per-card file, so the update date is the card date and the two chips sort
+identically** — the chip is still there, it just has nothing extra to say.
+
+Sorting reorders DOM nodes within each status section: sections never move,
+cards are never re-rendered, and so hidden cards stay hidden, the lane filter
+keeps working, and the WIP count is recomputed by the same pass every other
+filter uses. 默认 re-appends by `data-ord` and restores the baked order exactly.
+The choice is kept per browser under `<brand>_bl_sort` and applied when the pane
+is injected, so it survives a reload and the `lazyTabs` path both. The archive
+tab does not get the control in this version. Left unset, output is
 byte-identical to a board without the feature.
 
 ## WIP limits (optional)
