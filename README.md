@@ -125,10 +125,13 @@ date, cards, branch, acceptance progress; sortable, searchable, released ones
 folded by version) and a timeline. The timeline is one band per version plus
 dev, test and the leftovers, around 200px folded; click a band and it expands
 in place, packing its pull requests into at most six shared lanes so the
-expanded height has a ceiling. The date axis is not linear — a quiet day gets a
-few pixels and a day with many pull requests is widened to fit them side by
+expanded height has a ceiling. The date axis is not linear — a quiet day is
+narrow and a day with many pull requests is widened to fit them side by
 side, which is where the old one-row-per-pull-request timeline was spending
-2400px of height for no information. Five chips set the window — Last 30 days,
+2400px of height for no information. Those weights are relative: the axis is
+scaled to fill the panel, so a shorter window zooms in rather than stopping
+halfway across, and only a window too wide to fit scrolls sideways.
+Five chips set the window — Last 30 days,
 Last 2 weeks, This week (from the local Monday), Today, All time — starting at
 Last 30 days. The window is worked out in the browser from its own clock, so
 `gen` bakes no date and yesterday's `index.html` is still right today.

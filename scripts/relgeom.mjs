@@ -8,15 +8,29 @@
 //
 // 浏览器侧要跑在没有 const/箭头函数假设的老壳里,这里统一用 var + function。
 
-/** 窗口内的日子 → 每天的 x 与宽度。days = 升序 ISO 日期串;counts = 日 → PR 数 */
-export function relAxis(days, counts, o) {
-  var x = o.lbl, map = {}, wid = {}, i, d, c
+/**
+ * 窗口内的日子 → 每天的 x 与宽度。days = 升序 ISO 日期串;counts = 日 → PR 数。
+ * fit(v0.15.10)= 这一格能给轴的实宽(容器宽 − 左栏宽),可省。繁忙度只定**相对**宽窄,
+ * 绝对宽度由 fit 拉满:自然宽之和不够宽就整体等比放大 —— 短窗口 = 放大,不是把轴截短
+ * (近 30 天从前只画到面板左边小半截,右边空一片)。自然宽已经超过 fit 就原样交出去,
+ * 由外层的 overflow-x 横向滚(全时段在窄屏上照旧是滚的,这一条没变)。
+ * 逐日走前缀和再取整:总宽正好落在 fit 上,每天的宽还是整数,不会积出半像素的缝。
+ */
+export function relAxis(days, counts, o, fit) {
+  var nat = [], sum = 0, map = {}, wid = {}, i, d, c, k, x, cum, nx
   for (i = 0; i < days.length; i++) {
+    c = counts[days[i]] || 0
+    nat.push(c ? Math.max(o.base, Math.ceil(c / o.lanes) * o.slot) : o.quiet)
+    sum += nat[i]
+  }
+  k = fit > 0 && sum > 0 && fit > sum ? fit / sum : 1
+  for (i = 0, x = o.lbl, cum = 0; i < days.length; i++) {
     d = days[i]
-    c = counts[d] || 0
+    cum += nat[i]
+    nx = o.lbl + Math.round(cum * k)
     map[d] = x
-    wid[d] = c ? Math.max(o.base, Math.ceil(c / o.lanes) * o.slot) : o.quiet
-    x += wid[d]
+    wid[d] = nx - x
+    x = nx
   }
   return { x: map, w: wid, W: x, t0: days[0], t1: days[days.length - 1] }
 }
