@@ -104,6 +104,8 @@ export function stripCardUpdated(html) {
     .replace(/\n +\/\* =+ 每卡更新日期[^\n]*\n +\.udate \{[^\n]*/g, '')
     .replace(/const LAZY_BYTES = \{[^}]*\}/g, 'const LAZY_BYTES = {}')
     .replace(/ data-dorm="[^"]*"/g, ' data-dorm=""')
+    // backlogSort 的排序尺子(v0.15.12)也是拆分之后才有的新事实,与 .udate / data-dorm 同一类
+    .replace(/ data-udate="[^"]*"/g, ' data-udate=""')
     // 总览的「近 7 天动过的卡」也只在一卡一文件之后才有事实可依(v0.15.0)——
     // 与 .udate 同一类:拆分带来的新事实,不是拆分改坏了看板
     .replace(/\n +<section class="ovrow[^"]*" data-ovrow="recent">[\s\S]*?<\/section>/g, '')

@@ -25,6 +25,10 @@
 // tab 条吸顶 stickyTabs(四拍冻结 / position: sticky 落点跟 --ddd-hubh / 底色不透 / 横向滚动没动 /
 // z 层与 hubbar·懒加载进度线不打架 / 深链锚点补偿代入实高盖得过两条吸顶栏 / 文档库导航与 scrollspy
 // 一并让开 / 与 tabRail 同开时 rail 让位)、
+// Backlog 排序分段 backlogSort(四拍冻结 / 分段替掉 Backlog 那只下拉而决策的原样留着 / 五档次序 /
+// data-udate·data-ord 两枚派生属性 / 比较器从壳里抠出来穷举:默认还原、更新新→旧、同日按编号小→大、
+// 空日期沉底、全打平退编号 / 记忆键 <brand>_bl_sort / 拆卡后更新日与建卡日各说各的 /
+// cards-split 的等价门认得 data-udate)、
 // 时间线左栏(四拍冻结 / 整格 role=button+aria-expanded 而非只有文字那颗钮 / 点击与 Enter·Space
 // 共用一个 toggleBand 且重画后交还焦点 / 左栏宽只有一处字面值,轴行与带行读同一个 --relgut
 // 并画同样的右边框 / TL.lbl 与 --relgut 同一个数)等。
@@ -3833,6 +3837,134 @@ console.log('T63 时间线左栏整格可点 / 轴行对齐')
   cfg.releaseTab = false
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, fx63.kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
+// ============ T64 Backlog 排序分段 backlogSort(opt-in;关档逐字节冻结;默认档 = 烤入顺序)============
+console.log('T64 Backlog 排序分段 backlogSort')
+{
+  const fx64 = mkFixture('fx64', { 's.html': demoHtml('s') })
+  const kb = fx64.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html'), blP = join(kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const bl = rd(blP)
+  bl.tiers = { 1: '核心' }
+  const st = Object.keys(bl.statuses)[0], pri = Object.keys(bl.priorities)[0]
+  const item = (id, date, title) => ({ id, status: st, priority: pri, tier: '1', date, title, problem: 'p', approach: 'a', area: 'x', source: 's' })
+  // 同日期一对(BL-2 / BL-11):烤入顺序按编号大→小,「最近立卡」按编号小→大 —— 两档的区别正在这里
+  bl.items = [item('BL-2', '2026-03-03', '甲'), item('BL-11', '2026-03-03', '乙'), item('BL-7', '2026-01-01', '丙'), item('BL-4', '', '丁')]
+  wr(blP, bl)
+
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('blsortseg') && !off.includes('data-udate=') && !off.includes('data-ord=') && !off.includes('BLS_KEY'),
+    '未配 backlogSort:分段、两枚派生属性、记忆键一个字都不出')
+  ok(off.includes('<select id="blsort" aria-label="排序">') && off.includes('<select id="decsort" aria-label="排序">'),
+    '未配时两个 pane 都还是原来那只排序下拉')
+  const cfg = rd(cfgP)
+  cfg.backlogSort = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, 'backlogSort:false 与未配逐字节相同(冻结)')
+
+  cfg.backlogSort = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'backlogSort:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- 控件:分段替掉 Backlog 那只下拉,决策那只一个字没动 ----
+  ok(!on.includes('<select id="blsort"') && on.includes('<select id="decsort" aria-label="排序">'),
+    'Backlog 那只排序下拉换成了分段;决策 pane 的下拉原样留着')
+  const segHtml = (on.match(/<div class="lseg" id="blsortseg"[\s\S]*?<\/div>/) || [''])[0]
+  ok(/<span class="tlab">排序<\/span>\s*<div class="lseg" id="blsortseg"/.test(on),
+    '分段前面是一枚安静的「排序」小灰字(与「线别」那组同款 .tlab + .lseg,零新增 CSS)')
+  ok([...segHtml.matchAll(/data-sort="([^"]+)"[^>]*>([^<]+)</g)].map((m) => m[1] + '=' + m[2]).join(' ') ===
+    'ord=默认 udate-desc=最近更新 cdate-desc=最近立卡 date-asc=最早立卡 id=按编号',
+    '五档次序:默认 / 最近更新 / 最近立卡 / 最早立卡 —— 后两档是原下拉里那两项,换控件不丢功能',
+    segHtml)
+  ok(/data-sort="ord" class="on"/.test(segHtml) && count(segHtml, 'class="on"') === 1,
+    '默认档预先亮着(装了这个开关的板,不点就跟以前一模一样)')
+  ok(!on.includes('.blsortseg {') && !on.includes('.sortseg'), '没有为它新写一条 CSS(借的是线别分段那套)')
+
+  // ---- 派生属性 ----
+  const cards = [...on.matchAll(/<article class="blcard[^>]*id="(BL-[^"]+)"[^>]*data-date="([^"]*)"[^>]*data-udate="([^"]*)" data-ord="(\d+)"/g)]
+    .map((m) => ({ id: m[1], date: m[2], udate: m[3], ord: Number(m[4]) }))
+  ok(cards.length === 4, '四张卡都烤上了 data-udate / data-ord', String(cards.length))
+  ok(cards.every((c) => c.udate === c.date), '没拆卡的板:更新日期 = 建卡日期(两把尺量出同一个数,不是漏了)')
+  // 烤入顺序 = blByStatus 的 byDateDesc(同日按编号大→小),data-ord 记的正是它渲染出来的位次
+  ok(cards.map((c) => c.id + ':' + c.ord).join(' ') === 'BL-11:0 BL-2:1 BL-7:2 BL-4:3',
+    'data-ord = 分区内烤入位次 0..n-1(「默认」这一档靠它原样还原)', cards.map((c) => c.id + ':' + c.ord).join(' '))
+
+  // ---- 运行期比较器:从壳里原样抠出来跑 ----
+  {
+    const s = on.indexOf('\n  const tbNum = ')
+    const e = on.indexOf('\n  const toolbars = []')
+    const src = on.slice(s, e)
+    ok(src.includes('BLS_KEY') && src.includes('tbNewCmp'), '抠得到那段(比较器与记忆键都在壳里)')
+    const F = new Function(src + '\n  return { tbOrdCmp, tbNewCmp, tbIdAsc, BLS_KEY, BLS_OK, TB_SORT_LABEL }')()
+    ok(F.BLS_KEY === 'htest_bl_sort', '记忆键走 LS_PREFIX 老规矩:<brand>_bl_sort', F.BLS_KEY)
+    ok(F.BLS_OK.join(' ') === 'ord udate-desc cdate-desc date-asc id', 'BLS_OK 就是分段那五档(存了别的值一律不认)')
+    ok(F.TB_SORT_LABEL['ord'] === '板面顺序' && F.TB_SORT_LABEL['udate-desc'] === '更新新→旧' && F.TB_SORT_LABEL['cdate-desc'] === '立卡新→旧',
+      'meta 行说得出这三档各叫什么(不是空白)')
+    const el = (id, udate, date, ord) => ({ id, dataset: { udate, date, ord: String(ord) } })
+    // 烤入顺序:同日按编号大→小(BL-11 在 BL-2 前);无日期沉底
+    const deck = [el('BL-11', '2026-05-05', '2026-03-03', 0), el('BL-2', '2026-01-09', '2026-03-03', 1),
+      el('BL-7', '2026-09-09', '2026-01-01', 2), el('BL-4', '', '', 3)]
+    const order = (cmp) => deck.slice().sort(cmp).map((x) => x.id).join(' ')
+    ok(order(F.tbOrdCmp) === 'BL-11 BL-2 BL-7 BL-4', '默认:按 data-ord 还原成烤入顺序', order(F.tbOrdCmp))
+    ok(order(F.tbNewCmp('udate')) === 'BL-7 BL-11 BL-2 BL-4', '最近更新:更新日新→旧,没日期的沉底', order(F.tbNewCmp('udate')))
+    ok(order(F.tbNewCmp('date')) === 'BL-2 BL-11 BL-7 BL-4', '最近立卡:建卡日新→旧,同日按编号小→大(BL-2 在 BL-11 前)', order(F.tbNewCmp('date')))
+    ok(order(F.tbNewCmp('date')) !== order(F.tbOrdCmp),
+      '同日那一对上「最近立卡」与「默认」看得出区别 —— 否则两颗钮点着像坏的')
+    ok(order(F.tbIdAsc) === 'BL-2 BL-4 BL-7 BL-11', '按编号:前缀字母序 + 数字小→大(11 排在 7 之后,不是字符串序)', order(F.tbIdAsc))
+    // 稳定性:全同日 + 全同 udate 时,三档都退回编号,不会随机
+    const tie = [el('A-3', '2026-01-01', '2026-01-01', 0), el('A-1', '2026-01-01', '2026-01-01', 1)]
+    ok(tie.slice().sort(F.tbNewCmp('udate')).map((x) => x.id).join(' ') === 'A-1 A-3', '全打平时退到编号,结果是定的')
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((x) => x.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+
+  // ---- 拆卡之后:更新日期真的与建卡日期分开了 ----
+  {
+    // 拆分自带的等价门:data-udate 是拆分之后才有的新事实,得与 .udate / data-dorm 同样归一,
+    // 否则 backlogSort 一开,cards-split 会判自己「把看板拆坏了」并回滚(0.15.12 就在这里被逮到过)
+    const sp = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'cards-split.mjs'), '--dir', kb], { encoding: 'utf8' })
+    ok(sp.status === 0, 'backlogSort 开着也拆得动:cards-split exit 0(等价门认得 data-udate)', (sp.stdout || '') + (sp.stderr || ''))
+    const cd = join(kb, 'cards', 'backlog')
+    const t = new Date('2026-06-06T12:00:00Z')
+    utimesSync(join(cd, 'BL-7.json'), t, t) // git 里还没这文件 → 退 mtime,正是那条既有降级链
+    runGen(NEW_SCRIPTS, kb)
+    const split = readFileSync(idxP, 'utf8')
+    const m7 = split.match(/id="BL-7"[^>]*data-date="([^"]*)"[^>]*data-udate="([^"]*)"/)
+    ok(m7 && m7[1] === '2026-01-01' && m7[2] === '2026-06-06',
+      '拆卡后 data-udate 走的是 0.14.0 那条卡文件更新日(含 mtime 兜底),与建卡日各说各的', m7 ? m7.join(' / ') : 'no match')
+    ok(split.includes('class="udate"'), '卡头上那枚「更新」灰字照旧在(排序这把尺,人眼也看得见)')
+    spawnSync(process.execPath, [join(NEW_SCRIPTS, 'cards-join.mjs'), '--dir', kb], { encoding: 'utf8' })
+  }
+  // ---- 归档 pane:这一版不给它控件,但同一张 blCard 的属性它也带着(将来要加就是接一根线) ----
+  {
+    const c2 = rd(cfgP)
+    c2.backlogArchive = true
+    wr(cfgP, c2)
+    const ra = runGen(NEW_SCRIPTS, kb)
+    const arch = readFileSync(idxP, 'utf8')
+    ok(ra.status === 0 && arch.includes('id="pane-archive"') && count(arch, '<div class="lseg" id="blsortseg"') === 1,
+      '归档 pane 没有第二排排序分段(这一版只动 Backlog)', `exit ${ra.status}`)
+    c2.backlogArchive = false
+    wr(cfgP, c2)
+    runGen(NEW_SCRIPTS, kb)
+  }
+  cfg.backlogSort = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
 }
 

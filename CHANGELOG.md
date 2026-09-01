@@ -9,6 +9,42 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.12] - 2026-09-01
+
+### Added
+- **A visible sort control on the backlog, with last-updated as one of its
+  rulers (`backlogSort`, opt-in).** The backlog has been sortable since 0.4.0,
+  but the control was a `<select>` sitting between a filter dropdown and a
+  search box, and boards ran for months without anyone finding it. Set
+  `config.backlogSort` to `true` and that dropdown becomes a row of segmented
+  buttons in the toolbar — the same `.tlab` + `.lseg` idiom the lane filter
+  already uses, so no new vocabulary and not one new CSS rule — reading
+  默认 / 最近更新 / 最近立卡 / 最早立卡 / 按编号: board order, by update date,
+  by card date newest first, by card date oldest first, by id. The middle one is
+  new; the last two are the old dropdown's other two options, carried across so
+  the swap costs nothing.
+
+  *Last updated* is the per-card file date 0.14.0 already computes from one
+  batched `git log` (with its existing mtime and empty fallbacks); it is now
+  also baked onto each backlog card as `data-udate`, next to `data-ord`, the
+  card's position within its section. Sorting moves DOM nodes inside each
+  existing status section — sections never reorder, cards are never re-rendered,
+  so filtered-out cards keep their `flt-hide`, the lane-filter delegation
+  (BL-C105) keeps working, and the WIP count is recomputed by the same
+  `setLine` every other filter already calls. `默认` re-appends by `data-ord`
+  and restores the baked order exactly. The choice is remembered per browser
+  under `<brand>_bl_sort` and applied when the pane is injected, so it survives
+  a reload and the lazy-tab path both. The archive pane is untouched in this
+  version. On a board without `cardsDir` the update date equals the card date,
+  so the chip is present but the two rulers measure the same thing. Left unset,
+  output is byte-identical to a board without the feature.
+
+### Fixed
+- `cards-split.mjs`'s own equivalence gate now normalises `data-udate` the way
+  it already normalised `.udate` and `data-dorm`. Without it, splitting a board
+  that had `backlogSort` on would compare a pre-split date against a post-split
+  one, decide it had broken the board, and roll back.
+
 ## [0.15.11] - 2026-09-01
 
 ### Added
