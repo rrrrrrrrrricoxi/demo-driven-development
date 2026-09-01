@@ -255,11 +255,11 @@ The backlog has been sortable since the toolbar landed, but the control was a
 ruler for *when the card was last touched*. Set `config.backlogSort` to `true`
 and that dropdown becomes a row of segmented buttons under a quiet `排序`
 caption — the same `.tlab` + `.lseg` idiom as the lane filter, no new CSS —
-offering 默认 (board order) · 最近更新 (last updated) · 最近立卡 (card date,
-newest first) · 最早立卡 (card date, oldest first) · 按编号 (by id). The
-default is 默认, so turning the key on changes nobody's board until they pick
-something; the last two are the old dropdown's remaining options, kept so the
-swap loses nothing.
+offering 最近立卡 (card date, newest first) · 最近更新 (last updated) · 最早立卡
+(card date, oldest first) · 按编号 (by id). 最近立卡 is the default and is
+exactly the order the board already bakes, so turning the key on changes
+nobody's board until they pick something else; the last two are the old
+dropdown's remaining options, kept so the swap loses nothing.
 
 *Last updated* is the per-card file date that `cardsDir` boards already show as
 the grey `更新 MM-DD` stamp — one batched `git log`, falling back to mtime. It
@@ -271,9 +271,12 @@ identically** — the chip is still there, it just has nothing extra to say.
 Sorting reorders DOM nodes within each status section: sections never move,
 cards are never re-rendered, and so hidden cards stay hidden, the lane filter
 keeps working, and the WIP count is recomputed by the same pass every other
-filter uses. 默认 re-appends by `data-ord` and restores the baked order exactly.
-The choice is kept per browser under `<brand>_bl_sort` and applied when the pane
-is injected, so it survives a reload and the `lazyTabs` path both. The archive
+filter uses. 最近立卡 re-appends by `data-ord` and restores the baked order
+exactly — the board's own order is already card date newest first, which is why
+it is one chip and not two. The choice is kept per browser under
+`<brand>_bl_sort` and applied when the pane is injected, so it survives a
+reload and the `lazyTabs` path both; a value the current version does not
+recognise falls back to the default. The archive
 tab does not get the control in this version. Left unset, output is
 byte-identical to a board without the feature.
 
