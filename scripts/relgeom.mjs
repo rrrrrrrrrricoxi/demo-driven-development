@@ -110,3 +110,22 @@ export function relGrid(byDay, ax, o) {
 export function relBandH(m, s, o, open) {
   return o.head + (open ? (m ? o.sub + m * o.row + 2 : 0) + (s ? o.sub + s * o.row + 2 : 0) + o.pad : 0)
 }
+
+/**
+ * 时间线的时间窗(v0.15.9):五档预设 → 升序 ISO 日期串,末位永远是「今天」。
+ * 本地时钟由调用方递进来(now),这里照旧只做算术 —— gen 侧零时间的老规矩不动。
+ * win:'30' / '14' = 近 N 天(含今天);'week' = 本周一起(本地);'1' = 当日;
+ * 'all' = 全时段 —— 从 60 天窗口起往回够到最早的一条带,与从前的「全部」同一口径。
+ * @param los 各带最早锚点日的毫秒(带里没有 PR 就传今天)· @returns ['2026-08-31', '2026-09-01']
+ */
+export function relWindow(win, now, los) {
+  var tms = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()), t0, i, out = []
+  if (win === 'all') {
+    t0 = tms - 59 * 864e5
+    for (i = 0; i < los.length; i++) if (los[i] < t0) t0 = los[i]
+  } else if (win === 'week') t0 = tms - ((now.getDay() + 6) % 7) * 864e5 // 周一 = 0 格,周日 = 6 格
+  else t0 = tms - (Number(win) - 1) * 864e5
+  if (t0 > tms) t0 = tms // 带的日子比今天还新(时区 / 时钟)时窗口不倒着长
+  for (i = 0; t0 + i * 864e5 <= tms; i++) out.push(new Date(t0 + i * 864e5).toISOString().slice(0, 10))
+  return out
+}

@@ -9,6 +9,33 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.9] - 2026-09-01
+
+### Changed
+- **The release timeline offers five time windows instead of two.** The chips
+  were *last 60 days* and *all*, which is a coarse pair: 60 days is most of a
+  quarter, and on a board that ships several pull requests a day it buries this
+  week under the last two months. The chips are now **last 30 days · last 2
+  weeks · this week · today · all time**, defaulting to last 30 days. "This
+  week" starts at the local Monday; "today" is a one-day window and its caption
+  collapses to `09-01 · 1 天` rather than repeating the same date twice. "All
+  time" is the old *all* under a clearer name — same 60-day floor, still
+  reaching back to the earliest band.
+
+  The window is computed in the browser, as it always was: `gen` neither reads
+  a clock nor bakes a date, so the same `index.html` is correct tomorrow. The
+  arithmetic moved into `relgeom.mjs` as `relWindow(win, now, los)`, next to the
+  axis and lane packing, so the page and the tests run the same source. Nothing
+  is persisted — the window resets to last 30 days each time the board opens,
+  unlike the table/timeline view choice, which is remembered.
+
+  A one- or two-day window is a real case now rather than a theoretical one, so
+  the narrow end is covered: the axis keeps a positive width with no pull
+  requests in it, ticks neither duplicate nor collide, bands that fall entirely
+  outside the window resolve to "not drawn" instead of a negative-width bar, and
+  each band's header says `窗口内 0` so an empty timeline reads as an empty
+  window rather than a broken one.
+
 ## [0.15.8] - 2026-09-01
 
 ### Fixed
