@@ -9,6 +9,37 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.10] - 2026-09-01
+
+### Fixed
+- **The release timeline fills the panel for every window preset.** With *last
+  30 days* on a wide panel the axis stopped less than halfway across and the
+  rest of the row was blank; *last 60 days* used to reach the right edge, so a
+  shorter window looked like it merely truncated the axis instead of zooming
+  into it. The cause was that the busy-weighted widths in `relAxis` were
+  intrinsic pixels — a quiet day is `quiet` px, a busy one
+  `max(base, ceil(n / lanes) * slot)` — summed left to right with the container
+  width never consulted. Sixty days filling the panel was a coincidence of that
+  sum, not a fit.
+
+  `relAxis` now takes the track width (the container minus the lane-label
+  column) and, when the natural sum is smaller, scales every day by the same
+  factor so the axis ends exactly at the right edge. The busy/quiet weighting is
+  untouched — this is a zoom, not a re-layout: a day with 41 pull requests stays
+  3.5× the width of a day with 7. Positions are rounded on the running prefix
+  sum, so the widths stay whole pixels and the total lands on the track width
+  exactly. Ticks, tick labels, overlap-collapse, version tag lines, bands, bars,
+  same-day squares and the hover peek all read the same `ax.x` / `ax.w`, so they
+  move together. Same-day squares keep their `slot` pitch — the axis grows, the
+  squares stay readable.
+
+  When the natural sum is wider than the panel (all time on a long board, or any
+  window on a narrow screen) nothing changes: the widths are handed over as they
+  were and the timeline scrolls horizontally, as before. Compressing instead
+  would push quiet days to zero width. The width is measured at draw time; there
+  is no new resize listener, and none was needed for the reported case — the
+  release pane redraws whenever it is shown.
+
 ## [0.15.9] - 2026-09-01
 
 ### Changed

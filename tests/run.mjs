@@ -101,6 +101,12 @@ console.log('T4 cmpVer 矩阵')
   ok(cmpVer('0.10.0', '0.9.0') > 0, '0.10.0 > 0.9.0')
   ok(cmpVer('0.6.0', '0.6.0') === 0, '相等')
   ok(cmpVer('0.6', '0.6.0') === 0, '长度补零 0.6 == 0.6.0')
+  // 两位数补丁号(0.15.10 起):字符串比较在这里是反的 —— 全体版本比较必须走这一个 cmpVer
+  ok('0.15.10' < '0.15.9', '字符串比较下 0.15.10 反而「小于」0.15.9(这条断言存在的理由)')
+  ok(cmpVer('0.15.10', '0.15.9') > 0, '0.15.10 > 0.15.9(两位数补丁号)')
+  ok(cmpVer('0.15.9', '0.15.10') < 0, '0.15.9 < 0.15.10')
+  ok(cmpVer('0.16.0', '0.15.10') > 0, '0.16.0 > 0.15.10')
+  ok(cmpVer('0.15.10', '0.15.10') === 0, '0.15.10 与自己相等')
   ok(Number.isNaN(cmpVer('0.6.0-rc1', '0.6.0')), '预发布后缀 → NaN(按戳损坏处理)')
   ok(!(Number.isNaN(cmpVer('0.6.0-rc1', '0.6.0')) && cmpVer('0.6.0-rc1', '0.6.0') > 0), 'NaN 不触发拒降级分支')
 }
@@ -1712,6 +1718,61 @@ console.log('T41 时间线重做')
     ok(ax.W === 200 + 5 + 14 + 14 + 24 + 84 && ax.t0 === days[0] && ax.t1 === days[4], '总宽 = 左栏 + 各日宽之和')
     ok(relAxis(days, {}, O).W === 200 + 25, '一个 PR 都没有:全是安静日')
   }
+  { // 轴按这一格的实宽拉满(v0.15.10):短窗口 = 放大,不是把轴截短
+    const at = (d) => new Date(d + 'T10:00:00')
+    const now = at('2026-09-01') // 周二 → 本周 = 2 天
+    const los = [Date.parse('2026-07-01T00:00:00Z')]
+    const counts = { '2026-08-28': 7, '2026-08-31': 41, '2026-09-01': 1 }
+    const FIT = 1680 // 容器 1880 − 左栏 200
+    const tot = (ax, days) => days.reduce((a, d) => a + ax.w[d], 0)
+    for (const k of ['30', '14', 'week', '1']) {
+      const days = relWindow(k, now, los)
+      const ax = relAxis(days, counts, O, FIT)
+      const last = days[days.length - 1]
+      ok(tot(ax, days) === FIT && ax.W === O.lbl + FIT, `「${k}」窗:各日宽之和正好 = 轨道宽 ${FIT}(轴填满整格,不再只画左边一截)`, '和=' + tot(ax, days))
+      ok(days.every((d) => ax.w[d] > 0 && Number.isFinite(ax.x[d])), `「${k}」窗:没有零宽 / NaN 的日子`)
+      ok(days.every((d, i) => i === 0 || ax.x[d] === ax.x[days[i - 1]] + ax.w[days[i - 1]]),
+        `「${k}」窗:x 仍是宽度的前缀和(刻度 / 条 / 方块 / 竖线全从这一份取,没有留在旧刻度上的)`)
+      ok(ax.x[days[0]] === O.lbl && ax.x[last] + ax.w[last] === O.lbl + FIT, `「${k}」窗:首日贴左栏、末日贴右沿`)
+      ok(relTicks(days, ax, {}, 48).every((t) => Number.isFinite(t.x) && t.x >= O.lbl && t.x <= O.lbl + FIT), `「${k}」窗:刻度也在放大后的轴上`)
+    }
+    { // 缩放不是重排:忙 / 安静的相对宽窄一比一保住
+      const days = relWindow('30', now, los)
+      const nat = relAxis(days, counts, O), fit = relAxis(days, counts, O, FIT)
+      const ratio = (ax) => ax.w['2026-08-31'] / ax.w['2026-08-28']
+      ok(Math.abs(ratio(fit) - ratio(nat)) < 0.02, `忙日 : 次忙日 的宽度比缩放前后一致(${ratio(nat).toFixed(2)} → ${ratio(fit).toFixed(2)})`)
+      ok(fit.w['2026-08-31'] > fit.w['2026-08-28'] && fit.w['2026-08-28'] > fit.w['2026-08-30'],
+        '放大后最忙的还是最宽、安静的还是最窄(84 : 24 : 5 这三档的次序不变)')
+      ok(fit.w['2026-08-30'] > nat.w['2026-08-30'] && nat.W < O.lbl + FIT, '安静日也跟着放大(自然宽本来只有轨道的一小截)')
+    }
+    { // 自然宽已经超过这一格:一个像素都不动 —— 由外层 overflow-x 横向滚(全时段在窄屏上照旧)
+      const days = relWindow('all', now, [Date.parse('2026-01-05T00:00:00Z')])
+      const nat = relAxis(days, counts, O), narrow = relAxis(days, counts, O, 300)
+      ok(narrow.W === nat.W && days.every((d) => narrow.w[d] === nat.w[d]), '装不下就照旧交出自然宽(压缩会把安静日压成 0 宽)', 'W=' + narrow.W)
+      ok(narrow.W > 300 + O.lbl, '轴比这一格宽 → 横向滚,这条没变', narrow.W + ' > ' + (300 + O.lbl))
+      ok(relAxis(days, counts, O, nat.W - O.lbl).W === nat.W, '不多不少正好装下:也不动')
+    }
+    { // 量不到就退回自然宽:pane 藏着时 clientWidth = 0(fit 为负),不许塌成 0 宽或 NaN
+      const days = relWindow('14', now, los)
+      const w0 = JSON.stringify(relAxis(days, counts, O).w)
+      ok(JSON.stringify(relAxis(days, counts, O, 0 - O.lbl).w) === w0, 'pane 还藏着量出 0:退回自然宽')
+      ok(JSON.stringify(relAxis(days, counts, O, NaN).w) === w0, 'fit 是 NaN:退回自然宽(不是满轴 NaN)')
+      ok(JSON.stringify(relAxis(days, counts, O, undefined).w) === w0, '不传 fit:与 0.15.9 逐格相同(老调用点不受影响)')
+    }
+    { // 当日那档:一天就是整条轨道,方块照旧按号横排在这一天的格子里
+      const days = relWindow('1', now, los)
+      const ax = relAxis(days, { '2026-09-01': 13 }, O, FIT)
+      ok(days.length === 1 && ax.x[days[0]] === O.lbl && ax.w[days[0]] === FIT, '当日:这一天占满整条轨道')
+      const arr = []
+      for (let i = 1; i <= 13; i++) arr.push({ n: i })
+      const g = relGrid({ '2026-09-01': arr }, ax, O)
+      ok(g.bars.length === 13 && g.used === 6, '13 个方块一个不丢,泳道仍封顶 6 条')
+      ok(g.bars.every((b) => Number.isFinite(b.x) && b.w > 0 && b.x >= O.lbl && b.x + b.w <= O.lbl + FIT), '方块全落在轨道内,x / w 都是有限正数')
+      ok(g.bars.filter((b) => b.n === 7)[0].x === O.lbl + O.slot, '第 7 个换到第二列:方块按号横排的间距仍是 slot,不随轴一起拉长')
+      const b = relBar(ax, days[0], days[0], O.min)
+      ok(b.x0 === O.lbl && b.w === FIT - 1, '落在这一天的跨天条 = 整条轨道宽(不是 0 宽,也不是负宽)')
+    }
+  }
   { // 刻度:非线性轴上不许压字 —— 相邻两个「写了字」的标签必须 ≥ min px
     const days = mkDays('2026-06-29', 40) // 06-29 是周一
     const counts = {}
@@ -1864,6 +1925,18 @@ console.log('T41 时间线重做')
     ok(!on.includes('近 60 天') && !on.includes('data-relwin="60"'), '旧的近 60 天一个字不留')
     ok(on.includes("view = 'table', win = '30'"), '运行期初值与高亮的那一档是同一个')
     ok(!on.includes('_rel_win'), '窗口档不进 localStorage(与视图不同,它不记 —— 每次开板都从近 30 天起)')
+  }
+  { // 轴宽由这一格的实宽定(v0.15.10):壳里真的量了横滚容器,量到的数真的交给了 relAxis
+    const mline = on.split('\n').find((l) => l.includes('var sc = host.parentNode'))
+    const axline = on.split('\n').find((l) => l.includes('var ax = relAxis('))
+    ok(!!mline && /clientWidth/.test(mline) && /- TL\.lbl/.test(mline), '壳里量的是横滚容器的可视宽,减掉左栏 = 轴能用的轨道宽', mline && mline.trim())
+    ok(/relAxis\(days, DAYC, TL, fit\)/.test(axline || ''), '量到的 fit 交给 relAxis(不是量了不用)', axline && axline.trim())
+    const fitOf = new Function('host', 'TL', mline + '\nreturn fit')
+    ok(fitOf({ parentNode: { clientWidth: 1880 } }, { lbl: 200 }) === 1680, '容器 1880px → 轨道 1680px')
+    ok(fitOf({ parentNode: { clientWidth: 0 } }, { lbl: 200 }) === -200, 'pane 还藏着(clientWidth = 0):fit 为负 → relAxis 退回自然宽,切进 tab 那次 relSync 会带真宽重画')
+    ok(fitOf({ parentNode: null }, { lbl: 200 }) === -200, '容器还没挂上也不抛')
+    ok(on.includes("if (name === 'release' && window.relSync) relSync()"), 'show(release) 会 relSync → render → drawTl:pane 一露面就按真宽重画(轴宽因此不必再单挂 resize 监听)')
+    ok(on.includes('.reltlsc { overflow-x: auto'), '装不下时照旧由这一层横向滚(全时段在窄屏上不变)')
   }
   { // 字幕:五档都由 relWindow 现算,当日那档塌成单日形制。取的是壳里那一行真代码
     const line = on.split('\n').find((l) => l.includes('dnr.textContent ='))

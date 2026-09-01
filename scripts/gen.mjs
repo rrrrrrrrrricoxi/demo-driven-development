@@ -3636,7 +3636,11 @@ const REL_JS = !REL ? '' : `
       for (k = 0; k < G.length; k++) los.push(G[k].lo ? day(G[k].lo) : tms)
       var days = relWindow(win, now, los), span = days.length, today = dstr(tms)
       dnr.textContent = span === 1 ? md(days[0]) + ' · 1 天' : md(days[0]) + ' → ' + md(days[span - 1]) + ' · ' + span + ' 天'
-      var ax = relAxis(days, DAYC, TL)
+      // 轴按这一格的实宽拉满(v0.15.10):繁忙度只定相对宽窄,短窗口该是放大而不是把轴截短。
+      // 量的是横滚容器的可视宽(它的宽由外层给,与里头画多宽无关);pane 还藏着时量出 0 ——
+      // 退回自然宽,切进 tab 那次 show() 会 relSync → 重画,那时量得到真宽。
+      var sc = host.parentNode, fit = (sc && sc.clientWidth ? sc.clientWidth : 0) - TL.lbl
+      var ax = relAxis(days, DAYC, TL, fit)
       var vis = []
       for (k = 0; k < G.length; k++) if (sfil === 'all' || G[k].sg === sfil) vis.push(G[k])
       if (!vis.length) { host.style.width = 'auto'; host.innerHTML = '<p class="relnone2">没有匹配的 PR</p>'; return }
