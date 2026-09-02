@@ -138,7 +138,7 @@ const K_TAIL = ['links', 'shots', 'pr']
 const K_FLAT = [
   ...K_FRONT,
   'status', 'tier', 'area', 'priority', 'line', 'session', 'date', 'blockedOn', 'source',
-  'demo', 'route', 'routeLive', 'designDoc', 'repro', 'settleHold', 'order',
+  'demo', 'route', 'routeLive', 'designDoc', 'repro', 'settleHold', 'settleHoldAt', 'order',
   ...K_LONG, ...K_TAIL,
 ]
 const bandOf = (k) => (K_FRONT.includes(k) ? 0 : K_TAIL.includes(k) ? 3 : K_LONG.includes(k) ? 2 : 1)
@@ -208,7 +208,7 @@ function checkPr(value) {
   for (const v of Array.isArray(value) ? value : [value]) if (!parsePr(v, repo)) die(S.prBad(JSON.stringify(v)))
 }
 
-const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'demo', 'repro', 'walkthroughs', 'order']
+const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'order']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
   entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
@@ -224,7 +224,7 @@ function checkField(store, field, value) {
   if (field === 'id') die(S.idLocked())
   if (ARRAY_FIELDS.includes(field) && !Array.isArray(value)) die(S.arrayField(field))
   if (field === 'status') { const all = statusIds(store.head); if (!all.includes(String(value))) die(S.statusBad(String(value), all)) }
-  if (field === 'date' && !DATE_RE.test(String(value))) die(S.dateBad(String(value)))
+  if ((field === 'date' || field === 'settleHoldAt') && !DATE_RE.test(String(value))) die(S.dateBad(String(value)))
   if (field === 'line') checkTokens(value, laneIds(), S.lineBad)
   if (field === 'session') checkTokens(value, sessionIds(), S.sessionBad)
   if (field === 'pr') checkPr(value)
@@ -253,6 +253,8 @@ function cmdNew() {
   const base = k.key === 'items' ? backlogTemplate(store) : decisionTemplate(head)
   const card = { ...base, ...extra }
   delete card.order // order 是拆分记的原下标,手工新卡不写(gen 排完即删,缺席就按 id 排在最后)
+  // --from 带进来一个 settleHold 时同样记起算日(与 card set 同一条规矩,别让新卡漏掉钟)
+  if (String(card.settleHold || '').trim() && !card.settleHoldAt) card.settleHoldAt = TODAY
   for (const [f, v] of Object.entries(card)) { if (f !== 'id') checkField(store, f, v) }
 
   const prefix = k.key === 'entries' ? 'D' : dominantPrefix(ids)
@@ -402,7 +404,15 @@ function cmdSet() {
   else if (field === 'pr' && /^\d+$/.test(value)) value = Number(value)
   checkField(store, field, value)
   if (!KNOWN_FIELDS[store.k.key].includes(field)) console.error(S.unknownField(field, KIND_NAME[store.k.key]))
-  const card = writeCard(store, row, { ...row.card, [field]: value })
+  const patch = { ...row.card, [field]: value }
+  // 挂账是有寿命的承诺(v0.15.14,BL-C112 §3):写下 settleHold 的同时记下日期,守卫按它算
+  // 14 天到期提醒;重设即续期(日期归零),设成空串即撤回挂起,顺手把日期也收走 ——
+  // 留一个没有 settleHold 的 settleHoldAt 在卡上,下次再挂就会带着一个陈年的起算日。
+  if (field === 'settleHold') {
+    if (String(value).trim()) patch.settleHoldAt = TODAY
+    else delete patch.settleHoldAt
+  }
+  const card = writeCard(store, row, patch)
   say({ ok: true, id, field, value, file: row.where, card }, S.setDone(id, field, typeof value === 'string' ? value : JSON.stringify(value), row.where))
 }
 

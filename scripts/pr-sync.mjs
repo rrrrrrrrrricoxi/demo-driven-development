@@ -12,6 +12,7 @@
 //   prs[]     按号合并(gh 返回的号照它重写,没返回的老 PR 原样留着),number 降序;
 //             cards 一律由 prlink.prsOfCard 反查三份 manifest
 //   releases[] 只追加 gh 上有、文件里没有的 tag;已有条目的 note / 人手写的 prs 一律保留
+//             at = 打 tag 那一刻(v0.15.14,BL-C112 §2),不是 release 的 publishedAt
 //   syncedAt  当前 ISO(脚本可以用时间,gen 不行)
 //   stages / $comment 原样不动 —— 那是人写的口径
 // gh 缺席 / 未登录 / 网络不通 → stderr 一条文案 + exit 1,文件一个字节都不动。
@@ -111,6 +112,28 @@ const ghPrs = gh(['pr', 'list', '--repo', REPO, '--state', 'all', '--limit', Str
   '--json', 'number,title,state,isDraft,baseRefName,headRefName,url,createdAt,mergedAt,closedAt'], `gh pr list --repo ${REPO}`)
 const ghRels = gh(['release', 'list', '--repo', REPO, '--limit', String(REL_LIMIT), '--json', 'tagName,publishedAt'], `gh release list --repo ${REPO}`)
 
+// ---- 归版时刻 = 打 tag 那一刻(v0.15.14,BL-C112 §2)----
+// tag 是「这一版包含什么」的那一刀,publishedAt 只是「什么时候按下发布键」。两者之间合并的 PR,
+// 按 publishedAt 会被算进一个 tag 里根本没有它的版本 —— 而那段时间恰恰是「钉版之后不该再进东西」。
+// annotated tag 取 tag 对象自己的 tagger.date;lightweight tag 没有 tag 对象,退到它指的 commit
+// 的 committer.date。取不到(权限/网络/tag 已被删)就退回 publishedAt,并在 stderr 说一声 ——
+// 为一个时刻废掉整次同步不划算,但也不能让人以为拿到的是 tag 时刻。
+// 为什么走 gh api 而不是本地 git:pr-sync 只依赖 gh,不要求看板所在的仓就是目标仓、也不要求
+// 本地 fetch 过 tag(CI 的浅克隆里 `git tag` 常常是空的)—— 同一个真源,少一份前提。
+const ghSoft = (args) => {
+  const r = spawnSync('gh', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+  if (r.error || r.status !== 0) return null
+  try { return JSON.parse(r.stdout) } catch { return null }
+}
+const tagTimeOf = (tag) => {
+  const obj = (ghSoft(['api', `repos/${REPO}/git/ref/tags/${tag}`]) || {}).object
+  if (!obj || !obj.sha) return ''
+  const d = obj.type === 'tag'
+    ? ghSoft(['api', `repos/${REPO}/git/tags/${obj.sha}`])?.tagger?.date
+    : ghSoft(['api', `repos/${REPO}/git/commits/${obj.sha}`])?.committer?.date
+  return d ? String(d) : ''
+}
+
 // ---- 现有文件(缺则从模板起;坏 JSON 拒绝覆盖:人手写的 note/prs 可能就在里面)----
 let out
 if (existsSync(OUT)) {
@@ -122,13 +145,20 @@ if (existsSync(OUT)) {
 if (!Array.isArray(out.releases)) out.releases = []
 
 // ---- releases:追加新 tag,保留已有条目的一切(note / 人手写的 prs)----
+// 只给这趟新追加的 tag 取时刻:已落盘的 at 是历史,一律不回填 —— 归属区间当初是人核过的,
+// 悄悄重算会让若干个 PR 无声地换一版,而 diff 上只看得见几个时间戳变了。
 const have = new Set(out.releases.map((r) => String((r || {}).tag)))
 let added = 0
+const fellBack = []
 for (const r of ghRels) {
   if (!r || !r.tagName || have.has(String(r.tagName))) continue
-  out.releases.push({ tag: String(r.tagName), at: String(r.publishedAt || ''), note: '' })
+  const tag = String(r.tagName)
+  const at = tagTimeOf(tag)
+  if (!at) fellBack.push(tag)
+  out.releases.push({ tag, at: at || String(r.publishedAt || ''), note: '' })
   added++
 }
+if (fellBack.length) console.error(S.tagTimeFallback(fellBack))
 // at 升序(区间归属靠它;gh 给的顺序不保证)。比时刻不比字面:人手写的 at 常带 +08:00,gh 给的是 Z。
 out.releases.sort((a, b) => cmpAt((a || {}).at, (b || {}).at))
 
@@ -173,6 +203,8 @@ const fresh = ghPrs
 
 // ---- 版本区间自动填 prs:人手写过的不覆盖(显式列表是人的裁量,机器不该抹掉)----
 // 归属 = mergedAt 在上一版打 tag 时刻(不含)与本版打 tag 时刻(含)之间,且 base 是主线。
+// releases[].at 就是那个「打 tag 时刻」(v0.15.14 起;0.15.13 及以前落盘的是 release publishedAt,
+// 不回填)—— 这行注释在 0.15.13 之前说的是 tag、代码取的是 publishedAt,BL-C112 §2 把代码归了位。
 let prev = ''
 for (const r of out.releases) {
   const at = String(r.at || '')

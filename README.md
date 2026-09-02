@@ -22,6 +22,7 @@ This plugin packages the SEE-IT half as a workflow:
 - `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
 - `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
 - `retire-stale-caches.mjs` defuses superseded plugin versions that long-lived sessions are still pinned to (see "Upgrading").
+- `board-branch-check.mjs` says when a branch is carrying board changes that belong on the mainline (see "The board is only edited on the mainline").
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
@@ -171,6 +172,18 @@ stale" are computed in the browser. Run the script after opening or merging a
 pull request, and after tagging a release. Left unset, output is byte-identical
 to a board without the feature.
 
+A release's `at` is the moment its **tag** was cut — an annotated tag's
+`tagger.date`, or the `committer.date` of the commit a lightweight tag points
+at, both read through `gh api`. That is the boundary release attribution uses:
+`mergedAt` after the previous tag and up to and including this one. The tag is
+the cut that decides what a version contains; the release's `publishedAt` only
+records when someone pressed the button, and anything merged in between would
+otherwise be counted into a version whose tag does not contain it. If the tag
+lookup fails, the entry falls back to `publishedAt` and stderr names the
+versions affected. Entries already on disk are never re-dated: back-filling
+would move pull requests between versions while showing only a changed
+timestamp.
+
 ## Settling cards against merged pull requests
 
 A `release-manifest.json` is what turns this on — there is no config switch, and
@@ -212,6 +225,16 @@ Put a one-line reason in the card's `settleHold` field and the card drops out of
 the list, loses its chip, stops being named by the guard, and shows one grey
 chip with the reason in its tooltip. Nothing clears the field on its own; delete
 it when the card really is ready.
+
+A hold is a promise, not an amnesty, so it has a lifetime. Writing `settleHold`
+through the CLI stamps `settleHoldAt` alongside it; after 14 days the grey chip
+turns amber and puts the day count on its face, and the Stop guard adds one
+quiet line naming up to five held cards, oldest first. Restating the hold
+renews it. The reminder never unmutes the card, never blocks, and never writes
+to the board — whether a hold still stands is a judgement, and the guard only
+keeps track of how long it has been standing. Cards held before 0.15.14 have no
+`settleHoldAt`, so their clock starts from the card file's last commit date,
+which also means writing a line of news on the card counts as renewing it.
 
 ## Rich text in card bodies (optional)
 
@@ -329,6 +352,40 @@ was and exits non-zero. `cards-join.mjs` is the way back, with the same check.
 Upgrade every session before splitting — an older `gen` cannot see the card
 directory. Left unset, output is byte-identical to a board without the feature.
 
+## The board is only edited on the mainline
+
+Cards, manifests, config and generated output belong to the mainline branch.
+Feature branches leave the kanban directory alone; a demo or a card that a
+branch's work calls for is committed on the mainline in its own commit.
+
+Two things go wrong when a branch carries board changes back. A branch that
+forked before the one-file-per-card migration still holds the `items` /
+`entries` arrays in the header manifests, and merging it puts them back — `gen`
+then fails hard, which is a backstop rather than a warning, since the mainline
+is already dirty by the time it fires. The quiet failure is worse: the branch's
+cards are a snapshot from the fork point while the mainline's have moved on, and
+merging rewrites the whole array with no conflict for git to report, so the
+board reverts without a sound.
+
+```
+node <plugin>/scripts/board-branch-check.mjs [--dir <kanban>] [--branch <ref>] [--all] [--json] [--strict]
+```
+
+With no arguments it compares the current branch against the mainline (taken
+from `instance.branch`, defaulting to `main`, falling back to `origin/<main>`
+when there is no local copy) and lists what it found, split into data files,
+generated output and everything else, with the `items` hazard called out
+separately and its array length shown. `--all` sweeps every local and remote
+branch. It exits 0 by default — it is a reminder, not a gate — and `--strict`
+exits 1 instead so CI can gate on it. It says nothing at all when there is
+nothing to say.
+
+The Stop guard runs the same check on the current branch and adds one
+non-blocking notice when it hits, and the reminder after `gh pr merge` suggests
+running it before merging. Where a branch already touched the board:
+`git checkout <main> -- <kanban dir>` drops the branch-side changes before
+merging, and whatever genuinely belonged there gets replayed on the mainline.
+
 ## Sticky tab bar (optional, recommended)
 
 Set `config.stickyTabs` to `true` and the tab bar freezes under the hub bar
@@ -432,6 +489,10 @@ creates the file with `openSync(path, 'wx')`, so two sessions racing for the sam
 number both succeed and the loser steps to the next one. It fills a template
 whose prose fields are `<…>` placeholders to be replaced; `--from file.json`
 overrides any of them.
+
+`card set <id> settleHold "<reason>"` also stamps `settleHoldAt` with today's
+date, so the 14-day reminder has a clock to run against; setting the reason to
+an empty string takes the date away with it.
 
 The write commands check what they write — the status has to be one the board
 declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number, `#12`

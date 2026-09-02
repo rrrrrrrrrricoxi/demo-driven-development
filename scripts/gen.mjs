@@ -25,8 +25,8 @@ import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
-import { dormantDate, settleHold, settleOf, staleLink } from './settle.mjs'
-import { CARD_KINDS, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { SETTLE_HOLD_DAYS, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
+import { CARD_KINDS, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -109,29 +109,9 @@ if (CARDS_DIR) {
   }
 }
 // ———— 每卡更新日期(v0.14.0,仅 cardsDir 开)————
-// 一条 git log 批量取每个卡文件的最后提交日(不是一卡一条命令);照 docUpdated 的静默降级:
-// git 失败 / 文件还没提交 → 文件 mtime → 空。取的是已提交的事实,同一 commit 下同输出,不破确定性。
-const CARD_UPDATED = new Map() // id → 'YYYY-MM-DD' | ''
-if (CARDS_DIR) {
-  const byPath = new Map() // '<sub>/<id>.json' → 最后提交日(git 的路径相对仓根,不相对看板目录,故只认末两段)
-  try {
-    const out = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', CARDS_DIR],
-      { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
-    let day = ''
-    for (const raw of out.split('\n')) {
-      const line = raw.trim()
-      if (!line) continue
-      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
-      const k = line.split('/').slice(-2).join('/')
-      if (day && !byPath.has(k)) byPath.set(k, day) // git log 是新→旧,第一次见到即最后一次改动
-    }
-  } catch { /* 无 git / 命令失败 → 整批退 mtime */ }
-  for (const [id, rel] of CARD_SRC) {
-    let d = byPath.get(rel.split('/').slice(-2).join('/')) || ''
-    if (!d) { try { d = statSync(join(HERE, rel)).mtime.toISOString().slice(0, 10) } catch { d = '' } }
-    CARD_UPDATED.set(id, d)
-  }
-}
+// 口径在 cards.mjs(v0.15.14 起守卫的挂账到期提醒读同一份):一条 git log 批量取,
+// git 失败 / 文件还没提交 → 文件 mtime → 空。取的是已提交的事实,同一 commit 下同输出。
+const CARD_UPDATED = CARDS_DIR ? cardUpdatedMap(HERE, CARDS_DIR, CARD_SRC) : new Map()
 const cardUpd = (id) => CARD_UPDATED.get(id) || ''
 // instance.ghRepo/branch 三 manifest 各存一份(现状,避免双真源迁移);不一致仅提醒,不阻断
 {
@@ -731,13 +711,20 @@ const prStatus = (p) => {
 const RESP = Boolean(rlm)
 const RESP_DORM = 30 // 沉睡阈值(天);天数在浏览器算,gen 只烤日期
 const respOf = (entry) => settleOf(entry, prsOfCard(entry, PR_REPO), relPr, PR_REPO)
+// 挂账起算日(v0.15.14,BL-C112 §3):卡上的 settleHoldAt(CLI 写 settleHold 时顺手记的);
+// 0.15.14 之前挂上的老卡没有这个字段,退到卡文件最后改动日 —— 与 data-dorm 同一个事实源,
+// 也正好是「在卡上再写一句近况就算续期」的口径。天数照旧在浏览器算(gen 零时间是硬纪律)。
+const holdSince = (entry) => settleHoldSince(entry) || (CARDS_DIR ? cardUpd(entry.id) : '')
+// 这块板上一张挂账卡都没有 = 那段 CSS / JS 一个字节都不注入(零挂账的板逐字节冻结)
+const HOLD_ANY = RESP && [...(m.tasks || []), ...(b.items || []), ...(dm.entries || [])].some((c) => settleHold(c))
 // 卡头芯片:settle / reopen 各一枚;都不是但多 PR 部分合并 → 安静报个「2/3 已合」。
 // 卡上写了 settleHold = 人已经看过这张卡并判定「这一轮不收」,机器不再重复它已经知道的事:
 // 只留一枚灰芯片,理由挂 title(v0.13.1)。它换掉的是那三枚里的任意一枚,不是叠在它们上面。
 const respChips = (entry) => {
   if (!RESP) return ''
   const hold = settleHold(entry)
-  if (hold) return `<span class="rspchip rsp-hold" title="${esc(hold)}">暂不收账</span>`
+  // 挂起的芯片带上起算日:超 SETTLE_HOLD_DAYS 天,浏览器把它转成琥珀并写上天数(见 RESP_JS)
+  if (hold) return `<span class="rspchip rsp-hold" data-hold="${esc(holdSince(entry))}" title="${esc(hold)}">暂不收账</span>`
   const s = respOf(entry)
   if (s.kind === 'settle') return '<span class="rspchip rsp-settle" title="所有关联 PR 都已合并,卡还没收到终态 —— 跑 pr-sync.mjs --settle 看清单">PR 已合 · 待收账</span>'
   if (s.kind === 'reopen') return '<span class="rspchip rsp-reopen" title="卡已在终态,但还有关联 PR 开着">已收账但 PR 未合</span>'
@@ -4068,9 +4055,12 @@ const RESP_CSS = !RESP ? '' : `
   .rspsh { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
   .rspsm { margin-left: 9px; font-size: 11.5px; font-weight: 400; color: var(--mut); }
   .rspsr { margin: 4px 0; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; font-size: 12.5px; }
-  .rspst { color: var(--mut); }`
+  .rspst { color: var(--mut); }${!HOLD_ANY ? '' : `
+  /* 挂账到期(v0.15.14,BL-C112 §3):满 ${SETTLE_HOLD_DAYS} 天,灰芯片转回 .rspchip 本来的琥珀 */
+  .rsp-hold.holdold { font-weight: 600; color: ${tk('warn-ink')}; background: ${tk('warn-bg')}; }`}`
 // 沉睡天数:gen 只烤 data-dorm 的日期,「今天」永远是浏览器的事(gen 零时间是硬纪律)。
-// 懒加载的 pane 是后到的,注入完要再扫一次(幂等:未过阈值的芯片保持 hidden)。
+// 挂账天数(v0.15.14)同款同源:烤 data-hold 的日期,过阈值才改字面 —— 提醒而已,不解除静音。
+// 懒加载的 pane 是后到的,注入完要再扫一次(幂等:两者都从 data-* 现算,重跑不叠加)。
 const RESP_JS = !RESP ? '' : `
   ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
     function respDorm() {
@@ -4085,9 +4075,22 @@ const RESP_JS = !RESP ? '' : `
       })
     }
     window.respDorm = respDorm
-    respDorm()
+    respDorm()${!HOLD_ANY ? '' : `
+    function respHold() {
+      var now = Date.now()
+      document.querySelectorAll('.rsp-hold[data-hold]').forEach(function (el) {
+        var t = Date.parse(el.getAttribute('data-hold') + 'T00:00:00')
+        if (!isFinite(t)) return
+        var d = Math.floor((now - t) / 86400000)
+        if (d < ${SETTLE_HOLD_DAYS}) return  // 满 14 天就说(与守卫同一个边界;沉睡那条是「超 30 天」)
+        el.textContent = '暂不收账 · 已 ' + d + ' 天'
+        el.classList.add('holdold')
+      })
+    }
+    window.respHold = respHold
+    respHold()`}
   })()`
-const RESP_INJECTED = !RESP ? '' : `\n    if (window.respDorm) window.respDorm()`
+const RESP_INJECTED = !RESP ? '' : `\n    if (window.respDorm) window.respDorm()${!HOLD_ANY ? '' : `\n    if (window.respHold) window.respHold()`}`
 
 // ———— 归档 / 积压提醒:门控 CSS(两项都关 = 空串)————
 // 琥珀走 warn 一族(与进度响应同源),红走 .accbad 已在用的 #d44c47;暗档由 darkStyle 统一包 light-dark()。
