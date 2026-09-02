@@ -27,7 +27,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
-import { CARD_KINDS, cardsDirOf, cardText, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { CARD_KINDS, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
 
@@ -81,8 +81,7 @@ const { flags, pos } = parsed
 if (!pos.length) die(S.usage())
 
 // ---- 今天(脚本层可以读时钟;gen 不行)----
-const NOW = new Date()
-const TODAY = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, '0')}-${String(NOW.getDate()).padStart(2, '0')}`
+const TODAY = localDate()
 
 // ---- 看板数据 ------------------------------------------------------------
 const readJsonAt = (p, what) => {
