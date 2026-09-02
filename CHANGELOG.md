@@ -9,6 +9,19 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.16] - 2026-09-03
+
+### Fixed
+- **Another timezone-dependent test.** The `settleHold`/`settleHoldAt` tests
+  added in 0.15.14 built "today" with `toISOString().slice(0, 10)` (UTC) while
+  `ddd.mjs` stamps `settleHoldAt` in the local calendar day, the same
+  convention as every other date field on a card. On a machine east of UTC the
+  two clocks disagree for the first hours of every local day, so five
+  assertions failed. `ddd.mjs`'s local-date arithmetic is now a shared
+  `localDate()` in `cards.mjs`, and the tests import that same function
+  instead of reimplementing "today" against the wrong clock. No product
+  behaviour changed — the CLI still stamps local dates.
+
 ## [0.15.15] - 2026-09-03
 
 ### Fixed

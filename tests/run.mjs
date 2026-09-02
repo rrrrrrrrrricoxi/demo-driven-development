@@ -4201,7 +4201,15 @@ process.exit(1)
 // ============ T67 settleHold 有寿命(BL-C112 §3:CLI 记起算日 / 守卫满 14 天说一行 / 老卡退卡文件日)============
 console.log('T67 settleHold 14 天到期提醒')
 {
-  const dayAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+  // "今天"与 ddd.mjs 的 TODAY 同一个源(localDate,本地日历 getFullYear/Month/Date),不是
+  // toISOString().slice(0, 10)(UTC)—— CLI 按本地日期戳 settleHoldAt,UTC 之东的机器在本地刚
+  // 跨日、UTC 还没跨的那几个钟头,UTC 版本会晚一天,浮出这条测试(与 0.15.7 的 mtimeDay 同一类
+  // 坑,那条是特意退回 UTC 跟 gen 的 mtime 兜底口径对齐;这条相反,是要跟本地口径对齐)。
+  const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+  // 固定时钟断言(不依赖跑测试这一刻是不是正好落在 00:00-08:00 那几个钟头):本地 03:00 用
+  // toISOString() 会因时区跨日折回前一天,localDate 不会 —— 三个字段都是本地取的,不落 UTC。
+  ok(localDate(new Date(2026, 0, 1, 3, 0, 0)) === '2026-01-01', 'localDate 按本地日历取日期(2026-01-01 本地 03:00),不落到 UTC')
+  const dayAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return localDate(d) }
   const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
   const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
   const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })

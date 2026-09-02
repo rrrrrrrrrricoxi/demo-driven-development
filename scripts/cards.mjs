@@ -37,6 +37,17 @@ export const cardsDirUnsafe = (s) => /[/\\]/.test(s) || s === '.' || s === '..'
  */
 export const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' }
 
+/**
+ * 本地日历日的 'YYYY-MM-DD'(v0.15.16 起从 ddd.mjs 抠出来,ddd 与测试床共用同一份口径)。
+ * 卡上的 date / settleHoldAt 记的都是「人在本地过的哪一天」,取 getFullYear/Month/Date;
+ * 与 cardUpdatedMap 那条 toISOString().slice(0, 10) 的 UTC mtime 兜底是两码事,别混——那条
+ * 兜底本就该按 UTC(gen 也是 UTC 格式化 mtime),这条要的是本地日历。
+ * @param d 默认取当前时刻
+ */
+export function localDate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** config.cardsDir 归一:非空字符串才算开,首尾斜杠去掉;其它一切(缺席/false/空串)= 关。
  *  值逃出看板目录时抛 —— 悄悄当「没配」会让 gen 拿不到卡却也不报错,那更难查。 */
 export function cardsDirOf(cfg) {
