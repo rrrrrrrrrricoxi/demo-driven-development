@@ -9,6 +9,90 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.14] - 2026-09-02
+
+Three board conventions that had never been decided, decided (host board card
+BL-C112). None of them had bitten yet — no pull request had been attributed to
+the wrong release, no hold card was even a week old, and the one branch that
+would have collided had not been merged. That is the point: these are calibration
+decisions taken before the bleeding, not a post-mortem.
+
+### Added
+- **`scripts/board-branch-check.mjs` — the board is only edited on the mainline,
+  and this says when a branch broke that rule.** Two accidents hide behind a
+  feature branch that carries board changes back. A branch that forked before
+  one-file-per-card (0.14.0) still holds the `items` / `entries` arrays in the
+  header manifests; merging it puts them back and `gen` fails hard — which is a
+  backstop, not a warning, because by then the mainline is already dirty. Worse
+  is the quiet one: the branch's cards are a snapshot from the fork point, the
+  mainline's cards have moved on, and the merge rewrites whole arrays without a
+  conflict, so the board silently reverts.
+
+  The script diffs the kanban directory between the mainline and a branch,
+  splits what it finds into data / generated output / other, and calls out the
+  `items` hazard separately with the array length. `--all` scans every local and
+  remote branch, `--branch <ref>` picks one, `--json` is for scripting, and
+  `--strict` exits 1 so CI can gate on it. By default it exits 0 — it is a
+  reminder, not a gate — and it says nothing at all when nothing is wrong.
+
+  The Stop guard runs the same check on the current branch and adds one
+  non-blocking notice when it hits; the `gh pr merge` reminder now suggests
+  running it before merging. Deliberately **not** implemented: having `gen`
+  self-heal by re-splitting the array into `cards/`. That would overwrite newer
+  mainline cards with a stale snapshot, silently — a guard turned into the very
+  hand that causes the error.
+
+- **`settleHold` gets a 14-day expiry reminder.** Writing `settleHold` on a card
+  silenced the board and the guard permanently: five places agreed to say
+  nothing, and none of them looked at a date. A hold is a promise ("this round's
+  pull request only landed half of it, the rest is next round"), and a promise
+  should have a lifetime — half-landed work was quietly becoming permanently
+  half-landed.
+
+  The CLI now records `settleHoldAt` (today's date) whenever it writes
+  `settleHold`, so re-stating a hold renews it and clearing the field takes the
+  date with it. Cards held for 14 days or more get one quiet guard line (up to
+  five ids, oldest first) and their grey chip turns amber with the day count on
+  its face. Cards written before this release carry no `settleHoldAt`, so the
+  start date falls back to the card file's last commit date — the same fact
+  `.udate` and `data-dorm` already use, which also makes "write a line of news on
+  the card" a valid renewal. The reminder never unmutes anything, never blocks,
+  and never writes to the board: deciding whether a hold still stands is still
+  a person's job. 14 rather than the 30 of the dormancy threshold because
+  dormancy means "nobody ever touched it" while a hold means "somebody looked,
+  judged, and promised" — a promise deserves to be asked about more often.
+
+### Changed
+- **Release attribution is measured from the moment the tag was cut, not from
+  `publishedAt`.** `pr-sync.mjs` booked `releases[].at` from the GitHub release's
+  `publishedAt` while the comment three lines above the attribution loop said the
+  boundary was the tag. The comment was right about the intent: a tag is the cut
+  that decides what a version contains, `publishedAt` only records when someone
+  pressed the button. Anything merged in between was being counted into a version
+  whose tag does not contain it — and that gap is exactly the window in which
+  nothing should be landing.
+
+  New releases now take `at` from the tag itself: an annotated tag's
+  `tagger.date`, or, for a lightweight tag, the `committer.date` of the commit it
+  points at, both read through `gh api` (the same dependency `pr-sync` already
+  has — unlike local `git tag`, it needs neither a clone of the target repo nor
+  fetched tags, which a shallow CI checkout usually lacks). If the lookup fails
+  the entry falls back to `publishedAt` and stderr names the versions affected,
+  so a sync is never lost over one timestamp.
+
+  Entries already on disk keep their `at` untouched. Back-filling would silently
+  move pull requests between versions while the diff showed only a few changed
+  timestamps, and those boundaries were checked by a person when they were
+  written.
+
+### Notes
+- Boards with no `settleHold` card produce byte-identical output. A board that
+  has one gains a `data-hold` attribute on that chip plus one gated CSS rule and
+  one gated script function, so it needs a regenerate.
+- New card field: `settleHoldAt` (`YYYY-MM-DD`, written by the CLI beside
+  `settleHold`). Back-filling by hand is fine — it is a known field and is
+  validated as a date.
+
 ## [0.15.13] - 2026-09-01
 
 ### Changed

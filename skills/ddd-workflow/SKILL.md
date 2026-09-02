@@ -64,9 +64,20 @@ description: Demo-driven development workflow for a project that has the demo-dr
    **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。
    **合完 PR 用 `pr-sync.mjs --settle` 收账**(v0.13.0):它同步之后列出「关联 PR 都合了、卡还停在非终态」的卡与建议 status(backlog / 进度卡 `done`,决策卡 `live`),**默认只打印**;核对无误再加 `--write`(改 status,并在 `note` / `notes` 末尾追一行时间线)。守卫在收工时也会点名这两种卡(待收账 / 已收账但 PR 未合),非阻断。
    **一张卡跨几轮 PR 时写 `settleHold`**(v0.13.1):这一轮的 PR 只落了一半 / 只落了接口,卡该留在 `ready` —— `ddd.mjs card set <id> settleHold "理由"`,它从此不进待收账清单、不出芯片、守卫不催,卡头换成一枚灰芯片「暂不收账」(理由挂 title)。新一轮 PR 开了照旧 `card link` 挂上去(号自己并进 `pr` 数组);真收账时把 `settleHold` 从卡文件里删掉。清单上只有几张该收时,用 `--settle --write --only BL-1,D2` 挑着收(点名了清单外的卡号会报错,一个字节都不写)。
+   **挂账有寿命,满 14 天要么续要么收**(v0.15.14):CLI 写 `settleHold` 时顺手记下 `settleHoldAt`(今天)。挂满 14 天,灰芯片转琥珀并把天数写在面上,守卫出一行安静的提醒(最多点名 5 张,最久的排前面)。**它只提醒,不解除静音、不改卡、不阻断** —— 续期就是把 `settleHold` 重设一遍(理由写新的近况,起算日跟着归零),收账就是删掉那个字段。0.15.14 之前挂上的老卡没有 `settleHoldAt`,起算日退到卡文件最后提交日,所以在卡上写一句近况同样算续期。
    **`links[]` 的标题不写状态词**:「(开而不合)」「(待合)」「(已合并)」这类手写注解一定会过时 —— 板上有了 `release-manifest.json` 之后,指向本仓 PR 的链接自动带真实状态(开着 / 已合 08-26 / 已发 v0.0.3),写过的旧词若与实际不符会被划掉。标题只写这个 PR 干了什么。
 
-**发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。
+**发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。**归版切在「打 tag 那一刻」**(v0.15.14):`releases[].at` 取 tag 自己的时间(annotated 取 `tagger.date`,lightweight 退到它指的 commit),不是 release 的 `publishedAt`。tag 是「这一版包含什么」的那一刀,`publishedAt` 只是「什么时候按下发布键」—— 两者之间合并的 PR 不算进这一版。已落盘的 `at` 不回填。
+
+## 看板只在主线上改(v0.15.14)
+
+卡、manifest、`kanban.config.json` 与产物都属于主线。**feature 分支上不动 `app/kanban`**;这条线的活需要新 demo 或新卡,就在主线上单独提交。
+
+分支带着看板改动合回来会撞上两件事:拆卡(v0.14.0)之前分叉的分支,头文件里还带着 `items` / `entries` 数组,合回来 `gen` 当场硬报错 —— 那是事后兜底,报出来时主线已经脏了;更安静的一种是分支上那份卡是分叉当时的旧快照,合并整份数组重写、git 不报冲突,看板无声退版。
+
+合并之前跑一次:`node <plugin>/scripts/board-branch-check.mjs`(`--all` 扫全部分支,`--strict` 给 CI 当门用,零命中完全不出声)。收工守卫也会对当前分支跑同一份判定,命中出一条非阻断 notice。分支上已经动过的:合并前 `git checkout <主线> -- <看板目录>` 丢掉分支侧看板改动,真该留的在主线上重放一遍。
+
+**不做自动修复** —— 让 `gen` 自己把 `items` 拆回 `cards/` 等于拿旧快照静默覆盖新数据,一道防错的闸会变成一只致错的手。
 
 ## 日常段 token 硬规则(命令式,不是建议)
 

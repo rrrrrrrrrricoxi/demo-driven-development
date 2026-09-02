@@ -90,7 +90,7 @@ export function dormantDate(card) {
 
 // 「PR 合了」≠「卡能收」。一张卡跨几轮 PR(这一轮只落了一半、只落了接口)时,机器判出来的
 // settle 是对的判断、错的动作 —— 人看过之后写一句 settleHold 把这张卡的账挂起,看板与守卫就闭嘴,
-// 卡头改出一枚安静的灰芯片说明这事有人管着。要收账时删掉这个字段即可(不设过期,过期就是又一个要维护的钟)。
+// 卡头改出一枚安静的灰芯片说明这事有人管着。要收账时删掉这个字段即可。
 
 /**
  * 卡上的「暂不收账」理由。
@@ -98,4 +98,21 @@ export function dormantDate(card) {
  */
 export function settleHold(card) {
   return String((card && card.settleHold) || '').trim()
+}
+
+// 挂起不是永久静音(v0.15.14,BL-C112 §3)。hold 是「人看过、判过、承诺了下一轮」,承诺该有寿命:
+// 超过 SETTLE_HOLD_DAYS 天,卡头那枚灰芯片转回琥珀并把天数写在面上,守卫安静地说一行。
+// 它永远只是提醒 —— 不解除静音、不改数据、不阻断:到期的判断仍然只能由人做。
+// 阈值 14 比沉睡的 30 短一半:沉睡是「从没人碰过」,hold 是「有人承诺过」,承诺该问得更勤。
+export const SETTLE_HOLD_DAYS = 14
+
+/**
+ * 挂起的起算日。settleHoldAt 是 CLI 写 settleHold 时顺手记的(重设 = 续期,日期跟着归零);
+ * 0.15.14 之前挂上的老卡没有这个字段 —— 调用方退到「卡文件最后改动日」(与 .udate 同源),
+ * 那正好也是「在卡上再写一句近况就算续期」的口径。天数不在这里算:gen 零时间。
+ * @returns 'YYYY-MM-DD' | ''
+ */
+export function settleHoldSince(card) {
+  const d = String((card && card.settleHoldAt) || '').trim()
+  return DATE_RE.test(d) ? d : ''
 }

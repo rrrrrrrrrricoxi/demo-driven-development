@@ -37,6 +37,28 @@ const zh = {
     `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账(挑着收加 --only 卡号)。\n  这一轮不该收的卡(PR 只落了一半),在卡上写 "settleHold": "理由" —— 它从此不进清单、不出芯片,守卫这条也不再点它。`,
   respReopen: (ids, total) =>
     `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
+  respHoldOld: (ids, days, total) =>
+    `暂不收账已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
+  boardBranchGuard: (h, main) =>
+    `⚠ 看板守卫:当前分支 ${h.ref} 带着看板改动(相对 ${main}:数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})—— 看板只在 ${main} 上改。\n` +
+    h.hazard.map((z) => `  ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条):这块板已是一卡一文件,合回 ${main} 会让 gen 当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。\n`).join('') +
+    `  合并前把分支侧的看板改动丢掉(git checkout ${main} -- <看板目录>),真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。全表:\`node <plugin>/scripts/board-branch-check.mjs\`。`,
+  boardBranch: {
+    noGit: () => 'board-branch-check:这块板不在 git 仓里(或 git 跑不起来),没有分支可比 —— 本次不做判断。',
+    noMain: (main) => `board-branch-check:找不到主线分支 ${main}(本地与 origin/${main} 都没有),没有基准可比 —— 本次不做判断。主线名取三份 manifest 的 instance.branch,没写就按 main。`,
+    clean: (n, main) => `board-branch-check:比过 ${n} 条分支,相对 ${main} 都没有看板改动 —— 干净。`,
+    onMain: (main) => `board-branch-check:没有要比的分支(当前就在 ${main} 上)—— 看板改动本来就该落在这里。`,
+    head: (n, main) => `⚠ 看板改动落在了非主线分支上(基准 ${main}),${n} 条:`,
+    row: (h) => {
+      const key = [...h.data, ...h.gen]
+      const lines = [`  ${h.ref} —— 数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length}`]
+      for (const f of key.slice(0, 5)) lines.push(`    ${f}`)
+      if (key.length > 5) lines.push(`    …等 ${key.length} 个`)
+      for (const z of h.hazard) lines.push(`    ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条)—— 这块板已是一卡一文件,合回主线 gen 会当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。`)
+      return lines.join('\n')
+    },
+    rule: (prefix, main) => `规矩:看板只在 ${main} 上改 —— 分支上不动 ${prefix},demo 与卡都在 ${main} 上单独提交。\n  已经动过的,合并前 git checkout ${main} -- ${prefix} 丢掉分支侧看板改动,再在 ${main} 上重放一遍(重放靠人记,漏了就是安静地丢内容 —— 所以先看这张清单)。`,
+  },
   wipOver: (n, hard) =>
     `⚠ 看板守卫:可立即做(ready)的卡有 ${n} 张,超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
   cardsDirMissing: (rel) =>
@@ -48,7 +70,7 @@ const zh = {
     `⚠ 看板守卫:${total} 个卡文件不是合法 JSON —— gen 会硬失败,看板停在上一版:\n` +
     rows.map((r) => `  - ${r.file}:${r.message}`).join('\n'),
   ghprRemindMerge:
-    '[看板提醒] 刚合了一个 PR。跑 `node <plugin>/scripts/pr-sync.mjs --settle`:它先把 gh 上的 PR 与版本同步进 release-manifest.json,再列出「PR 都合了、卡还没收」的卡与建议 status(默认只打印;确认无误后加 --write 收账)。顺手核一遍卡的 links 标题:状态词(开而不合 / 待合 / 已合)不必手写,看板会按实际状态渲染。与看板无关则忽略。',
+    '[看板提醒] 刚合了一个 PR。合之前若还没看过,顺手跑一次 `node <plugin>/scripts/board-branch-check.mjs`(看板只在主线上改;分支带着看板改动合回来会让 gen 硬报错、或拿旧快照静默盖掉主线的卡)。然后跑 `node <plugin>/scripts/pr-sync.mjs --settle`:它先把 gh 上的 PR 与版本同步进 release-manifest.json,再列出「PR 都合了、卡还没收」的卡与建议 status(默认只打印;确认无误后加 --write 收账)。顺手核一遍卡的 links 标题:状态词(开而不合 / 待合 / 已合)不必手写,看板会按实际状态渲染。与看板无关则忽略。',
   ghprRemind:
     '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成);顺手把 PR 挂上卡 —— `node <plugin>/scripts/ddd.mjs card link <卡号> "<这个 PR 干了什么>" <PR 链接>`(它顺手写 pr 字段),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
   prSync: {
@@ -60,6 +82,7 @@ const zh = {
     badLimit: (name, v) => `pr-sync:--${name} 要跟一个正整数(给的是 ${JSON.stringify(v)})。`,
     prTruncated: (n, flag) => `⚠ pr-sync:gh 一次就给满了 ${n} 个 PR —— 比这更旧的这趟没取到,它们在 release-manifest.json 里原样留着,但状态不再刷新。要全量:--${flag} <更大的数>。`,
     relTruncated: (n, flag) => `⚠ pr-sync:gh 一次就给满了 ${n} 个 release —— 比这更旧的 tag 这趟没取到。要全量:--${flag} <更大的数>。`,
+    tagTimeFallback: (tags) => `⚠ pr-sync:取不到这些 tag 自己的时刻(权限 / 网络 / tag 已被删都会这样),这几版的 at 退回了 release 的 publishedAt:${tags.join(' ')}\n  归版口径是「打 tag 时刻」,publishedAt 通常晚几秒到几十分钟 —— 那段时间里合并的 PR 会被算进这一版。核过之后可以手工把 at 改成 tag 时刻(已落盘的 at 脚本不再改写)。`,
     done: (prs, rels, added, file) => `pr-sync:${prs} 个 PR · ${rels} 个版本(新增 ${added})→ ${file}`,
     dry: (prs, rels, added) => `pr-sync --dry-run:将写入 ${prs} 个 PR · ${rels} 个版本(新增 ${added});未写文件。`,
     settleNone: () => 'pr-sync --settle:没有待收账的卡 —— 关联 PR 都合了的卡,status 都已经在终态了。',
@@ -359,6 +382,28 @@ const en = {
     `⚠ Kanban guard: ${total} card(s) have all their pull requests merged but are still in a non-final status (unsettled): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Run \`node <plugin>/scripts/pr-sync.mjs --settle\` for the full list (card → suggested status), then add --write to settle them (add --only <ids> to pick some).\n  For a card that should not be settled this round (its pull request only landed half the work), put "settleHold": "reason" on it — it then leaves the list, drops its chip, and this notice stops naming it.`,
   respReopen: (ids, total) =>
     `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
+  respHoldOld: (ids, days, total) =>
+    `On settle hold for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
+  boardBranchGuard: (h, main) =>
+    `⚠ Kanban guard: the current branch ${h.ref} carries board changes (against ${main}: ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) — the board is only edited on ${main}.\n` +
+    h.hazard.map((z) => `  ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries): this board is one file per card, so merging it back into ${main} makes gen fail hard — and that array is a snapshot from the fork point, which would overwrite cards that have moved on since.\n`).join('') +
+    `  Before merging, drop the branch-side board changes (git checkout ${main} -- <kanban dir>) and replay what genuinely belongs there (a new demo, a refs doc) on ${main}. Full table: \`node <plugin>/scripts/board-branch-check.mjs\`.`,
+  boardBranch: {
+    noGit: () => 'board-branch-check: this board is not inside a git repository (or git could not run), so there are no branches to compare — no judgement this time.',
+    noMain: (main) => `board-branch-check: cannot find the mainline branch ${main} (neither locally nor as origin/${main}), so there is no baseline to compare against — no judgement this time. The mainline name comes from instance.branch in the three manifests, defaulting to main.`,
+    clean: (n, main) => `board-branch-check: compared ${n} branch(es); none of them carries board changes against ${main} — clean.`,
+    onMain: (main) => `board-branch-check: nothing to compare (you are on ${main}) — board changes belong here in the first place.`,
+    head: (n, main) => `⚠ Board changes are sitting on non-mainline branches (baseline ${main}), ${n} of them:`,
+    row: (h) => {
+      const key = [...h.data, ...h.gen]
+      const lines = [`  ${h.ref} — ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other`]
+      for (const f of key.slice(0, 5)) lines.push(`    ${f}`)
+      if (key.length > 5) lines.push(`    … ${key.length} in total`)
+      for (const z of h.hazard) lines.push(`    ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries) — this board is one file per card, so merging it back makes gen fail hard, and that array is a fork-point snapshot that would overwrite cards which have moved on since.`)
+      return lines.join('\n')
+    },
+    rule: (prefix, main) => `The rule: the board is only edited on ${main} — branches leave ${prefix} alone, and demos and cards are committed on ${main} in their own commits.\n  Where a branch already touched it: before merging, run git checkout ${main} -- ${prefix} to drop the branch-side board changes, then replay them on ${main} (replaying is done from memory — miss one and the content is lost silently, which is why this list comes first).`,
+  },
   wipOver: (n, hard) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
   cardsDirMissing: (rel) =>
@@ -370,7 +415,7 @@ const en = {
     `⚠ Kanban guard: ${total} card file(s) are not valid JSON — gen will fail hard and the board stays on its last version:\n` +
     rows.map((r) => `  - ${r.file}: ${r.message}`).join('\n'),
   ghprRemindMerge:
-    '[Kanban reminder] A pull request was just merged. Run `node <plugin>/scripts/pr-sync.mjs --settle`: it syncs pull requests and releases from gh into release-manifest.json, then lists the cards whose pull requests are all merged while the card is not settled, with a suggested status (printing only by default; add --write once the list looks right). While you are there, check the link titles on those cards — hand-written status words are no longer needed, the board renders the real state.',
+    '[Kanban reminder] A pull request was just merged. If you have not already, run `node <plugin>/scripts/board-branch-check.mjs` first (the board is only edited on the mainline; a branch that carries board changes back either makes gen fail hard or silently overwrites mainline cards with a fork-point snapshot). Then run `node <plugin>/scripts/pr-sync.mjs --settle`: it syncs pull requests and releases from gh into release-manifest.json, then lists the cards whose pull requests are all merged while the card is not settled, with a suggested status (printing only by default; add --write once the list looks right). While you are there, check the link titles on those cards — hand-written status words are no longer needed, the board renders the real state.',
   ghprRemind:
     '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically), and attach the pull request to the card with `node <plugin>/scripts/ddd.mjs card link <id> "<what this pull request did>" <pr-url>` (it writes the pr field too); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
   prSync: {
@@ -382,6 +427,7 @@ const en = {
     badLimit: (name, v) => `pr-sync: --${name} needs a positive integer (got ${JSON.stringify(v)}).`,
     prTruncated: (n, flag) => `⚠ pr-sync: gh returned exactly ${n} pull requests, i.e. as many as it was asked for — anything older was not fetched this run. Those entries stay in release-manifest.json as they were, but their status no longer refreshes. For all of them: --${flag} <a larger number>.`,
     relTruncated: (n, flag) => `⚠ pr-sync: gh returned exactly ${n} releases, i.e. as many as it was asked for — older tags were not fetched this run. For all of them: --${flag} <a larger number>.`,
+    tagTimeFallback: (tags) => `⚠ pr-sync: could not read the tags' own timestamps (no permission, no network, or the tag is gone), so their at fell back to the release publishedAt: ${tags.join(' ')}\n  Release attribution is measured from the moment the tag was cut; publishedAt is usually seconds to tens of minutes later — pull requests merged in between get counted into that release. You can set at by hand once you have checked (the script never rewrites an at that is already on disk).`,
     done: (prs, rels, added, file) => `pr-sync: ${prs} pull request(s) · ${rels} release(s) (${added} new) → ${file}`,
     dry: (prs, rels, added) => `pr-sync --dry-run: would write ${prs} pull request(s) · ${rels} release(s) (${added} new); nothing written.`,
     settleNone: () => 'pr-sync --settle: nothing to settle — every card whose pull requests are all merged is already in a final status.',

@@ -30,6 +30,12 @@
 // (烤入顺序本就是建卡日新→旧,不占两颗钮)、更新新→旧、同日退编号、空日期沉底 /
 // 记忆键 <brand>_bl_sort 与 0.15.12 旧值 'cdate-desc' 的落回 / 拆卡后更新日与建卡日各说各的 /
 // cards-split 的等价门认得 data-udate)、
+// 看板只在主线上改(board-branch-check:干净分支与主线一言不发 / 分类与 items 隐患 / --strict 给 CI /
+//   守卫那条非阻断 notice 零命中不出声)、
+// 归版按打 tag 时刻(annotated 的 tagger.date / lightweight 退 commit / 取不到退 publishedAt 并出声 /
+//   打完 tag 到点发布之间合的 PR 不算进这一版 / 已落盘的 at 不回填)、
+// settleHold 有寿命(CLI 记起算日与续期 / 清空一并收走 / 13 天不出声满 14 天出一行 / 最多 5 张 /
+//   老卡退卡文件最后提交日 / 守卫只读不写 / 拆分等价门认得 data-hold)、
 // 时间线左栏(四拍冻结 / 整格 role=button+aria-expanded 而非只有文字那颗钮 / 点击与 Enter·Space
 // 共用一个 toggleBand 且重画后交还焦点 / 左栏宽只有一处字面值,轴行与带行读同一个 --relgut
 // 并画同样的右边框 / TL.lbl 与 --relgut 同一个数)等。
@@ -2185,7 +2191,7 @@ console.log('T45 settleHold 暂不收账')
   ok(r.status === 0, 'settleHold 在场 gen exit 0', r.stderr)
   const on = readFileSync(idxP, 'utf8')
   const cardOf = (id) => { const i = on.indexOf(`id="${id}"`); return i < 0 ? '' : on.slice(i, on.indexOf('</article>', i)) }
-  ok(cardOf('BL-H').includes('<span class="rspchip rsp-hold" title="这一轮 PR 只落了 &lt;接口&gt; &amp; &quot;壳&quot;">暂不收账</span>'),
+  ok(cardOf('BL-H').includes('<span class="rspchip rsp-hold" data-hold="" title="这一轮 PR 只落了 &lt;接口&gt; &amp; &quot;壳&quot;">暂不收账</span>'),
     'backlog 卡:灰芯片「暂不收账」,理由 esc 进 title', (cardOf('BL-H').match(/rsp-hold[^>]*>[^<]*/) || [''])[0])
   ok(!cardOf('BL-H').includes('rsp-settle'), 'hold 卡不再出「PR 已合 · 待收账」')
   ok(cardOf('BL-S').includes('rsp-settle'), '同一个 PR 上没写 settleHold 的卡照旧催')
@@ -3974,6 +3980,287 @@ console.log('T64 Backlog 排序分段 backlogSort')
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
+// ============ T65 看板只在主线上改(BL-C112 §1:board-branch-check + 守卫那条非阻断 notice)============
+console.log('T65 看板改动落在哪条分支上 board-branch-check')
+{
+  const runChk = (kb, extra = []) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'board-branch-check.mjs'), '--dir', kb, ...extra], { encoding: 'utf8' })
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+
+  { // ---- 未拆板:分支上动了 backlog-manifest / 卡目录 → 点名;干净分支与主线上一言不发 ----
+    const fx = mkFixture('fx65a', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('checkout', '-q', '-B', 'main')
+    const blP = join(kb, 'backlog-manifest.json')
+    const bl = rd(blP)
+    bl.tiers = { 1: '核心' }
+    bl.instance.branch = 'main'
+    bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', problem: 'p', approach: 'a', area: 'x', source: 's' }]
+    wr(blP, bl)
+    g('add', '-A'); g('commit', '-qm', 'init')
+
+    const onMain = runChk(kb)
+    ok(onMain.status === 0 && /当前就在 main 上/.test(onMain.stdout), '当前就在主线上:没有分支要比,一句说明,exit 0', `${onMain.status} ${onMain.stdout}${onMain.stderr}`)
+
+    g('checkout', '-q', '-b', 'feat/clean')
+    writeFileSync(join(root, 'README.md'), 'x\n')
+    g('add', '-A'); g('commit', '-qm', 'no board change')
+    const clean = runChk(kb)
+    ok(clean.status === 0 && /干净/.test(clean.stdout) && !/⚠/.test(clean.stdout), '分支上没动看板:一个 ⚠ 都不出', clean.stdout)
+    const cleanStop = runStop(NEW_SCRIPTS, root)
+    ok(!/带着看板改动/.test(cleanStop.stdout), '守卫在干净分支上完全不出声(零命中不说话)', cleanStop.stdout.slice(0, 200))
+
+    g('checkout', '-q', '-b', 'feat/dirty')
+    const bl2 = rd(blP)
+    bl2.items.push({ id: 'BL-2', status: 'ready', priority: 'high', tier: '1', title: '乙', problem: 'p', approach: 'a', area: 'x', source: 's' })
+    wr(blP, bl2)
+    g('add', 'app/kanban/backlog-manifest.json'); g('commit', '-qm', 'board change on a branch')
+    const dirty = runChk(kb)
+    ok(dirty.status === 0 && /⚠/.test(dirty.stdout) && /feat\/dirty/.test(dirty.stdout) && /backlog-manifest\.json/.test(dirty.stdout),
+      '分支上动了看板数据:点名分支与文件', dirty.stdout.slice(0, 300))
+    ok(/数据 1 /.test(dirty.stdout), '分了类:manifest 算「数据」', (dirty.stdout.match(/数据 \d+[^\n]*/) || [''])[0])
+    ok(/只在 main 上改/.test(dirty.stdout), '末尾把规矩与补救动作说清(checkout main -- 看板目录,再在 main 上重放)')
+    ok(runChk(kb, ['--strict']).status === 1 && runChk(kb).status === 0, '默认恒 exit 0(提醒不是闸),--strict 才给 CI 当门用')
+    const j = runChk(kb, ['--json'])
+    const jd = JSON.parse(j.stdout)
+    ok(jd.hits.length === 1 && jd.hits[0].data.length === 1 && jd.hits[0].hazard.length === 0, '--json 给结构化结果(没配 cardsDir 时没有 items 隐患)', j.stdout.slice(0, 200))
+
+    const stop = runStop(NEW_SCRIPTS, root)
+    ok(/带着看板改动/.test(stop.stdout) && /feat\/dirty/.test(stop.stdout), '守卫在带看板改动的分支上出一条 notice', stop.stdout.slice(0, 300))
+    ok(!/"decision":\s*"block"/.test(stop.stdout), '这条永远不阻断收工')
+
+    const named = runChk(kb, ['--branch', 'feat/clean'])
+    ok(/干净/.test(named.stdout), '--branch 可以点名比别的分支', named.stdout)
+    const all = runChk(kb, ['--all'])
+    ok(/feat\/dirty/.test(all.stdout) && !/feat\/clean/.test(all.stdout), '--all 扫全部分支,只列真命中的那条', all.stdout.slice(0, 300))
+    g('checkout', '-q', 'main') // 收摊:别把这块板留在分支上影响后面的用例
+  }
+
+  { // ---- 拆过卡的板:分支把 items 数组带回头文件 = gen 会硬报错的那一类,合并前就点出来 ----
+    const fx = mkFixture('fx65b', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('checkout', '-q', '-B', 'main')
+    const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+    const bl = rd(blP)
+    bl.tiers = { 1: '核心' }
+    const card = { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', problem: 'p', approach: 'a', area: 'x', source: 's' }
+    delete bl.items
+    wr(blP, bl)
+    const cfg = rd(cfgP); cfg.cardsDir = 'cards'; wr(cfgP, cfg)
+    mkdirSync(join(kb, 'cards', 'backlog'), { recursive: true })
+    mkdirSync(join(kb, 'cards', 'decisions'), { recursive: true })
+    wr(join(kb, 'cards', 'backlog', 'BL-1.json'), card)
+    const dec = rd(join(kb, 'decisions-manifest.json')); delete dec.entries; wr(join(kb, 'decisions-manifest.json'), dec)
+    g('add', '-A'); g('commit', '-qm', 'split')
+
+    g('checkout', '-q', '-b', 'feat/pre-split')
+    const back = rd(blP); back.items = [card, { ...card, id: 'BL-9' }]; wr(blP, back) // 拆分之前的旧快照原样合回来
+    g('add', '-A'); g('commit', '-qm', 'stale items array')
+    const r = runChk(kb)
+    ok(/⛔/.test(r.stdout) && /items 数组/.test(r.stdout) && /2 条/.test(r.stdout),
+      'items 隐患单列一行,写清条数与后果', (r.stdout.match(/⛔[^\n]*/) || [''])[0].slice(0, 160))
+    const jd = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(jd.hits[0].hazard.length === 1 && jd.hits[0].hazard[0].key === 'items' && jd.hits[0].hazard[0].n === 2,
+      '隐患认的是「头文件里有 items 且这块板已拆卡」,条数如实报', JSON.stringify(jd.hits[0].hazard))
+    ok(jd.hits[0].data.some((f) => /cards\//.test(f)) === false && jd.hits[0].data.length === 1, 'cards/ 下没动的话数据只算头文件那一个', JSON.stringify(jd.hits[0].data))
+    g('checkout', '-q', 'main')
+  }
+}
+
+// ============ T66 归版按打 tag 时刻(BL-C112 §2:tag 时刻 ≠ publishedAt 时,窗口内的 PR 归上一版)============
+console.log('T66 归版按 tag 时刻')
+{
+  const fx = mkFixture('fx66', { 's.html': demoHtml('s') })
+  const relP = join(fx.kb, 'release-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+    const x = rd(join(fx.kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(fx.kb, f), x)
+  }
+  // v0.0.1 是历史:at 是 0.15.13 落盘的 publishedAt,prs 是人核过的 —— 这一趟一个字节都不许动它
+  wr(relP, {
+    stages: REL_MANIFEST.stages,
+    releases: [{ tag: 'v0.0.1', at: '2026-08-01T00:00:00Z', note: '首版', prs: [1] }],
+    prs: [], syncedAt: null,
+  })
+  // 假 gh:v0.0.3 的 tag 时刻比 publishedAt 早 26 分钟(demo 里那条真事实),窗口里卡着一个 PR
+  const mkGh = (dir, body) => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'gh'), `#!${process.execPath}\n${body}`)
+    chmodSync(join(dir, 'gh'), 0o755)
+    return dir
+  }
+  const PRS = JSON.stringify([
+    { number: 2, title: '窗口里合的', state: 'MERGED', isDraft: false, baseRefName: 'main', headRefName: 'f2', url: 'https://github.com/o/r/pull/2', createdAt: '2026-08-25T01:00:00Z', mergedAt: '2026-08-26T06:50:00Z', closedAt: '2026-08-26T06:50:00Z' },
+    { number: 3, title: 'tag 之前合的', state: 'MERGED', isDraft: false, baseRefName: 'main', headRefName: 'f3', url: 'https://github.com/o/r/pull/3', createdAt: '2026-08-25T01:00:00Z', mergedAt: '2026-08-26T06:00:00Z', closedAt: '2026-08-26T06:00:00Z' },
+  ])
+  const RELS = JSON.stringify([{ tagName: 'v0.0.3', publishedAt: '2026-08-26T07:06:18Z' }])
+  const annotated = mkGh(join(WORK, 'fakegh-tag-a'), `
+const a = process.argv.slice(2)
+if (a[0] === 'pr') { console.log(${JSON.stringify(PRS)}); process.exit(0) }
+if (a[0] === 'release') { console.log(${JSON.stringify(RELS)}); process.exit(0) }
+if (a[0] === 'api' && /git\\/ref\\/tags\\/v0\\.0\\.3$/.test(a[1])) { console.log(JSON.stringify({ object: { sha: 'TAGSHA', type: 'tag' } })); process.exit(0) }
+if (a[0] === 'api' && /git\\/tags\\/TAGSHA$/.test(a[1])) { console.log(JSON.stringify({ tagger: { date: '2026-08-26T06:40:11Z' } })); process.exit(0) }
+process.exit(1)
+`)
+  const runSync = (dir) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', fx.kb],
+    { encoding: 'utf8', env: { ...process.env, PATH: dir } })
+  const r = runSync(annotated)
+  ok(r.status === 0, 'pr-sync exit 0(annotated tag)', `${r.stdout}${r.stderr}`)
+  const out = rd(relP)
+  const v3 = out.releases.find((x) => x.tag === 'v0.0.3')
+  ok(v3.at === '2026-08-26T06:40:11Z', 'at 落的是 tagger.date,不是 release publishedAt', v3.at)
+  ok(JSON.stringify(v3.prs) === '[3]', '打完 tag 到点发布之间合的 #2 不算进这一版(按 publishedAt 会把它算进来)', JSON.stringify(v3.prs))
+  const v1 = out.releases.find((x) => x.tag === 'v0.0.1')
+  ok(v1.at === '2026-08-01T00:00:00Z' && JSON.stringify(v1.prs) === '[1]' && v1.note === '首版',
+    '已落盘的老条目一个字节都不回填(历史归属不静默重算)', JSON.stringify(v1))
+  ok(!/publishedAt|退回/.test(r.stderr), '取得到 tag 时刻就不吵', r.stderr.slice(0, 160))
+
+  { // lightweight tag:没有 tag 对象,退到它指的 commit 的 committer.date
+    const fx2 = mkFixture('fx66b', { 's.html': demoHtml('s') })
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const x = rd(join(fx2.kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(fx2.kb, f), x)
+    }
+    const light = mkGh(join(WORK, 'fakegh-tag-b'), `
+const a = process.argv.slice(2)
+if (a[0] === 'pr') { console.log(${JSON.stringify(PRS)}); process.exit(0) }
+if (a[0] === 'release') { console.log(${JSON.stringify(RELS)}); process.exit(0) }
+if (a[0] === 'api' && /git\\/ref\\/tags\\//.test(a[1])) { console.log(JSON.stringify({ object: { sha: 'C1', type: 'commit' } })); process.exit(0) }
+if (a[0] === 'api' && /git\\/commits\\/C1$/.test(a[1])) { console.log(JSON.stringify({ committer: { date: '2026-08-26T06:41:00Z' } })); process.exit(0) }
+process.exit(1)
+`)
+    const r2 = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', fx2.kb], { encoding: 'utf8', env: { ...process.env, PATH: light } })
+    const o2 = rd(join(fx2.kb, 'release-manifest.json'))
+    ok(r2.status === 0 && o2.releases[0].at === '2026-08-26T06:41:00Z', 'lightweight tag 退到 commit 的 committer.date', `${r2.status} ${o2.releases[0] && o2.releases[0].at}`)
+  }
+
+  { // 取不到 tag 时刻(权限 / 网络 / tag 已被删):退回 publishedAt,但要说一声
+    const fx3 = mkFixture('fx66c', { 's.html': demoHtml('s') })
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const x = rd(join(fx3.kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(fx3.kb, f), x)
+    }
+    const blind = mkGh(join(WORK, 'fakegh-tag-c'), `
+const a = process.argv.slice(2)
+if (a[0] === 'pr') { console.log(${JSON.stringify(PRS)}); process.exit(0) }
+if (a[0] === 'release') { console.log(${JSON.stringify(RELS)}); process.exit(0) }
+process.exit(1)
+`)
+    const r3 = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'pr-sync.mjs'), '--dir', fx3.kb], { encoding: 'utf8', env: { ...process.env, PATH: blind } })
+    const o3 = rd(join(fx3.kb, 'release-manifest.json'))
+    ok(r3.status === 0 && o3.releases[0].at === '2026-08-26T07:06:18Z', '取不到就退回 publishedAt,同步照样落盘(不为一个时刻废掉整趟)', `${r3.status} ${o3.releases[0] && o3.releases[0].at}`)
+    ok(/v0\.0\.3/.test(r3.stderr) && /publishedAt/.test(r3.stderr), 'stderr 点名是哪几版退了口径 —— 别让人以为拿到的是 tag 时刻', r3.stderr.slice(0, 200))
+  }
+}
+
+// ============ T67 settleHold 有寿命(BL-C112 §3:CLI 记起算日 / 守卫满 14 天说一行 / 老卡退卡文件日)============
+console.log('T67 settleHold 14 天到期提醒')
+{
+  const dayAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
+
+  { // ---- CLI:写 settleHold 顺手记起算日;重设 = 续期;撤回 = 连日期一起收走 ----
+    const fx = mkFixture('fx67a', { 's.html': demoHtml('s') })
+    const blP = join(fx.kb, 'backlog-manifest.json')
+    const bl = rd(blP)
+    bl.tiers = { 1: '核心' }
+    bl.instance.ghRepo = 'o/r'
+    bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', problem: 'p', approach: 'a', area: 'x', source: 's' }]
+    wr(blP, bl)
+    const r1 = runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHold', '这一轮只落了接口'])
+    const c1 = rd(blP).items[0]
+    ok(r1.status === 0 && c1.settleHoldAt === dayAgo(0), 'card set settleHold 顺手写下起算日(今天)', `${r1.status} ${c1.settleHoldAt}${r1.stderr}`)
+    ok(Object.keys(c1).join(',').includes('settleHold,settleHoldAt'), '新键落在 settleHold 紧后面(键序规范里排好的位置)', Object.keys(c1).join(','))
+    // 续期:先把日期改老,再重设一次 —— 日期该跟着归零
+    const aged = rd(blP); aged.items[0].settleHoldAt = '2026-01-01'; wr(blP, aged)
+    runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHold', '还是那半截,下一轮收'])
+    ok(rd(blP).items[0].settleHoldAt === dayAgo(0), '重设 settleHold = 续期,起算日归零')
+    // 撤回:空理由不算 hold,那个日期也不该留着(留着下次挂账就带一个陈年起算日)
+    runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHold', ''])
+    ok(rd(blP).items[0].settleHoldAt === undefined, '把 settleHold 清空的同时把起算日一起收走')
+    const rBad = runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHoldAt', '昨天'])
+    ok(rBad.status === 1 && rd(blP).items[0].settleHoldAt === undefined, '手工写 settleHoldAt 也要过日期形制这道门', `${rBad.status} ${rBad.stderr.slice(0, 80)}`)
+    ok(!/不认识的字段|unknown field/.test(runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHoldAt', '2026-01-01']).stderr), 'settleHoldAt 是已知字段,手工回填不报「不认识」')
+  }
+
+  { // ---- 守卫:13 天不出声,满 14 天出一行;芯片把起算日烤进 data-hold ----
+    const fx = mkFixture('fx67b', { 's.html': demoHtml('s') })
+    const kb = fx.kb, idxP = join(kb, 'index.html')
+    const blP = join(kb, 'backlog-manifest.json'), relP = join(kb, 'release-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const x = rd(join(kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(kb, f), x)
+    }
+    const bl = rd(blP)
+    bl.tiers = { 1: '核心' }
+    bl.items = [{ id: 'BL-H', status: 'ready', priority: 'high', tier: '1', title: '挂起的甲', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 227, settleHold: '只落了一半', settleHoldAt: dayAgo(13) }]
+    wr(blP, bl)
+    wr(relP, REL_MANIFEST)
+    const cfg = rd(cfgP); cfg.releaseTab = true; wr(cfgP, cfg)
+    runGen(NEW_SCRIPTS, kb)
+    const on = readFileSync(idxP, 'utf8')
+    ok(on.includes(`data-hold="${dayAgo(13)}"`), '芯片把起算日烤进 data-hold(天数照旧在浏览器算,gen 零时间)', (on.match(/data-hold="[^"]*"/) || [''])[0])
+    ok(on.includes('.rsp-hold.holdold {') && on.includes('function respHold()'), '有挂账卡时才注入那段琥珀 CSS 与算天数的 JS')
+    touch(idxP)
+    const g13 = runStop(NEW_SCRIPTS, fx.root)
+    ok(!/暂不收账已/.test(g13.stdout), '13 天:守卫一个字都不说', g13.stdout.slice(0, 200))
+    const bl14 = rd(blP); bl14.items[0].settleHoldAt = dayAgo(14); wr(blP, bl14)
+    const g14 = runStop(NEW_SCRIPTS, fx.root)
+    ok(/暂不收账已 14 天/.test(g14.stdout) && /BL-H/.test(g14.stdout), '满 14 天:一行,写清天数与卡号', (g14.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 160))
+    ok(/重设|settleHold/.test(g14.stdout), '这一行顺带说清「续」与「收」各怎么做')
+    ok(!/"decision":\s*"block"/.test(g14.stdout), '到期提醒永不阻断')
+    // 提醒不解除静音:这张卡照旧不进待收账那条,也照旧不出「PR 已合 · 待收账」芯片
+    ok(!/待收账\)?:.*BL-H/.test(g14.stdout), '到期了也还是 hold —— 待收账那条不点它')
+    const after = readFileSync(blP, 'utf8')
+    ok(JSON.parse(after).items[0].settleHoldAt === dayAgo(14), '守卫只读不写:卡上的字段一个都没被改')
+    // 6 张一起过期:只点 5 个 + 总数
+    const many = rd(blP)
+    for (let i = 2; i <= 6; i++) many.items.push({ ...many.items[0], id: `BL-H${i}`, settleHoldAt: dayAgo(20 + i) })
+    wr(blP, many)
+    const gN = runStop(NEW_SCRIPTS, fx.root)
+    ok(/…等 6 张/.test(gN.stdout) && (gN.stdout.match(/BL-H\d/g) || []).length === 5, '最多点名 5 张 + 总数(最久的排前面)', (gN.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 200))
+  }
+
+  { // ---- 老卡(0.15.14 之前挂上的,没有 settleHoldAt):退到卡文件最后提交日 ----
+    const fx = mkFixture('fx67c', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const x = rd(join(kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(kb, f), x)
+    }
+    const bl = rd(blP); bl.tiers = { 1: '核心' }; delete bl.items; wr(blP, bl)
+    const dec = rd(join(kb, 'decisions-manifest.json')); delete dec.entries; wr(join(kb, 'decisions-manifest.json'), dec)
+    const cfg = rd(cfgP); cfg.cardsDir = 'cards'; cfg.releaseTab = true; wr(cfgP, cfg)
+    mkdirSync(join(kb, 'cards', 'backlog'), { recursive: true })
+    mkdirSync(join(kb, 'cards', 'decisions'), { recursive: true })
+    wr(join(kb, 'cards', 'backlog', 'BL-OLD.json'), { id: 'BL-OLD', status: 'ready', priority: 'high', tier: '1', title: '老挂起', problem: 'p', approach: 'a', area: 'x', source: 's', pr: 227, settleHold: '0.15.14 之前挂上的' })
+    wr(join(kb, 'release-manifest.json'), REL_MANIFEST)
+    const g = (env, ...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', env: { ...process.env, ...env } })
+    g({}, 'config', 'user.email', 't@example.com'); g({}, 'config', 'user.name', 'T')
+    g({}, 'add', '-A')
+    const when = `${dayAgo(30)}T12:00:00`
+    g({ GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when }, 'commit', '-qm', '30 天前挂上的')
+    runGen(NEW_SCRIPTS, kb)
+    ok(readFileSync(join(kb, 'index.html'), 'utf8').includes(`data-hold="${dayAgo(30)}"`),
+      '没有 settleHoldAt 的老卡:起算日退到卡文件最后提交日(与 .udate 同源)', (readFileSync(join(kb, 'index.html'), 'utf8').match(/data-hold="[^"]*"/) || [''])[0])
+    touch(join(kb, 'index.html'))
+    const gs = runStop(NEW_SCRIPTS, root)
+    ok(/暂不收账已 30 天/.test(gs.stdout) && /BL-OLD/.test(gs.stdout), '守卫读同一份卡文件日期,老卡照样催得动', (gs.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 160))
+    ok(!readFileSync(join(kb, 'cards', 'backlog', 'BL-OLD.json'), 'utf8').includes('settleHoldAt'),
+      '守卫不往卡上补写起算日(收工时改板会跟并行会话抢写)')
+  }
+
+  { // 拆分等价门:data-hold 与 .udate / data-dorm 同类 —— 拆卡之后才有的新事实,归一了再比
+    const { stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+    ok(stripCardUpdated('<span data-hold="2026-01-01">x</span>') === stripCardUpdated('<span data-hold="">x</span>'),
+      'cards-split / cards-join 的逐字节等价门认得 data-hold(否则带挂账卡的板一拆就判「搬坏了」)')
+  }
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

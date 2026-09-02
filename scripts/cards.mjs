@@ -12,7 +12,8 @@
 // 顺序:数组顺序在 gen 里就是显示顺序 —— decisionRank 决定截图廊的组序、LAZY_IDMAP 决定深链表
 // 的键序、byDateDesc 是稳定排序(同日同号时数组先后即先后)。所以拆分时给每张卡写入 order =
 // 原数组下标,读回时按 order 再按 id 排,排完把 order 删掉:卡对象与拆分前逐字段相同。
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { pickStrings } from './strings.mjs'
 
@@ -92,11 +93,44 @@ export function stripOrder(cards) {
 export function cardText(card) { return JSON.stringify(card, null, 2) + '\n' }
 
 /**
+ * 每卡最后改动日(v0.14.0 起 gen 在用,v0.15.14 起守卫也读同一份)。一条 git log 批量取每个卡
+ * 文件的最后提交日,不是一卡一条命令;git 失败 / 文件还没提交 → 文件 mtime → 空。
+ * 取的是已提交的事实:同一个 commit 下同输出,不破 gen 的确定性。
+ * @param kanbanDir 看板目录(git 命令的 cwd,也是相对路径的根)
+ * @param cardsDir  config.cardsDir
+ * @param srcOf     Map<id, '<cardsDir>/<sub>/<id>.json'>(相对看板目录)
+ * @returns Map<id, 'YYYY-MM-DD' | ''>
+ */
+export function cardUpdatedMap(kanbanDir, cardsDir, srcOf) {
+  const byPath = new Map() // git 的路径相对仓根,不相对看板目录,故只认末两段
+  try {
+    const out = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', cardsDir],
+      { cwd: kanbanDir, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+    let day = ''
+    for (const raw of out.split('\n')) {
+      const line = raw.trim()
+      if (!line) continue
+      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+      const k = line.split('/').slice(-2).join('/')
+      if (day && !byPath.has(k)) byPath.set(k, day) // git log 是新→旧,第一次见到即最后一次改动
+    }
+  } catch { /* 无 git / 命令失败 → 整批退 mtime */ }
+  const out = new Map()
+  for (const [id, rel] of srcOf) {
+    let d = byPath.get(rel.split('/').slice(-2).join('/')) || ''
+    if (!d) { try { d = statSync(join(kanbanDir, rel)).mtime.toISOString().slice(0, 10) } catch { d = '' } }
+    out.set(id, d)
+  }
+  return out
+}
+
+/**
  * 去掉「每卡更新日期」带来的字节。拆前 / 拆后对比时用:除了这个日期本身,一卡一文件
  * 不该改动产物的任何一个字节。它波及三处 ——
  *   1. 卡头那枚灰字与它那条 CSS(新增的标记);
  *   2. LAZY_BYTES(parts 的未压缩长度,多几枚 span 就多几个字节;parts 本身另比,漏不掉真差异);
- *   3. data-dorm 的取值(沉睡天数改从卡文件最后改动日起算,这是 cardsDir 的既定行为)。
+ *   3. data-dorm 的取值(沉睡天数改从卡文件最后改动日起算,这是 cardsDir 的既定行为);
+ *   4. data-hold 的取值(v0.15.14:没写 settleHoldAt 的老卡,挂账天数同样从卡文件最后改动日起算)。
  */
 export function stripCardUpdated(html) {
   return String(html)
@@ -104,6 +138,7 @@ export function stripCardUpdated(html) {
     .replace(/\n +\/\* =+ 每卡更新日期[^\n]*\n +\.udate \{[^\n]*/g, '')
     .replace(/const LAZY_BYTES = \{[^}]*\}/g, 'const LAZY_BYTES = {}')
     .replace(/ data-dorm="[^"]*"/g, ' data-dorm=""')
+    .replace(/ data-hold="[^"]*"/g, ' data-hold=""')
     // backlogSort 的排序尺子(v0.15.12)也是拆分之后才有的新事实,与 .udate / data-dorm 同一类
     .replace(/ data-udate="[^"]*"/g, ' data-udate=""')
     // 总览的「近 7 天动过的卡」也只在一卡一文件之后才有事实可依(v0.15.0)——

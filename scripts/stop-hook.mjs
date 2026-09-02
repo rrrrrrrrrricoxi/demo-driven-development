@@ -24,9 +24,15 @@
 //   5. 进度响应审计(v0.13.0,只在 release-manifest.json 在场时):关联 PR 全合了却没收账的卡、
 //      已收账却还有 PR 开着的卡,各出一条非阻断 notice(各最多点名 5 张 + 总数)。收账动作在
 //      pr-sync.mjs --settle,守卫只提示 —— 静默改 manifest 会跟并行会话抢写。
+//   5b. 挂账到期(v0.15.14,BL-C112 §3):写了 settleHold 的卡挂满 14 天 → 一行安静的提醒
+//      (「已 N 天,仍成立就重设一下,收账就删」,最多点名 5 张)。只提醒:不解除静音、不改卡。
+//      起算日取卡上的 settleHoldAt(CLI 写 settleHold 时记的);老卡没有就退卡文件最后提交日。
 //   6. 卡文件审计(v0.14.0,只在 config.cardsDir 开时):文件名与卡里的 id 不符 / JSON 解析失败
 //      → 点名文件(各最多 5 个 + 总数)。这几种 gen 会硬失败,但一次只报得出第一个。
 //      同一个键还让新鲜度盯住 <cardsDir>/**/*.json(卡也是 gen 输入)、让孤儿语料纳入卡文件正文。
+//   7. 分支审计(v0.15.14,BL-C112 §1):当前分支相对主线带着看板改动 → 一条非阻断 notice。
+//      看板只在主线上改:带回来的头文件 items/entries 会让 gen 硬报错,分支上的旧卡快照
+//      会静默盖掉主线上改过的卡。口径与 board-branch-check.mjs 同一份;零命中完全不出声。
 //
 // plugin 化改造(设计 §6):
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
@@ -45,8 +51,9 @@ import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
-import { TERMINAL, settleHold, settleOf } from './settle.mjs'
-import { CARD_KINDS, cardsDirOf, scanCardDir } from './cards.mjs'
+import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } from './settle.mjs'
+import { CARD_KINDS, cardUpdatedMap, cardsDirOf, scanCardDir } from './cards.mjs'
+import { boardBranchCheck } from './board-branch-check.mjs'
 
 const KANBAN = detect()
 if (!KANBAN) process.exit(0)
@@ -278,7 +285,7 @@ const orphans = demos.filter((f) => !covered.has(f))
     try { rlm = JSON.parse(readFileSync(relPath, 'utf8')) } catch {} // 坏 JSON:gen 已经出过声,守卫不重复吵
     const relPr = new Map()
     for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
-    const settle = [], reopen = []
+    const settle = [], reopen = [], held = [] // held:写了 settleHold 的卡 + 起算日(下面算到期)
     if (relPr.size) {
       for (const [f, k, sub] of CARD_SOURCES) {
         let data = null
@@ -286,7 +293,8 @@ const orphans = demos.filter((f) => !covered.has(f))
         const repo = String((data.instance || {}).ghRepo || '') // instance 始终在头文件里,与卡拆不拆无关
         if (!repo) continue
         for (const c of cardsOf(f, k, sub)) {
-          if (!c || !c.id || settleHold(c)) continue // settleHold = 人看过了,别再催
+          if (!c || !c.id) continue
+          if (settleHold(c)) { held.push({ id: String(c.id), since: settleHoldSince(c) }); continue } // settleHold = 人看过了,别再催(只记下起算日,见下面的到期提醒)
           const s = settleOf(c, prsOfCard(c, repo), relPr, repo)
           if (s.kind === 'settle') settle.push(String(c.id))
           else if (s.kind === 'reopen') reopen.push(String(c.id))
@@ -295,7 +303,39 @@ const orphans = demos.filter((f) => !covered.has(f))
     }
     if (settle.length) notices.push(S.respSettle(settle.slice(0, 5), settle.length))
     if (reopen.length) notices.push(S.respReopen(reopen.slice(0, 5), reopen.length))
+
+    // 挂账到期提醒(v0.15.14,BL-C112 §3):hold 是承诺不是遗忘,挂满 SETTLE_HOLD_DAYS 天说一行。
+    // 只提醒 —— 不解除静音、不改卡:到期的判断仍然只能由人做,守卫替人记的只是「多久了」。
+    // 0.15.14 之前挂上的老卡没有 settleHoldAt,退到卡文件最后改动日(与 gen 的 .udate 同一份口径);
+    // 未拆卡的板取不到「这张卡什么时候动的」,那种老卡就不催 —— 宁可不出声,也不拿假日期点名。
+    if (held.length) {
+      const need = held.some((h) => !h.since)
+      if (need && CARDS_DIR) {
+        const srcOf = new Map()
+        for (const k of CARD_KINDS) {
+          const s = cardScan[k.sub]
+          if (!s || s.missing) continue
+          for (const x of s.cards) srcOf.set(String(x.card.id), `${CARDS_DIR}/${k.sub}/${x.file}`)
+        }
+        const upd = cardUpdatedMap(KANBAN, CARDS_DIR, srcOf)
+        for (const h of held) if (!h.since) h.since = upd.get(h.id) || ''
+      }
+      const today = Date.now()
+      const old = held
+        .map((h) => ({ id: h.id, days: Math.floor((today - Date.parse(`${h.since}T00:00:00`)) / 86400000) }))
+        .filter((h) => Number.isFinite(h.days) && h.days >= SETTLE_HOLD_DAYS)
+        .sort((a, z) => z.days - a.days)
+      if (old.length) notices.push(S.respHoldOld(old.slice(0, 5).map((h) => h.id), old[0].days, old.length))
+    }
   }
+}
+
+// ---- ⑦ 看板改动落在非主线分支上(v0.15.14,BL-C112 §1):非阻断,零命中完全不出声 ----
+// 规矩是「看板只在主线上改」;这里只看当前分支(全表走 board-branch-check.mjs --all)。
+// git 不可用 / 找不到主线 / 就在主线上 → 一个字都不说,也不多花一次 spawn。
+{
+  const r = boardBranchCheck(KANBAN, S)
+  if (!r.skip) for (const h of r.hits) notices.push(S.boardBranchGuard(h, r.main))
 }
 
 // ---- ⑥ 积压审计(v0.13.0,只在 config.wip 配了对象时跑):ready 超 hard 就说一声 ----
