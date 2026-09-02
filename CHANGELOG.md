@@ -9,6 +9,39 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.15] - 2026-09-03
+
+### Fixed
+- **The release timeline's peek card now sizes to its content, and long titles
+  wrap instead of running off it.** The card was capped at `max-width: 320px`
+  while every row in the day list was `white-space: nowrap` with an ellipsis, a
+  pairing that only works while the ellipsis actually lands — a long Chinese
+  title has no space to break at, so on a host board it drew past the card's
+  right edge with text sitting on the page background. The rule is now
+  `width: max-content` with `max-width: min(720px, calc(100vw - 16px))`: a short
+  title still gets a narrow card, a long one grows until it hits 720px or the
+  viewport, and the title cells (`.relpkt`, `.relpkr > span`) wrap with
+  `overflow-wrap: anywhere` rather than being clipped. The `#NNN` cell keeps
+  `white-space: nowrap` — a number split across two lines stops reading as one
+  number — and the existing flip / clamp placement is untouched, so a wide card
+  near the right edge still stays on screen.
+
+- **A `+N` chip's card lists the pull requests it folded, not the whole day.**
+  In the chip regime a cell that cannot hold its chips folds the rest into one
+  `+N`, and hovering it popped the day card for that band and day — on a host
+  board, `+3` answered with all ten pull requests of that day, the seven visible
+  chips included. `+N` asks "who is not shown", so the answer now is only those:
+  `relGridChip` reports the folded numbers alongside the count, `tlOvf` bakes
+  them onto the chip as `data-relfold="257,259,260"`, and `pkDay` filters to that
+  list and heads the card 「未展开 N 个 PR」. It filters by number rather than by
+  day, which also fixes the cross-day case where the group's anchor day is
+  clipped by the window and the day never matched anything. Squares, chips, bars
+  and the folded-band day segments are unchanged, as is the keyboard path — the
+  `+N` is still `tabindex="0"` and focus opens the same filtered card.
+
+  Boards without `releaseTab` are byte-identical; a board with it changes only
+  in the peek CSS and JS and in the `data-relfold` attribute on `+N` chips.
+
 ## [0.15.14] - 2026-09-02
 
 Three board conventions that had never been decided, decided (host board card

@@ -206,14 +206,19 @@ export function relGridBig(byDay, ax, size, o) {
  * 只画一行是有意的 —— 芯片本身就是「这一格里有谁」的答案,叠成一叠反而又要数。
  */
 export function relGridChip(byDay, ax, cw) {
-  var pitch = cw + 6, out = [], d, arr, cols, show, i
+  var pitch = cw + 6, out = [], d, arr, cols, show, i, fold
   for (d in byDay) {
     if (ax.x[d] === undefined) continue
     arr = byDay[d].slice().sort(function (a, b) { return a.n - b.n })
     cols = Math.max(1, Math.floor((ax.w[d] - 8) / pitch))
     show = arr.length > cols ? Math.max(1, cols - 1) : arr.length // 放不下就腾一格给 +N
     for (i = 0; i < show; i++) out.push({ n: arr[i].n, lane: 0, x: ax.x[d] + 4 + i * pitch, w: cw, item: arr[i] })
-    if (arr.length > show) out.push({ more: arr.length - show, lane: 0, d: d, x: ax.x[d] + 4 + show * pitch, w: cw - 8 })
+    if (arr.length > show) {
+      // 被收起来的是哪几个,这里就说清楚(v0.15.15):+N 的悬停卡只列它们,不再退回整天
+      fold = []
+      for (i = show; i < arr.length; i++) fold.push(arr[i].n)
+      out.push({ more: fold.length, fold: fold, lane: 0, d: d, x: ax.x[d] + 4 + show * pitch, w: cw - 8 })
+    }
   }
   return { used: out.length ? 1 : 0, bars: out }
 }

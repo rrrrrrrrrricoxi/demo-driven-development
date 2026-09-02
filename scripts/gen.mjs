@@ -3498,22 +3498,24 @@ const REL_CSS = !REL ? '' : `
   .relmore { margin-left: auto; max-width: 62ch; }
   /* hover peek(v0.15.2):压成几像素的方块也说得出自己是谁 —— 自绘卡顶掉原生 title(截断、要等、两层浮层打架) */
   .relpb:focus-visible, .relsp:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 1px; z-index: 2; }
-  .relpeek { position: fixed; z-index: 65; left: 0; top: 0; max-width: 320px; width: max-content; padding: 8px 10px;
+  /* 卡宽跟着内容走(v0.15.15):320px 那道死墙下,一条中文标题会从卡的右沿探出去。
+     max-content + 一个上限:短标题仍是窄卡,长的自己撑开,撑到 720px 或贴着视口就换行 */
+  .relpeek { position: fixed; z-index: 65; left: 0; top: 0; width: max-content; max-width: min(720px, calc(100vw - 16px)); padding: 8px 10px;
      border: 1px solid var(--line-strong); border-radius: 9px; background: var(--card); color: var(--ink);
      box-shadow: 0 1px 2px rgba(${SHADOW_INK},.04), 0 10px 24px rgba(${SHADOW_INK},.09);
      font-size: 11.5px; line-height: 1.5; }
   .relpeek[hidden] { display: none; }
   .relpkh { display: flex; align-items: baseline; gap: 6px; }
   .relpkh b { flex: none; font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
-  .relpkt { min-width: 0; color: var(--mut); }
+  .relpkt { min-width: 0; color: var(--mut); overflow-wrap: anywhere; }
   .relpkm { margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; color: var(--faint); }
   .relpkm code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
   .relpkk { margin-top: 5px; }
   .relpka { margin-top: 4px; color: var(--mut); font-variant-numeric: tabular-nums; }
   .relpkl { margin-top: 5px; display: grid; gap: 2px; }
   .relpkr { display: flex; gap: 6px; }
-  .relpkr b { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .relpkr > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .relpkr b { flex: none; white-space: nowrap; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .relpkr > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; } /* 标题换行,不再截半句也不再探出卡外 */
   @media (max-width: 820px) { .relseg { margin-left: 0; } .relmore { margin-left: 0; } }`
 // 运行期:筛选 / 搜索 / 排序 / 版本折叠 / 视图切换 / 时间线绘制 / syncedAt 换算。
 // 两视图共用同一份 REL_D 与同一个 pass():筛选一次,表格与时间线看到的是同一批 PR。
@@ -3661,19 +3663,22 @@ const REL_JS = !REL ? '' : `
     function tlChip(it, g, x, y, q, cw) { // 号直接写在图上:不用悬停也不用点就知道是谁
       return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', '#' + it.d.n)
     }
-    // 放不下的收进一枚 +N。它不是某一条 PR,挂不上 data-relpk;改挂折叠带那副「带 + 那一天」的钩子,
-    // 悬停 / 聚焦弹的就是那一天的 PR 清单 —— 被收起来的几个正在里头,不必为此另造一张卡。
-    function tlOvf(n, g, dy, x, y, w) {
+    // 放不下的收进一枚 +N。它不是某一条 PR,挂不上 data-relpk;改挂折叠带那副「带 + 那一天」的钩子。
+    // 被收起来的号一并烤在 data-relfold 上(v0.15.15):+N 问的是「没展开的是谁」,答那一整天等于没答 ——
+    // 画出来的几枚就在旁边,再列一遍反而要人自己做减法。
+    function tlOvf(ns, g, dy, x, y, w) {
       return '<span class="relpb relchip relovf relc s-' + g.sg + ' q' + g.q + '" tabindex="0" data-relpkg="' + xe(g.g)
-        + '" data-relpkd="' + dy + '" style="left:' + x + 'px;top:' + y + 'px;width:' + w + 'px">+' + n + '</span>'
+        + '" data-relpkd="' + dy + '" data-relfold="' + ns.join(',') + '" style="left:' + x + 'px;top:' + y
+        + 'px;width:' + w + 'px">+' + ns.length + '</span>'
     }
+    function foldNs(list, from) { var o = [], j; for (j = from; j < list.length; j++) o.push(list[j].n); return o }
     function tlWhisk(r, g, top, rowM, q, cw) { // 一组(同开同合)共用一行一条细线,whisker 才不含糊指向谁
       var out = [], y = top + r.lane * rowM + 1, cy = y + Math.round(TL.chip / 2), pitch = cw + 6, j
       if (r.x1 > r.x0) out.push('<i class="relwk relc s-' + g.sg + ' q' + g.q + '" style="left:' + r.x0 + 'px;top:' + cy + 'px;width:' + (r.x1 - r.x0) + 'px"></i>')
       if (r.clip) out.push('<i class="relwx relc relink s-' + g.sg + '" style="left:' + TL.lbl + 'px;top:' + (cy - 6) + 'px">‹</i>')
       else out.push('<i class="relwt relc s-' + g.sg + ' q' + g.q + '" style="left:' + ((r.open ? r.x1 : r.x0) - 1) + 'px;top:' + (cy - 3) + 'px"></i>')
       for (j = 0; j < r.show; j++) out.push(tlChip(r.list[j], g, r.cx + j * pitch, y, q, cw))
-      if (r.list.length > r.show) out.push(tlOvf(r.list.length - r.show, g, r.an, r.cx + r.show * pitch, y, cw - 8))
+      if (r.list.length > r.show) out.push(tlOvf(foldNs(r.list, r.show), g, r.an, r.cx + r.show * pitch, y, cw - 8))
       return out.join('')
     }
     // ———— hover peek(v0.15.2)————
@@ -3706,19 +3711,28 @@ const REL_JS = !REL ? '' : `
       if (ac) out.push('<div class="relpka">验收 <b>' + xe(ac.textContent.trim()) + '</b></div>')
       return out.join('')
     }
-    function pkDay(gid, dy) { // 折叠带上的一段 = 那条带的那一天:把这天的 PR 列出来(封 10 条)
+    // 折叠带上的一段 = 那条带的那一天:把这天的 PR 列出来(封 10 条)。
+    // 带 data-relfold 的锚点(那枚 +N)只列被收起来的那几个:按号挑,不按天挑 —— 跨天那组的
+    // 锚点日被窗口裁掉时,「那一天」根本对不上,而号永远对得上。
+    function pkDay(gid, dy, fold) {
       var list = byG[gid] || [], hit = [], nm = gid, k
+      var only = fold ? String(fold).split(',') : null
       for (k = 0; k < G.length; k++) if (G[k].g === gid) nm = G[k].nm
-      for (k = 0; k < list.length; k++) if (anc(list[k]) === dy) hit.push(list[k])
+      for (k = 0; k < list.length; k++) {
+        if (only ? only.indexOf(String(list[k].n)) < 0 : anc(list[k]) !== dy) continue
+        hit.push(list[k])
+      }
       hit.sort(function (a, b) { return a.n - b.n })
-      var out = ['<div class="relpkh"><b>' + xe(nm) + '</b><span class="relpkt">' + md(dy) + ' · ' + hit.length + ' 个 PR</span></div>']
+      var out = ['<div class="relpkh"><b>' + xe(nm) + '</b><span class="relpkt">' + md(dy) + ' · '
+        + (only ? '未展开 ' : '') + hit.length + ' 个 PR</span></div>']
       var li = []
       for (k = 0; k < hit.length && k < 10; k++) li.push('<span class="relpkr"><b>#' + hit[k].n + '</b><span>' + xe(hit[k].t) + '</span></span>')
       out.push('<div class="relpkl">' + li.join('') + '</div>')
-      if (hit.length > 10) out.push('<div class="relpkm">还有 ' + (hit.length - 10) + ' 个 · 点带头展开看全</div>')
+      // 收起来的那几个:带已经是展开的,再让人「点带头展开」就指错了路
+      if (hit.length > 10) out.push('<div class="relpkm">还有 ' + (hit.length - 10) + ' 个' + (only ? '' : ' · 点带头展开看全') + '</div>')
       return out.join('')
     }
-    function pkPlace(el) { // 贴元素上方;顶不下就翻到下面,右边越界就往左收(卡宽 CSS 里封在 320px)
+    function pkPlace(el) { // 贴元素上方;顶不下就翻到下面,右边越界就往左收(卡宽由内容定,CSS 里封了个上限)
       var r = el.getBoundingClientRect(), w = pk.offsetWidth || 260, h = pk.offsetHeight || 90
       var l = r.left, t = r.top - h - 8
       if (t < 8) t = r.bottom + 8
@@ -3728,7 +3742,7 @@ const REL_JS = !REL ? '' : `
       pk.style.top = t + 'px'
     }
     function pkShow(el) {
-      var html = el.dataset.relpk ? pkPr(el.dataset.relpk) : pkDay(el.dataset.relpkg, el.dataset.relpkd)
+      var html = el.dataset.relpk ? pkPr(el.dataset.relpk) : pkDay(el.dataset.relpkg, el.dataset.relpkd, el.dataset.relfold)
       if (!html) return
       pkFor = el
       pk.innerHTML = html
@@ -3837,7 +3851,7 @@ const REL_JS = !REL ? '' : `
             top += TL.sub
             for (j = 0; j < sg2.bars.length; j++) {
               var sb = sg2.bars[j]
-              if (sb.more) body.push(tlOvf(sb.more, g, sb.d, sb.x, top + 1, sb.w))
+              if (sb.more) body.push(tlOvf(sb.fold, g, sb.d, sb.x, top + 1, sb.w))
               else if (reg === 2) body.push(tlChip(sb.item, g, sb.x, top + 1, q, cw))
               else if (reg === 1) body.push(tlSq(sb, g, top, q, rowS, size))
               else body.push(tlBar(sb, g, top, q, false))

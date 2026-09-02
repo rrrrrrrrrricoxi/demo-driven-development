@@ -149,7 +149,10 @@ acceptance `n/N` when that pull request has a checklist. A pull request opened
 and merged the same day is a square a few pixels wide in a normal window, so
 the card is the only place any of that fits; zoomed in far enough the number is
 written on the glyph and the card is the rest of the story. On a folded version band each segment stands for one
-day, and its card lists that day's pull requests, ten at most. `Esc` or moving
+day, and its card lists that day's pull requests, ten at most; a `+N` chip's
+card lists only the ones it folded away, since the rest are chips beside it. The
+card is as wide as it needs to be, up to 720px or the viewport, and long titles
+wrap rather than being cut. `Esc` or moving
 away dismisses it, the card stays put while the pointer is inside it so the
 chips stay reachable, and touch gets the two-tap pattern. Every field is read
 from the row already in the table below, so nothing is baked a second time, and

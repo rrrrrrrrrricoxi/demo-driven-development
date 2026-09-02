@@ -1899,7 +1899,10 @@ console.log('T41 时间线重做')
       ok(g.bars.filter((b) => b.more).length === 1 && g.bars.filter((b) => b.more)[0].more === 3,
         '省略的那几个收进一枚 +3(3 枚画出来 + 3 枚收起来 = 6)',
         JSON.stringify(g.bars.map((b) => b.more || b.n)))
-      ok(g.bars.filter((b) => b.more)[0].d === '2026-09-01', '+N 记着自己是哪一天的(悬停出的是那一天的清单)')
+      ok(g.bars.filter((b) => b.more)[0].d === '2026-09-01', '+N 记着自己是哪一天的(悬停出的卡上写这个日子)')
+      ok(g.bars.filter((b) => b.more)[0].fold.join(',') === '244,245,246',
+        '+N 还记着被收起来的是哪几个号:悬停列的就是它们,不是那一整天',
+        JSON.stringify(g.bars.filter((b) => b.more)[0].fold))
       ok(g.bars.every((b, i) => i === 0 || b.x === g.bars[i - 1].x + 48), '按号横排,间距 = 芯片宽 + 6')
       ok(g.bars.every((b) => b.x >= ax.x['2026-09-01'] && b.x + b.w <= ax.x['2026-09-01'] + ax.w['2026-09-01']),
         '连 +N 在内都不越出当天的格子')
@@ -3615,7 +3618,44 @@ console.log('T61 时间线 hover peek')
     const pkZ = Number((on.match(/\.relpeek \{[^}]*z-index: (\d+)/) || [, '0'])[1])
     ok(railZ > 0 && pkZ > railZ, `peek 的 z-index ${pkZ} 压在 tabrail ${railZ} 之上`)
   }
-  ok(/\.relpeek \{[^}]*max-width: 320px/.test(on), '卡宽封在 320px(读一眼的量,不是第二张表)')
+  { // 卡宽跟着内容走(v0.15.15):死墙没了,长标题不再从右沿探出去
+    const pkRule = (on.match(/\.relpeek \{[^}]*\}/) || [''])[0]
+    ok(pkRule.includes('width: max-content') && !/(?:^|[^-])width: \d+px/.test(pkRule),
+      'peek 卡不再钉死一个像素宽,宽度由内容定', pkRule.slice(0, 160))
+    ok(/max-width: min\(720px, calc\(100vw - 16px\)\)/.test(pkRule),
+      '仍封一个上限:720px 与「视口再留 8px 边」谁小取谁(读一眼的量,且贴着右沿也不越出屏幕)', pkRule.slice(0, 160))
+    ok(/\.relpkr > span \{[^}]*white-space: normal[^}]*overflow-wrap: anywhere/.test(on) &&
+      !/\.relpkr > span \{[^}]*text-overflow: ellipsis/.test(on),
+      '清单行的标题改成换行(原来 nowrap + 截断,长中文标题会探到卡外)')
+    ok(/\.relpkr b \{[^}]*white-space: nowrap/.test(on), '#NNN 那格照旧不换行(号断成两行就读不成一个号)')
+  }
+  { // +N 的卡只列被收起来的那几个(v0.15.15):号烤在 data-relfold 上,pkDay 按号挑
+    ok(/function tlOvf\(ns, g, dy, x, y, w\)/.test(on) && on.includes("data-relfold=\"' + ns.join(',')") &&
+      on.includes("'px;width:' + w + 'px\">+' + ns.length + '</span>'"),
+      '+N 把被收起来的号一并烤上 data-relfold,+N 的 N 就是这串号的个数(两处对不上就没得对)')
+    ok(on.includes('pkDay(el.dataset.relpkg, el.dataset.relpkd, el.dataset.relfold)'),
+      '锚点带 data-relfold 时,这一串号跟着传进 pkDay')
+    // 把 pkDay 从生成物里切出来现跑:喂一份假的带 / PR,看它到底列了谁
+    const cut = on.indexOf('function pkDay(gid, dy, fold)')
+    const src = on.slice(cut, on.indexOf('\n    }\n', cut) + 6)
+    const rowsOf = (ns) => ns.map((n) => ({ n, t: '第 ' + n + ' 号的标题' }))
+    const pkDay = new Function('byG', 'G', 'anc', 'md', 'xe', src + '\nreturn pkDay')(
+      { b1: rowsOf([251, 252, 255, 256, 257, 258, 259, 260]) },
+      [{ g: 'b1', nm: 'test · 4173 (main)' }],
+      () => '2026-09-01', (s) => String(s).slice(5, 10), (s) => String(s),
+    )
+    const fold = pkDay('b1', '2026-09-01', '257,259,260')
+    const nums = (h) => (h.match(/<b>#(\d+)<\/b>/g) || []).map((x) => x.replace(/\D/g, ''))
+    ok(nums(fold).join(',') === '257,259,260',
+      '+N 的卡只列折起来的那三个,画出来的几枚不再重列一遍', nums(fold).join(','))
+    ok(fold.includes('09-01 · 未展开 3 个 PR') && fold.includes('test · 4173 (main)'),
+      '卡头说的是「未展开 3 个 PR」,不是那一整天的总数', fold.slice(0, 120))
+    const all = pkDay('b1', '2026-09-01', undefined)
+    ok(nums(all).length === 8 && all.includes('09-01 · 8 个 PR') && !all.includes('未展开'),
+      '不带 data-relfold 的锚点(方块 / 芯片 / 条 / 折叠带那一段)照旧列一整天', nums(all).length + ' 条')
+    ok(pkDay('b1', '2026-09-01', '888').includes('· 未展开 0 个 PR'),
+      '按号挑不按天挑:跨天那组的锚点日被窗口裁掉时,天对不上而号永远对得上')
+  }
   { // 「不引新色」的真检法:peek 那几条里出现的色值,样式表里别处已经在用(与总览那条同一把尺)
     const styleAll = on.slice(on.indexOf('<style>'), on.indexOf('</style>'))
     const cut = styleAll.indexOf('/* hover peek(v0.15.2)')
