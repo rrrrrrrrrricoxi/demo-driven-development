@@ -9,6 +9,23 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.17] - 2026-09-05
+
+### Changed
+- **Rich-text previews are line-clamped, so a card's height no longer depends
+  on how disciplined the writer was.** With `richText` on, a field over 400
+  characters is baked twice — a first-paragraph preview and the full text — and
+  the preview was rendered at full height while `clampScan`, the height clamp
+  that bounds every other field, deliberately stepped aside for it. 400
+  characters is not a bound in a 320px grid column: it is fifteen lines, and a
+  card with three such fields ran past forty. The preview now carries the same
+  `max-height: 3.3em` as `.clamp`, so both folding paths open at the same
+  height, and the button below it reads *展开全文 · N 字* with N the whole
+  field's length — the old *展开 · 还有 N 字* counted the characters below the
+  preview, which stops being the truth once the preview itself is clipped. The
+  expand button still swaps the two baked copies and still does not remember
+  being opened. Boards with `richText` off are byte-identical.
+
 ## [0.15.16] - 2026-09-03
 
 ### Fixed

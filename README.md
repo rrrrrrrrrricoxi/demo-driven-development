@@ -250,8 +250,9 @@ circled number is kept as the marker), and a `【…】` opening as a dated sect
 with a hairline above it. It deliberately does not understand headings, tables,
 link syntax or HTML, and escaping runs before any of it — a card can quote a
 `<script>` tag and it stays text. Fields over 400 characters are baked twice, a
-first-paragraph preview and the full text, with a quiet *expand · N more
-characters* button between them. The same switch enables an optional `detail`
+first-paragraph preview and the full text, with a quiet *展开全文 · N 字*
+button between them, and the preview is clamped to the same height as every
+other field so a long field cannot stretch its card. The same switch enables an optional `detail`
 card field for the long trail of evidence, rendered after every other field as
 a collapsed block. A non-blocking guard notice counts, in one line, the cards
 whose prose runs past 800 characters with no `detail` to move it into, and

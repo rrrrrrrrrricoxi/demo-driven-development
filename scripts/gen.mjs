@@ -817,6 +817,7 @@ const bold = (s) => Array.isArray(s)
 // 关 = 三种卡的长文本字段照旧只 esc()、换行被 white-space 折叠,输出逐字节冻结。
 // 开 = 走 lite.mjs:**粗体** / `代码` / 段落 / <br> / 列表 / ①…⑩ / 【…】小节(见 lite.mjs 头注)。
 // 超 RICH_N 字的字段烤两份(预览 + 全文,按段落边界切),运行期点钮换 hidden —— 折叠不记忆;
+// 预览那份自带 .lclamp 按高度收(v0.15.17):400 字在 320px 列宽下仍是十几行,字数管不住卡高。
 // 没超的照旧交给 clampScan 按高度折(两套折叠不叠加,clampScan 见 .lfull 即让路)。
 // detail 字段(查证细节)同受本开关门控:没开 richText 的板一律零差异。
 const RICH = cfg.richText === true
@@ -828,7 +829,7 @@ const rt = (text) => {
   if (!RICH) return esc(s)
   const { head, rest } = litePreview(s, RICH_N)
   if (rest <= 0) return `<div class="lite">${lite(s)}</div>`
-  return `<div class="lite lpre">${lite(head)}</div><div class="lite lfull" hidden>${lite(s)}</div><button type="button" class="litemore" data-rest="${rest}">展开 · 还有 ${rest} 字</button>`
+  return `<div class="lite lpre lclamp">${lite(head)}</div><div class="lite lfull" hidden>${lite(s)}</div><button type="button" class="litemore" data-all="${s.length}">展开全文 · ${s.length} 字</button>`
 }
 // detail:摘要与细节分家(定稿 §3.3)——渲染在卡内所有字段之后,默认折叠。无字段零差异。
 const detailBlock = (card) => {
@@ -4019,6 +4020,11 @@ const RICH_CSS = !RICH ? '' : `
   /* 【日期】小节:段前一条细线;首段不画(否则字段一开头就顶着一条线) */
   .lite .tsec { border-top: 1px solid var(--line); padding-top: .55em; margin-top: .35em; }
   .lite .tsec:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  /* 预览段按高度收,3.3em 与 .clamp 同一个数 —— 两条折叠路径(超 400 字烤预览 / 没超交给 clampScan)
+     收下来一样高。400 字在 320px 列宽下是十几行,一张卡三个长字段就能滚到 40 行,字数管不住卡高。
+     不画 .clamp 那道渐隐:首段短的时候预览根本不溢出,渐隐会在没截断的地方留一道假边;
+     下面那颗「展开全文 · N 字」的钮一直在,是唯一入口,也把「还有多少」说明白了。 */
+  .lpre.lclamp { max-height: 3.3em; overflow: hidden; }
   .litemore { appearance: none; border: 0; background: none; padding: 0; margin-top: 6px; font: inherit;
      font-size: 11.5px; color: var(--faint); cursor: pointer; }
   .litemore:hover { color: var(--accent); }
@@ -4047,7 +4053,7 @@ const RICH_JS = !RICH ? '' : `
       var open = full.hidden
       full.hidden = !open
       pre.hidden = open
-      btn.textContent = open ? '收起' : '展开 · 还有 ' + btn.getAttribute('data-rest') + ' 字'
+      btn.textContent = open ? '收起' : '展开全文 · ' + btn.getAttribute('data-all') + ' 字'
     })
   })()`
 

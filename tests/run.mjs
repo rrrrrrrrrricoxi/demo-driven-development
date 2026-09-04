@@ -1190,16 +1190,28 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   ok(on.includes('<ol class="circ"><li><span class="mk">①</span>'), '圈号段渲染成 ol.circ')
   ok(on.includes('<b>要紧</b>') && on.includes('<code>models.py:37</code>'), '粗体与行内代码进了卡')
   ok(on.includes('<div class="tsec"><p>【2026-01-01】一行</p></div>'), '【日期】段包进 .tsec')
-  ok(on.includes('<div class="lite lpre">') && on.includes('<div class="lite lfull" hidden>') &&
-    /class="litemore" data-rest="\d+">展开 · 还有 \d+ 字</.test(on), '超 400 字的字段烤成预览 + 全文两份 + 展开钮')
-  ok(count(on, '<div class="lite lpre">') === 1 && on.includes('<div class="lite"><p>' + 'x'.repeat(700)),
+  ok(on.includes('<div class="lite lpre lclamp">') && on.includes('<div class="lite lfull" hidden>') &&
+    /class="litemore" data-all="\d+">展开全文 · \d+ 字</.test(on), '超 400 字的字段烤成预览 + 全文两份 + 展开钮')
+  ok(on.includes(`data-all="${LONG.length}">展开全文 · ${LONG.length} 字`) && !on.includes('data-rest'),
+    '钮上的 N = 字段全长(预览被高度收掉之后,「还有 N 字」不再是真话)')
+  ok(count(on, '<div class="lite lpre') === count(on, '<div class="lite lpre lclamp">'),
+    '每个预览段都带 .lclamp —— 没有一份预览是不收高的')
+  ok(on.includes('.lpre.lclamp { max-height: 3.3em; overflow: hidden; }') &&
+    on.includes('.lcard .clamp { position: relative; max-height: 3.3em;'),
+    '预览段与 clampScan 收到同一个 3.3em:两条折叠路径默认高度一致')
+  ok(on.includes('<div class="notes"><div class="lite"><div class="tsec">'),
+    '没超 400 字的字段照旧一份到底、不带 lclamp —— 收高交给 clampScan(两套折叠不叠加)')
+  ok(on.includes("var pre = box.querySelector('.lpre'), full = box.querySelector('.lfull')") &&
+    on.includes("btn.textContent = open ? '收起' : '展开全文 · ' + btn.getAttribute('data-all') + ' 字'"),
+    '展开钮照旧换 hidden 两份,文案与 data-all 对齐')
+  ok(count(on, '<div class="lite lpre lclamp">') === 1 && on.includes('<div class="lite"><p>' + 'x'.repeat(700)),
     '首段自己就超 400 的字段不烤预览:整篇一份,交给高度折叠 —— 与「整篇一段」同一种处置')
   ok(on.includes('<div class="notes">') && !on.includes('<p class="notes">'), 'notes 容器换成 <div>(<p> 里塞不进 <p>/<ul>,解析器会当场闭合)')
   ok(on.includes('dd.demonote, div.notes') && on.includes("if (el.querySelector('.lfull'))"), 'clampScan 认 div.notes,并给拆过两份的字段让路(两套折叠不叠加)')
   ok(on.includes('<dd class="lsrc"><span class="bbadge src"><p>用户 <b>口述</b></p></span></dd>'), '决策卡 source 补渲染成同款小徽章(0.12.0 前是死数据)')
   ok(on.includes('<dd class="decided"><div class="lite"><p>✓ 就这么定</p></div></dd>'), '结论行的 ✓ 落进第一段,不自成一行')
   ok(on.includes('<span class="bbadge src">s</span>'), 'backlog 自己的 source 芯片仍是纯 esc(它是一枚短标签,不是正文)')
-  ok(on.includes('.lite ol.circ') && on.includes('.litemore {') && on.includes('.detail > summary'), 'CSS 片段挂上尾链')
+  ok(on.includes('.lite ol.circ') && on.includes('.litemore {') && on.includes('.lpre.lclamp {') && on.includes('.detail > summary'), 'CSS 片段挂上尾链')
   {
     const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
     let compiled = true
