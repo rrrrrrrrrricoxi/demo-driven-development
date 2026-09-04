@@ -4323,6 +4323,72 @@ console.log('T67 settleHold 14 天到期提醒')
   }
 }
 
+// ============ T68 行卡展开的那一下补量长文折叠(0.15.18)============
+// 三类卡的正文都在 .rbody 里,收着时 display:none —— 卡是收着进 DOM 的,pane 级的那几趟
+// clampScan 全部撞在 offsetParent === null 上,一个正文块都量不到。于是 .clamp 这套按高度折叠
+// 自 rcard 形制落地以来对行卡是空转的:一张 1200 字单段的决策卡,展开就是满高十几行。
+console.log('T68 行卡展开时补量折叠')
+{
+  const fx68 = mkFixture('fx68', { 's.html': demoHtml('s') })
+  const cfgP = join(fx68.kb, 'kanban.config.json'), idxP = join(fx68.kb, 'index.html')
+  const decP = join(fx68.kb, 'decisions-manifest.json')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  const dec = JSON.parse(readFileSync(decP, 'utf8'))
+  const LONG1 = '问'.repeat(1200) // 1200 字、无空行 —— litePreview 切不动,只能靠高度折叠
+  dec.entries = [{ id: 'D1', code: 'D1', status: Object.keys(dec.statuses)[0], date: '2026-01-01', title: 't',
+    question: LONG1, decision: '就这么定', demoNote: '看 demo', source: '来'.repeat(223) }]
+  writeFileSync(decP, JSON.stringify(dec))
+  cfg.richText = true
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx68.kb)
+  const on = readFileSync(idxP, 'utf8')
+
+  ok(on.includes(`<dd class="x"><div class="lite"><p>${'问'.repeat(1200)}`),
+    '1200 字单段的 question 烤成一整份(没有段落边界可切,预览路径不接手)')
+  ok(on.includes("if (head) { const rc = head.parentElement; clampScan(rc.classList.toggle('open') ? rc : null); return }"),
+    '点 .rhead 展开的那一下补量一趟(收起时传 null,clampScan 自己走人)')
+  ok(on.includes("if (el.classList.contains('rcard')) { el.classList.add('open'); clampScan(el) }"),
+    '深链自动展开的卡也补量')
+  ok(on.includes("pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); clampScan(pane)"),
+    '「展开全部」之后补量一趟')
+  ok(on.includes("pane.querySelectorAll('dd.x, dd.decided, dd.demonote, div.notes, dd.lsrc')"),
+    'richText 开着时 source 徽章(dd.lsrc)也进扫描名单')
+
+  // ---- 把生成物里那只 clampScan 抠出来真跑一遍(手搭最小 DOM:只实现它用到的那几面)----
+  const src = (on.match(/ {2}function clampScan\(pane\) \{[\s\S]*?\n {2}\}/) || [''])[0]
+  ok(src.includes('scrollHeight') && src.includes('offsetParent'), '抠得到 clampScan 本体', src.slice(0, 60))
+  const mkEl = (sel, chars, o = {}) => ({
+    sel, dataset: {}, cls: new Set(),
+    offsetParent: o.hidden ? null : {},
+    querySelector: (s) => (o.full && s === '.lfull' ? {} : null),
+    scrollHeight: Math.ceil(chars / 40) * 21, // 40 字/行 × 21px 行高
+    classList: { add(c) { this.own.cls.add(c) } },
+  })
+  const els = [mkEl('dd.x', 1200), mkEl('dd.decided', 40), mkEl('dd.lsrc', 223), mkEl('div.notes', 900, { full: true }), mkEl('dd.x', 1200, { hidden: true })]
+  els.forEach((e) => { e.classList.own = e })
+  const pane = { querySelectorAll: (sel) => els.filter((e) => sel.split(', ').includes(e.sel)) }
+  const scan = new Function('getComputedStyle', src + '\n; return clampScan')(() => ({ lineHeight: '21px' }))
+  scan(pane)
+  ok(els[0].cls.has('clamp'), '1200 字的 question:量到超 3.3 行 → 打 .clamp(点开有「展开 ▾」)')
+  ok(!els[1].cls.has('clamp') && els[1].dataset.cl === '1', '40 字的结论:量过了,不折')
+  ok(els[2].cls.has('clamp'), '223 字的 source 徽章同样收得住')
+  ok(!els[3].cls.has('clamp') && els[3].dataset.cl === '1', '烤了预览/全文两份的字段照旧让路(不叠加)')
+  ok(!els[4].cls.has('clamp') && els[4].dataset.cl === undefined,
+    '还收着的卡(offsetParent === null)不打标 —— 展开后那一趟才量得到,这正是本次修的那个洞')
+  scan(pane)
+  ok(els[4].dataset.cl === undefined, '重复扫描不会把没量过的当量过')
+
+  // ---- richText 关着:dd.lsrc 不进选择器(它本就不渲染),其余照旧 ----
+  cfg.richText = false
+  writeFileSync(cfgP, JSON.stringify(cfg))
+  runGen(NEW_SCRIPTS, fx68.kb)
+  const off = readFileSync(idxP, 'utf8')
+  ok(off.includes("pane.querySelectorAll('dd.x, dd.decided, dd.demonote, p.notes')") && !off.includes('dd.lsrc'),
+    'richText 关着:选择器里没有 dd.lsrc(那一行本就不渲染)')
+  ok(off.includes("clampScan(rc.classList.toggle('open') ? rc : null)"),
+    '补量这三处是核心行为,不随 richText 开关(关着的板同样收得住长正文)')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

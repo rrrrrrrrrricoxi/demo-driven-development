@@ -9,6 +9,28 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.15.18] - 2026-09-05
+
+### Fixed
+- **Card prose is line-bounded once a card is opened. The height clamp had
+  been dead code on row cards.** A card's fields live in `.rbody`, which is
+  `display: none` until the card is opened, and `clampScan` — the pass that
+  measures a block and folds anything over 3.3 line-heights — skips elements
+  whose `offsetParent` is `null`. Cards enter the DOM closed, so every
+  pane-level scan measured nothing, and nothing rescanned when a card was
+  opened: `.clamp` only ever appeared in the path panel, where cards render
+  already open. A 1200-character single-paragraph `question` therefore
+  rendered at full height, forty-odd lines, and no amount of writing
+  discipline was going to change that. The three moments a card becomes
+  readable — clicking `.rhead`, a deep link auto-opening the target, and
+  *展开全部* — now scan it, so long prose folds to two lines with the
+  「展开 ▾」 affordance it was always supposed to have. Decision cards were the
+  visible casualty; backlog and task cards had exactly the same hole, and are
+  fixed by the same three calls. With `richText` on, the decision `source`
+  badge joins the scanned selector. This is core behaviour rather than a gated
+  feature, so boards with `richText` off change too: about 310 bytes of
+  runtime in `index.html`, and nothing at all in the card markup.
+
 ## [0.15.17] - 2026-09-05
 
 ### Changed
