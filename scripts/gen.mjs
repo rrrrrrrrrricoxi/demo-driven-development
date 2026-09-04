@@ -4771,9 +4771,11 @@ ${PATH_CSS_B}
 <script>
   const tabs = document.querySelectorAll('.tab')
   // 长文折叠:pane 可见时才量高(display:none 下 scrollHeight=0 会误判);量过的打 data-cl 不重复
+  // 行卡的正文在 .rbody 里,收着时 display:none —— 卡是收着进 DOM 的,所以 pane 级的这几趟一个正文块都量不到。
+  // 真正量得到的时刻是「卡展开的那一下」,故 rhead 点击 / 深链自动展开 / 展开全部 三处都补一趟(见下)。
   function clampScan(pane) {
     if (!pane) return
-    pane.querySelectorAll('dd.x, dd.decided, dd.demonote, ${NOTES_TAG}.notes').forEach(function (el) {
+    pane.querySelectorAll('dd.x, dd.decided, dd.demonote, ${NOTES_TAG}.notes${RICH ? ', dd.lsrc' : ''}').forEach(function (el) {
       if (el.dataset.cl || el.offsetParent === null) return
       ${RICH_CLAMP_SKIP}const lh = parseFloat(getComputedStyle(el).lineHeight) || 21
       el.dataset.cl = '1'
@@ -4806,7 +4808,7 @@ ${PATH_CSS_B}
     }
     const ppanel = el.closest('.pathpanel') // 目标在某步详情面板里(如决策路径跳 TCx 任务卡)→ 先激活该面板
     if (ppanel) selectIter(ppanel.dataset.iter)${OV_ROUTE}
-    if (el.classList.contains('rcard')) el.classList.add('open') // 跳到某卡时自动展开看详情
+    if (el.classList.contains('rcard')) { el.classList.add('open'); clampScan(el) } // 跳到某卡时自动展开看详情(展开后才量得到正文高)
     el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     el.classList.add('flash-target')
     setTimeout(() => el.classList.remove('flash-target'), 1600)
@@ -4817,7 +4819,8 @@ ${PATH_CSS_B}
   document.addEventListener('click', function (ev) {
     if (ev.target.closest('a, button')) return
     const head = ev.target.closest('.rhead')
-    if (head) { head.parentElement.classList.toggle('open'); return }
+    // 展开的那一下才量得到正文高(收着时 .rbody display:none);收起时传 null,clampScan 自己走人
+    if (head) { const rc = head.parentElement; clampScan(rc.classList.toggle('open') ? rc : null); return }
     const d = ev.target.closest('.clamp')
     if (d) d.classList.toggle('open')
   })
@@ -4961,7 +4964,7 @@ ${PATH_CSS_B}
   if (expandBtn) expandBtn.addEventListener('click', () => {
     allOpen = !allOpen
     const pane = document.querySelector('.pane-active')
-    if (pane) pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen))
+    if (pane) { pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); clampScan(pane) } // 展开全部之后补量一趟
     expandBtn.textContent = allOpen ? '收起全部' : '展开全部'
   })
 
