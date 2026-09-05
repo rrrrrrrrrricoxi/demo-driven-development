@@ -4135,7 +4135,7 @@ const RICH_CSS = !RICH ? '' : `
   /* 【日期】小节:段前一条细线;首段不画(否则字段一开头就顶着一条线) */
   .lite .tsec { border-top: 1px solid var(--line); padding-top: .55em; margin-top: .35em; }
   .lite .tsec:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-  /* 预览段按高度收,与 .clamp 同一个数(CLAMP_MAX)—— 两条折叠路径(超 400 字烤预览 / 没超交给 clampScan)
+  /* 预览段按高度收,3.3em 与 .clamp 同一个数 —— 两条折叠路径(超 400 字烤预览 / 没超交给 clampScan)
      收下来一样高。400 字在 320px 列宽下是十几行,一张卡三个长字段就能滚到 40 行,字数管不住卡高。
      不画 .clamp 那道渐隐:首段短的时候预览根本不溢出,渐隐会在没截断的地方留一道假边;
      下面那颗「展开全文 · N 字」的钮一直在,是唯一入口,也把「还有多少」说明白了。 */
@@ -4702,9 +4702,7 @@ const html = `<!doctype html>
   .gdetail { color: var(--mut); font-size: 13px; }
   .gprog { margin-left: auto; font-size: 12.5px; color: var(--mut); }
 
-  /* 死规则:同一张表下面那条 .cards(display: flex 那条)同特异度、在后,整条盖掉它;
-     grid-template-columns 在 display: flex 下本来也无效。留着只为不动壳的字节,
-     下一个本来就要改壳的版本里删掉。全板三个 .cards 容器装的都是整行一张的行卡。 */
+  /* 死规则(下面那条同名的 display: flex 整条盖掉它):留着只为不动壳的字节,下一版删 */
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
   .card, .blcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
           padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -4769,7 +4767,7 @@ const html = `<!doctype html>
   .deccard dl { margin: 0; font-size: 13.5px; }
   .deccard dt { float: left; clear: left; width: 34px; color: var(--mut); font-weight: 600; }
   .deccard dd { margin: 0 0 6px 44px; color: ${tk('body-ink')}; }
-  /* 长文折叠(信息密度):默认收 2 行(CLAMP_MAX 容住两整行),点击展开;渐隐只压裁切缘 */
+  /* 长文折叠(信息密度):默认收 2 行(3.3em 容住两整行),点击展开;渐隐只压裁切缘 */
   .lcard .clamp { position: relative; max-height: ${CLAMP_MAX}; overflow: hidden; cursor: pointer; }
   .lcard .clamp:not(.open)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
     height: .9em; background: linear-gradient(rgba(255,255,255,0), var(--card) 92%); pointer-events: none; }
