@@ -3205,10 +3205,14 @@ const OV_ACC = !OVERVIEW || !ACC ? '' : ACC_CUR ? ovRow({
 // v0.16.0:口径跟着 wip 一起改口 —— 还等着前置的 ready 卡不算「可做」(不然总览与横幅各报一个数)
 const ovReadyCards = !OVERVIEW ? [] : b.items.filter((it) => it.status === 'ready' && !depOpen(it))
 const OV_READY_N = ovReadyCards.length
+// 面上的字得跟着口径走:数的是「可立即做」,写「N 张 ready」就是在总览里报一个和 Backlog 段里
+// 数得出来的 ready 张数对不上的数,而横幅那边老实交代了被扣掉的几张。
+const OV_WAIT = !OVERVIEW ? 0 : b.items.filter((it) => it.status === 'ready' && depOpen(it)).length
+const ovWaitNote = (n) => (n ? `(另 ${n} 张等前置)` : '')
 const OV_READY_LV = !OVERVIEW || !WIP ? '' : wipLevel(OV_READY_N)
 const OV_READY = !OVERVIEW ? '' : ovRow({
   k: 'ready', label: '可做', cls: OV_READY_LV ? `ov-${OV_READY_LV}` : '',
-  head: `<b><span id="ovreadyn">${OV_READY_N}</span></b> 张 ready`,
+  head: `<b><span id="ovreadyn">${OV_READY_N}</span></b> ${AFTER_ANY ? `张可立即做<span id="ovreadyw">${ovWaitNote(OV_WAIT)}</span>` : '张 ready'}`,
   tail: `<a href="#backlog">Backlog ↗</a>`,
   body: (() => {
     const top = ovReadyCards.slice().sort((a, b) => { // 积压最久的排前面(没写日期的垫底)
@@ -3406,7 +3410,10 @@ const OV_SETLINE = !OVERVIEW ? '' : `
     const ovN = document.getElementById('ovreadyn')
     const ovBl = document.getElementById('pane-backlog')
     if (ovN && ovBl && ovBl.dataset.lazyPending === undefined) { // 未取 pane:保持烤入的数,别先归零再跳
-      const ovV = nVis(ovBl, '.bl-ready')${AFTER_ANY ? ` - nVis(ovBl, '.bl-ready[data-after-open]')` : ''}
+      ${AFTER_ANY ? `const ovW = nVis(ovBl, '.bl-ready[data-after-open]')
+      const ovWEl = document.getElementById('ovreadyw')
+      if (ovWEl) ovWEl.textContent = ovW ? '(另 ' + ovW + ' 张等前置)' : ''
+      ` : ''}const ovV = nVis(ovBl, '.bl-ready')${AFTER_ANY ? ' - ovW' : ''}
       ovN.textContent = ovV${!WIP ? '' : `
       const ovRow = ovN.closest('.ovrow')
       if (ovRow) {

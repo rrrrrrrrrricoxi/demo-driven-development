@@ -4648,6 +4648,24 @@ console.log('T69 前置依赖 after')
     runGen(NEW_SCRIPTS, kb)
   }
 
+  { // 总览「可做」那行:面上的字与口径一致(数的是可立即做,不是 ready 张数)
+    const cfgOv = rd(cfgP); cfgOv.overviewTab = true; wr(cfgP, cfgOv)
+    runGen(NEW_SCRIPTS, kb)
+    const hOv = readFileSync(idxP, 'utf8')
+    ok(hOv.includes('<span id="ovreadyn">3</span></b> 张可立即做<span id="ovreadyw">(另 5 张等前置)</span>'),
+      '总览:「3 张可立即做(另 5 张等前置)」—— 与横幅同一个数、同一句交代,不再写「N 张 ready」',
+      (hOv.match(/ovreadyn[\s\S]{0,90}/) || [''])[0])
+    ok(hOv.includes("const ovWEl = document.getElementById('ovreadyw')"), '随线别/筛选重算时括号那半句也跟着改')
+
+    const xOv = rd(blP); xOv.items = mkItems(); wr(blP, xOv)
+    runGen(NEW_SCRIPTS, kb)
+    ok(/<span id="ovreadyn">4<\/span><\/b> 张 ready/.test(readFileSync(idxP, 'utf8')),
+      '板上一条 after 都没有:仍是「N 张 ready」,逐字节冻结')
+    wr(blP, withAfter)
+    cfgOv.overviewTab = false; wr(cfgP, cfgOv)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
   { // 反向名单只列还没终态的那几张:做完的卡不该出现在「谁在等它」里
     const x = rd(blP)
     for (const id of ['BL-6', 'BL-7']) x.items.find((i) => i.id === id).status = 'done'
