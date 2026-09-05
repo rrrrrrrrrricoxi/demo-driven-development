@@ -62,14 +62,31 @@ export function branchFindings({ kanbanDir, prefix, main, ref, cardsDir }) {
 }
 
 /**
+ * 工作区里还没提交的看板改动(v0.16.1)。补救动作 `git checkout <main> -- <看板目录>` 是无条件覆盖:
+ * 它连这些一起盖掉,而上面那张清单只列已提交的东西 —— 没提交过的盖了就找不回来。所以给的清单
+ * 必须把它们一起说出来,否则「先看这张清单」这句承诺是假的。
+ * 只数已跟踪的改动:未跟踪的新文件 checkout 不动它,列进去是虚惊。
+ */
+export function dirtyBoardFiles(kanbanDir) {
+  const out = git(kanbanDir, ['diff', '--name-only', 'HEAD', '--', '.'])
+  if (out === null) return []
+  return out.split('\n').map((s) => s.trim()).filter(Boolean)
+}
+
+/**
  * 这块板的检查现场。git 不可用 / 板不在仓里 / 找不到主线 → { skip: <说明> },调用方自己决定说不说。
- * @param refs 要比的分支;缺省 = 当前分支(HEAD)
+ * @param refs 要比的分支;缺省 = 当前位置(游离 HEAD 也算一个位置,见下)
  */
 export function boardBranchCheck(kanbanDir, S, { refs = null, all = false } = {}) {
   const head = git(kanbanDir, ['rev-parse', '--abbrev-ref', 'HEAD', '--show-prefix'])
   if (head === null) return { skip: S.boardBranch.noGit() }
-  const [cur, rawPrefix = ''] = head.split('\n')
+  const [abbrev, rawPrefix = ''] = head.split('\n')
   const prefix = rawPrefix.trim() // 看板目录相对仓根;仓根就是看板目录时为空串
+  // 游离 HEAD(rebase / bisect / git checkout <sha> / CI 的 actions/checkout)时 --abbrev-ref 吐的是
+  // 字面量 'HEAD'。它照样是一个位置:diff / show 都认它。0.15.14 把这个值当噪音滤掉,于是最该出声的
+  // 那一刻 scanned 归零,而 scanned===0 又被读成「你就在主线上」—— 检查变哑,还反过来断言了相反的事。
+  const detached = abbrev === 'HEAD'
+  const cur = detached ? (git(kanbanDir, ['rev-parse', '--short', 'HEAD']) || '').trim() : abbrev
   let cfg = {}
   try { cfg = JSON.parse(readFileSync(`${kanbanDir}/kanban.config.json`, 'utf8')) } catch {}
   let cardsDir = ''
@@ -92,13 +109,15 @@ export function boardBranchCheck(kanbanDir, S, { refs = null, all = false } = {}
         .split('\n').map((s) => s.trim()).filter(Boolean).filter((r) => !/(?:^|\/)HEAD$/.test(r))
       : [cur]
   }
-  list = list.filter((r) => r !== main && r !== `origin/${main}` && r !== 'HEAD')
+  // 只滤主线本身(refs/remotes/*/HEAD 那类符号别名在 --all 那条路上已经按 /HEAD$ 滤过了)
+  list = list.filter((r) => r && r !== main && r !== `origin/${main}`)
   const hits = []
   for (const ref of list) {
     const f = branchFindings({ kanbanDir, prefix, main: mainRef, ref, cardsDir })
     if (f) hits.push(f)
   }
-  return { main: mainRef, prefix, scanned: list.length, hits }
+  // 零命中就不多花这一次 spawn(补救动作只在有命中时才给,清单也只在那时才用得上)
+  return { main: mainRef, prefix, cur, detached, scanned: list.length, hits, dirty: hits.length ? dirtyBoardFiles(kanbanDir) : [] }
 }
 
 // ---- CLI(被 import 时不跑:守卫也读这份口径)----
@@ -120,9 +139,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(flag('strict') && r.hits && r.hits.length ? 1 : 0)
   }
   if (r.skip) { console.log(r.skip); process.exit(0) }
+  // 报的是「按什么比的」:游离 HEAD 没有分支名,不说一声人会以为它比的是某条分支
+  if (r.detached && !one && !flag('all')) console.log(S.boardBranch.detached(r.cur, r.main))
   if (!r.hits.length) { console.log(r.scanned ? S.boardBranch.clean(r.scanned, r.main) : S.boardBranch.onMain(r.main)); process.exit(0) }
   console.log(S.boardBranch.head(r.hits.length, r.main))
   for (const h of r.hits) console.log(S.boardBranch.row(h))
   console.log(S.boardBranch.rule(r.prefix || 'app/kanban/', r.main))
+  if (r.dirty.length) console.log(S.boardBranch.dirty(r.dirty, r.main, r.prefix || 'app/kanban/'))
   process.exit(flag('strict') ? 1 : 0)
 }

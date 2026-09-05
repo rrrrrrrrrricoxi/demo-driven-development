@@ -56,8 +56,8 @@ import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } from './settle.mjs'
-import { CARD_KINDS, cardUpdatedMap, cardsDirOf, localDate, scanCardDir } from './cards.mjs'
-import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, openCount } from './deps.mjs'
+import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, daysBetween, localDate, scanCardDir } from './cards.mjs'
+import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 
 const KANBAN = detect()
@@ -126,17 +126,13 @@ function cardUpdAll() {
 let DEP_CTX = null
 function depCtx() {
   if (DEP_CTX) return DEP_CTX
-  const cardById = new Map()
-  let repo = ''
+  const cards = []
+  const heads = []
   for (const [f, k, sub] of CARD_SOURCES) {
-    for (const c of cardsOf(f, k, sub)) if (c && c.id) cardById.set(String(c.id), c)
-    if (!repo) { try { repo = String((JSON.parse(readFileSync(join(KANBAN, f), 'utf8')).instance || {}).ghRepo || '') } catch {} }
+    for (const c of cardsOf(f, k, sub)) if (c && c.id) cards.push(c)
+    try { heads.push(JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))) } catch { heads.push(null) }
   }
-  const relPr = new Map(), relTag = new Map()
-  for (const p of (RLM && RLM.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
-  for (const r of (RLM && RLM.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || ''))
-  const upd = cardUpdAll()
-  DEP_CTX = { repo, cardById, relPr, relTag, cardUpd: (id) => upd.get(id) || '' }
+  DEP_CTX = depCtxFrom({ cards, repo: boardRepo(...heads), rlm: RLM })
   return DEP_CTX
 }
 
@@ -359,9 +355,9 @@ let RLM = null
         const upd = cardUpdAll()
         for (const h of held) if (!h.since) h.since = upd.get(h.id) || ''
       }
-      const today = Date.now()
+      const today = localDate()
       const old = held
-        .map((h) => ({ id: h.id, days: Math.floor((today - Date.parse(`${h.since}T00:00:00`)) / 86400000) }))
+        .map((h) => ({ id: h.id, days: daysBetween(h.since, today) }))
         .filter((h) => Number.isFinite(h.days) && h.days >= SETTLE_HOLD_DAYS)
         .sort((a, z) => z.days - a.days)
       if (old.length) notices.push(S.respHoldOld(old.slice(0, 5).map((h) => h.id), old[0].days, old.length))
@@ -378,7 +374,7 @@ let RLM = null
   for (const [f, k, sub] of CARD_SOURCES) for (const c of cardsOf(f, k, sub)) if (c && c.id) cards.push(c)
   if (cards.some((c) => afterOf(c).length)) {
     const ctx = depCtx()
-    const today = Date.parse(`${localDate()}T00:00:00`)
+    const today = localDate()
     const rows = []
     for (const c of cards) {
       if (String(c.status || '') !== 'ready') continue
@@ -386,7 +382,7 @@ let RLM = null
       if (!list.length || openCount(list)) continue
       const at = clearedAt(list)
       if (!at) continue // 取不到清除日(未拆卡的板上,卡号前置就是这样)—— 宁可不出声,也不拿假日期点名
-      const days = Math.floor((today - Date.parse(`${at}T00:00:00`)) / 86400000)
+      const days = daysBetween(at, today)
       if (!Number.isFinite(days) || days > DEPS_FRESH_DAYS) continue
       rows.push({ id: String(c.id), at, items: list })
     }
@@ -400,7 +396,8 @@ let RLM = null
 // git 不可用 / 找不到主线 / 就在主线上 → 一个字都不说,也不多花一次 spawn。
 {
   const r = boardBranchCheck(KANBAN, S)
-  if (!r.skip) for (const h of r.hits) notices.push(S.boardBranchGuard(h, r.main))
+  // dirty = 工作区里没提交的看板改动:补救那条 checkout 会连它们一起盖掉,清单不说就是安静地丢内容
+  if (!r.skip) for (const h of r.hits) notices.push(S.boardBranchGuard(h, r.main, r.dirty))
 }
 
 // ---- ⑥ 积压审计(v0.13.0,只在 config.wip 配了对象时跑):ready 超 hard 就说一声 ----

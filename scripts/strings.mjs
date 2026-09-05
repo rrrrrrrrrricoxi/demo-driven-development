@@ -43,17 +43,25 @@ const zh = {
     `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账(挑着收加 --only 卡号)。\n  这一轮不该收的卡(PR 只落了一半),在卡上写 "settleHold": "理由" —— 它从此不进清单、不出芯片,守卫这条也不再点它。`,
   respReopen: (ids, total) =>
     `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
+  // days 是最久那张的天数(hook 按天数降序取的 old[0]),ids 是前五张 —— 措辞得说清这个数是谁的,
+  // 否则「已 41 天:BL-1 BL-2 BL-3」把最久那张的天数安在了三张卡头上,人会先去动其实没那么急的那两张。
   respHoldOld: (ids, days, total) =>
-    `暂不收账已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
-  boardBranchGuard: (h, main) =>
+    `暂不收账最久已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
+  boardBranchGuard: (h, main, dirty = []) =>
     `⚠ 看板守卫:当前分支 ${h.ref} 带着看板改动(相对 ${main}:数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})—— 看板只在 ${main} 上改。\n` +
     h.hazard.map((z) => `  ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条):这块板已是一卡一文件,合回 ${main} 会让 gen 当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。\n`).join('') +
-    `  合并前把分支侧的看板改动丢掉(git checkout ${main} -- <看板目录>),真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。全表:\`node <plugin>/scripts/board-branch-check.mjs\`。`,
+    `  合并前把分支侧的看板改动丢掉(git checkout ${main} -- <看板目录>),真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。全表:\`node <plugin>/scripts/board-branch-check.mjs\`。` +
+    (dirty.length ? `\n  ⚠ 工作区里还有 ${dirty.length} 处没提交的看板改动,上面那条 checkout 会连它们一起盖掉(上面的清单只列已提交的):${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` …等 ${dirty.length} 个` : ''} —— 要留就先提交或 git stash。` : ''),
   boardBranch: {
     noGit: () => 'board-branch-check:这块板不在 git 仓里(或 git 跑不起来),没有分支可比 —— 本次不做判断。',
     noMain: (main) => `board-branch-check:找不到主线分支 ${main}(本地与 origin/${main} 都没有),没有基准可比 —— 本次不做判断。主线名取三份 manifest 的 instance.branch,没写就按 main。`,
     clean: (n, main) => `board-branch-check:比过 ${n} 条分支,相对 ${main} 都没有看板改动 —— 干净。`,
     onMain: (main) => `board-branch-check:没有要比的分支(当前就在 ${main} 上)—— 看板改动本来就该落在这里。`,
+    detached: (sha, main) => `board-branch-check:HEAD 是游离的(不在任何分支上),按当前提交 ${sha} 与 ${main} 比 —— 结论照常给,只是没有分支名可报。`,
+    dirty: (files, main, prefix) =>
+      `  ⚠ 工作区里还有 ${files.length} 处没提交的看板改动 —— 上面那条 git checkout ${main} -- ${prefix} 是无条件覆盖,会连它们一起盖掉,而它们没提交过、盖了就找不回来(上面那张清单只列已提交的):\n` +
+      files.slice(0, 5).map((f) => `    ${f}`).join('\n') + (files.length > 5 ? `\n    …等 ${files.length} 个` : '') +
+      `\n  要留就先提交(或 git stash),再执行上面那条。`,
     head: (n, main) => `⚠ 看板改动落在了非主线分支上(基准 ${main}),${n} 条:`,
     row: (h) => {
       const key = [...h.data, ...h.gen]
@@ -182,7 +190,7 @@ const zh = {
     cardParseBad: (rel, err) => `ddd:卡文件 ${rel} 不是合法 JSON,本次一个字节都没写(gen 也会在这儿硬失败):${err}`,
     cardIdMismatch: (rel, id) => `ddd:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,本次一个字节都没写 —— 文件名就是卡号(一个真源)。`,
     cardNotFound: (id) => `ddd:板上没有卡号「${id}」。用 card list 核一遍(拆成一卡一文件之后,文件名就是卡号)。`,
-    orderLocked: () => 'ddd:order 是拆分时记下的原数组下标(它就是显示顺序),不许用 CLI 改 —— 真要挪位置,直接编辑卡文件并说明理由。',
+    orderLocked: () => 'ddd:order 是拆分时记下的原数组下标(gen 读回时按它再按 id 排,排完就删;跟着数组走的是截图廊组序与深链表键序 —— Backlog / 决策面上的顺序按卡日期新→旧,不看它),不许用 CLI 改 —— 真要挪位置,直接编辑卡文件并说明理由。',
     idLocked: () => 'ddd:id 是这张卡的身份 —— 一卡一文件时它就是文件名,改了之后 gen 立刻硬失败(文件名与 id 对不上),而 CLI 见到坏卡也拒跑,连改回来的那条命令都用不了。要换卡号:用 card new 建新卡把内容搬过去,或者停下 gen、手工把文件与 id 一起改。本次一个字节都没写。',
     arrayField: (field) => `ddd:${field} 的形制是数组,给的是标量 —— gen 会在渲染它的时候 TypeError,整块板生成不出来。写法:--json '[…]',例如 card set <id> ${field} --json '[]'。本次一个字节都没写。`,
     statusBad: (v, list) => `ddd:status「${v}」不在这类卡的 statuses 里。可用:${list.join(' / ')}`,
@@ -226,7 +234,7 @@ const zh = {
     afterNotThere: (id, ref, cur) => `ddd card after --rm:${id} 的前置里没有「${ref}」,一个字节都没写。现在写着的是:${cur.length ? cur.join(' · ') : '(空)'}`,
     afterDone: (id, list, file) => `ddd card after:${id} 的前置 = ${list.join(' · ') || '(空)'} → ${file}`,
     afterRmDone: (id, ref, list) => `ddd card after --rm:${id} 去掉了「${ref}」,剩下 ${list.join(' · ') || '(空)'}`,
-    afterShow: (rows) => `  前置: ${rows.join(' · ')}`,
+    afterShow: (rows) => `  after(前置): ${rows.join(' · ')}`,
     showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
     showHead: (id, kind, file) => `${id}  (${kind === 'backlog' ? 'backlog' : '决策'}卡 · ${file})`,
     listEmpty: () => 'ddd card list:这组筛选下一张卡都没有。',
@@ -410,16 +418,22 @@ const en = {
   respReopen: (ids, total) =>
     `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
   respHoldOld: (ids, days, total) =>
-    `On settle hold for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
-  boardBranchGuard: (h, main) =>
+    `On settle hold, the oldest for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
+  boardBranchGuard: (h, main, dirty = []) =>
     `⚠ Kanban guard: the current branch ${h.ref} carries board changes (against ${main}: ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) — the board is only edited on ${main}.\n` +
     h.hazard.map((z) => `  ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries): this board is one file per card, so merging it back into ${main} makes gen fail hard — and that array is a snapshot from the fork point, which would overwrite cards that have moved on since.\n`).join('') +
-    `  Before merging, drop the branch-side board changes (git checkout ${main} -- <kanban dir>) and replay what genuinely belongs there (a new demo, a refs doc) on ${main}. Full table: \`node <plugin>/scripts/board-branch-check.mjs\`.`,
+    `  Before merging, drop the branch-side board changes (git checkout ${main} -- <kanban dir>) and replay what genuinely belongs there (a new demo, a refs doc) on ${main}. Full table: \`node <plugin>/scripts/board-branch-check.mjs\`.` +
+    (dirty.length ? `\n  ⚠ ${dirty.length} uncommitted board change(s) are in the working tree; that checkout overwrites them too (the list above only covers committed ones): ${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` … ${dirty.length} in total` : ''} — commit or git stash them first.` : ''),
   boardBranch: {
     noGit: () => 'board-branch-check: this board is not inside a git repository (or git could not run), so there are no branches to compare — no judgement this time.',
     noMain: (main) => `board-branch-check: cannot find the mainline branch ${main} (neither locally nor as origin/${main}), so there is no baseline to compare against — no judgement this time. The mainline name comes from instance.branch in the three manifests, defaulting to main.`,
     clean: (n, main) => `board-branch-check: compared ${n} branch(es); none of them carries board changes against ${main} — clean.`,
     onMain: (main) => `board-branch-check: nothing to compare (you are on ${main}) — board changes belong here in the first place.`,
+    detached: (sha, main) => `board-branch-check: HEAD is detached (not on any branch), so the comparison is commit ${sha} against ${main} — the verdict still stands, there is just no branch name to report.`,
+    dirty: (files, main, prefix) =>
+      `  ⚠ ${files.length} uncommitted board change(s) are in the working tree — the git checkout ${main} -- ${prefix} above overwrites unconditionally, so it takes those with it, and they were never committed (the list above only covers committed changes):\n` +
+      files.slice(0, 5).map((f) => `    ${f}`).join('\n') + (files.length > 5 ? `\n    … ${files.length} in total` : '') +
+      `\n  Commit them (or git stash) before running that command.`,
     head: (n, main) => `⚠ Board changes are sitting on non-mainline branches (baseline ${main}), ${n} of them:`,
     row: (h) => {
       const key = [...h.data, ...h.gen]
@@ -554,7 +568,7 @@ kanban.config.json). This command never commits — git add the card files yours
     cardParseBad: (rel, err) => `ddd: card file ${rel} is not valid JSON; nothing was written (gen fails on this too): ${err}`,
     cardIdMismatch: (rel, id) => `ddd: card file ${rel} does not match the id "${id}" inside it; nothing was written — the filename is the card id (one source of truth).`,
     cardNotFound: (id) => `ddd: no card "${id}" on this board. Check with card list (with one file per card, the filename is the id).`,
-    orderLocked: () => 'ddd: "order" is the original array index recorded by the split (it is the display order) and the CLI will not change it. To really move a card, edit its file and say why.',
+    orderLocked: () => 'ddd: "order" is the original array index recorded by the split (gen sorts by it, then by id, and deletes it; what follows the array is the screenshot gallery grouping and the deep-link table — the backlog and decision panes are ordered by card date, newest first) and the CLI will not change it. To really move a card, edit its file and say why.',
     idLocked: () => 'ddd: "id" is the card\'s identity — with one file per card it is the filename. Change it and the next gen fails hard (filename does not match the id), and the CLI refuses to run on a board with a bad card, so even the command that would change it back is locked out. To renumber a card: create a new one with card new and move the content, or stop gen and change the file and the id together by hand. Nothing was written.',
     arrayField: (field) => `ddd: ${field} is an array field and a scalar was given — gen throws a TypeError while rendering it and the whole board fails to build. Write it as --json '[…]', e.g. card set <id> ${field} --json '[]'. Nothing was written.`,
     statusBad: (v, list) => `ddd: status "${v}" is not one of this card kind's statuses. Available: ${list.join(' / ')}`,
@@ -598,7 +612,8 @@ kanban.config.json). This command never commits — git add the card files yours
     afterNotThere: (id, ref, cur) => `ddd card after --rm: ${id} has no prerequisite "${ref}"; nothing was written. It currently has: ${cur.length ? cur.join(' · ') : '(none)'}`,
     afterDone: (id, list, file) => `ddd card after: prerequisites of ${id} = ${list.join(' · ') || '(none)'} → ${file}`,
     afterRmDone: (id, ref, list) => `ddd card after --rm: dropped "${ref}" from ${id}; left with ${list.join(' · ') || '(none)'}`,
-    afterShow: (rows) => `  after: ${rows.join(' · ')}`,
+    // 标签不与上一行那个原样打印的字段名撞:同名两行、值还不一样,读起来像脚本打重了
+    afterShow: (rows) => `  after (state): ${rows.join(' · ')}`,
     showUsage: () => 'ddd card show: card show <id> [--json].',
     showHead: (id, kind, file) => `${id}  (${kind} card · ${file})`,
     listEmpty: () => 'ddd card list: no card matches those filters.',

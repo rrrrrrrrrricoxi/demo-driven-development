@@ -28,10 +28,10 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
-import { CARD_KINDS, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
-import { afterOf, afterStates, auditAfter, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
+import { afterKey, afterOf, afterStates, auditAfter, depCtxFrom, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ARGV = process.argv.slice(2)
@@ -186,11 +186,18 @@ const sessionIds = () => {
   const ids = Object.keys(t)
   return ids.length ? ids : null
 }
-const repoOf = () => {
-  for (const k of CARD_KINDS) { const v = ((storeOf(k).head.instance || {}).ghRepo || '').trim(); if (v) return v }
-  const m = readJsonAt(join(KANBAN, 'manifest.json'), 'manifest.json')
-  return String((m.instance || {}).ghRepo || '').trim()
-}
+/** manifest.json 的内容(instance 与进度卡都在里面),按需读一次 */
+let HEAD_MAIN = null
+const headMain = () => (HEAD_MAIN || (HEAD_MAIN = readJsonAt(join(KANBAN, 'manifest.json'), 'manifest.json')))
+let REPO = null
+/** 取法与 gen / 守卫同一条(cards.mjs 的 boardRepo:manifest.json 优先,空了才退另两份) */
+const repoOf = () => (REPO === null ? (REPO = boardRepo(headMain(), ...CARD_KINDS.map((k) => storeOf(k).head))) : REPO)
+/**
+ * 全板卡 —— 三种都算。CLI 只写 backlog / 决策两种(进度卡不拆、也没有写它的命令),但 after 的
+ * 卡号宇宙得与 gen 的 ALL_CARDS 是同一个:进度卡是合法的前置目标,gen 渲染它、守卫也认它。
+ * 用 allCards()(= CLI 写得动的卡)兼职当这个宇宙,就会出现「CLI 拒写、gen 照渲」的裂缝。
+ */
+const allBoardCards = () => [...(headMain().tasks || []), ...allCards().map((r) => r.card)]
 const statusIds = (head) => Object.keys(head.statuses || {})
 /** 建卡默认状态:statuses 的第一个,且它得在 groups 里(gen 两处都硬校验) */
 function firstStatus(head) {
@@ -223,8 +230,8 @@ const ARRAY_FIELDS = ['links', 'shots', 'walkthroughs', 'iters', 'refines', 'aft
  * @param id 这张卡的卡号;建卡时还没分配(''),那时新卡不可能被谁指着,自指与环都无从谈起
  */
 function checkAfter(id, value) {
-  const rows = allCards()
-  const ids = new Set(rows.map((r) => String(r.card.id)))
+  const rows = allBoardCards()
+  const ids = new Set(rows.map((c) => String(c.id)))
   for (const v of value) {
     const p = parseAfterRef(v)
     if (!p) die(S.afterRefBad(JSON.stringify(v)))
@@ -233,7 +240,7 @@ function checkAfter(id, value) {
     if (id && p.id === id) die(S.afterSelf(id))
   }
   if (!id) return
-  const audit = auditAfter(rows.map((r) => (String(r.card.id) === id ? { ...r.card, after: value } : r.card)))
+  const audit = auditAfter(rows.map((c) => (String(c.id) === id ? { ...c, after: value } : c)))
   if (audit.cycle) die(S.afterCycle(audit.cycle.join(' → ')))
 }
 
@@ -511,16 +518,18 @@ function cmdAfter() {
   const { store, row } = findCard(id)
   const cur = afterOf(row.card)
   let next, removed = ''
+  // 追加与移除都按归一键比(afterOf 也是):266 与 #266 是同一个前置,按原文比会各占一项
   if (flags.rm !== undefined) {
     if (refs.length) die(S.afterRmAlone())
     const want = String(flags.rm).trim()
-    if (!cur.includes(want)) die(S.afterNotThere(id, want, cur))
-    next = cur.filter((x) => x !== want)
-    removed = want
+    const hit = cur.find((x) => afterKey(x) === afterKey(want))
+    if (hit === undefined) die(S.afterNotThere(id, want, cur))
+    next = cur.filter((x) => x !== hit)
+    removed = hit
   } else {
     if (!refs.length) die(S.afterUsage())
     next = [...cur]
-    for (const r of refs) { const v = String(r).trim(); if (v && !next.includes(v)) next.push(v) }
+    for (const r of refs) { const v = String(r).trim(); if (v && !next.some((x) => afterKey(x) === afterKey(v))) next.push(v) }
   }
   checkField(store, 'after', next, id)
   const card = writeCard(store, row, { ...row.card, after: next })
@@ -528,16 +537,18 @@ function cmdAfter() {
     removed ? S.afterRmDone(id, removed, next) : S.afterDone(id, next, row.where))
 }
 
-/** 前置逐项的当前状态(与 gen 同一份 deps.mjs;清除日不在 CLI 里算 —— 那要一条 git log,card show 不值当) */
+/**
+ * 前置逐项的当前状态(组装与 gen / 守卫同一份 deps.mjs;清除日不在 CLI 里算 —— 那要一条 git log,
+ * card show 不值当)。建一次存下来:warnWip 在 ready 卡的 filter 里逐张调它,不缓存就是
+ * 每张 ready 卡重读一遍 release-manifest、重排一遍全board 卡(守卫那份早就是缓存的)。
+ */
+let DEP_CTX = null
 function depCtx() {
+  if (DEP_CTX) return DEP_CTX
   let rlm = null
   try { rlm = JSON.parse(readFileSync(join(KANBAN, 'release-manifest.json'), 'utf8')) } catch {}
-  const relPr = new Map(), relTag = new Map()
-  for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
-  for (const r of (rlm && rlm.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || ''))
-  const cardById = new Map()
-  for (const x of allCards()) cardById.set(String(x.card.id), x.card)
-  return { repo: repoOf(), cardById, relPr, relTag, cardUpd: () => '' }
+  DEP_CTX = depCtxFrom({ cards: allBoardCards(), repo: repoOf(), rlm })
+  return DEP_CTX
 }
 
 function cmdShow() {
@@ -546,15 +557,16 @@ function cmdShow() {
   const { store, row } = findCard(id)
   if (flags.json) { console.log(JSON.stringify(row.card, null, 2)); return }
   console.log(S.showHead(String(row.card.id), KIND_NAME[store.k.key], row.where))
+  const dep = afterOf(row.card)
   for (const [key, value] of Object.entries(row.card)) {
     if (key === 'id') continue
     const text = typeof value === 'string' ? value : JSON.stringify(value)
     console.log(`  ${key}: ${String(text).replace(/\n/g, '\n    ')}`)
-  }
-  const dep = afterOf(row.card)
-  if (dep.length) {
-    const ctx = depCtx()
-    console.log(S.afterShow(dep.map((r) => depItemText(resolveAfter(r, ctx), S.depWords))))
+    // 解析结果紧跟在字段本身后面:两行贴着,后面的长正文再多也冲不散(「关联的放一起」)
+    if (key === 'after' && dep.length) {
+      const ctx = depCtx()
+      console.log(S.afterShow(dep.map((r) => depItemText(resolveAfter(r, ctx), S.depWords))))
+    }
   }
 }
 

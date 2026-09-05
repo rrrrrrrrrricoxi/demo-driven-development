@@ -9,6 +9,139 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.16.1] - 2026-09-06
+
+A review round over everything since 0.15.5 — 34 confirmed findings fixed, one
+declined, plus five decisions that were put as questions and answered here. No
+new feature; the parts that moved are named below with the finding ids, and the
+generated output only changes on boards that use `after`, `settleHold` or the
+release tab (plus the shell's own inlined script, where three of these live).
+
+### Fixed
+- **`board-branch-check` went silent on a detached HEAD and said the opposite
+  of the truth** (BBC-DETACHED-HEAD, SEC-1). `git rev-parse --abbrev-ref HEAD`
+  returns the literal `HEAD` when detached; 0.15.14 filtered that value out of
+  the scan list, so `scanned` fell to 0 — and `scanned === 0` was read as "you
+  are on the mainline". Rebase, bisect, `git checkout <sha>` and CI checkouts
+  are all detached, so the one guard against a stale card snapshot overwriting
+  mainline was mute exactly when the tree state is most confusing, `--strict`
+  exited 0, and the message asserted the opposite. A detached HEAD is now
+  resolved to its short sha and scanned like any other ref, and the run says
+  what it compared against.
+- **The remedy the guard prints destroys uncommitted board edits it never
+  listed** (SEC-2). The file list is committed-only (`git diff main...ref`),
+  while the closing line tells you to run `git checkout <main> -- <kanban dir>`,
+  which overwrites the working tree unconditionally. Board files edited but not
+  yet committed were never on the list and are gone for good. When there are
+  hits, the check now also runs `git diff --name-only HEAD` and names those
+  files in their own block, in the CLI and in the guard notice alike.
+- **`展开全部` interleaved layout reads and writes across the whole pane**
+  (PERF-1). `clampScan` read `offsetParent` / `lineHeight` / `scrollHeight` and
+  then wrote `.clamp` in the same loop; `.clamp` sets `max-height` / `overflow`,
+  so every write forced a synchronous relayout for the next element's read — on
+  a pane where every card had just been expanded. On the real board that is one
+  forced reflow per clamped element over 511 measured blocks in the decisions
+  tab. Split into a read pass and a write pass; behaviour is unchanged, since
+  clamping an element changes only its own height.
+- **The `after` context was assembled three times, and the three did not agree
+  on what counts as a card** (R1, AFTER-CLI-GEN-UNIVERSE). `gen` and the guard
+  resolved references against all three card kinds; the CLI used only backlog
+  and decisions, so `ddd card after BL-27 T1` refused a prerequisite that `gen`
+  renders happily — against a README that says an unknown card id is an error in
+  both. `deps.mjs` now owns the assembly (`depCtxFrom`), all three callers pass
+  the same three-kind set, and `instance.ghRepo` is resolved by one rule
+  (`cards.mjs`'s `boardRepo`) instead of three different orders.
+- **The clear date of a card prerequisite was the card file's last change date**
+  (D3). That date moves: touch a finished card and the clearance re-dates, so
+  the guard repeats a notice it already gave; and on a board without `cardsDir`
+  there was no date at all. It is now the day the card reached a terminal
+  status — the last `【date】status → done|live|closed` timeline line, or the
+  `【date 收账】` line `pr-sync --settle` writes, else the card's own `date`,
+  else nothing. As a side effect the split/join byte-equivalence gate no longer
+  has to blank the whole chip, so it sees the chip's contents again (TQ-7).
+- **Both prerequisite chips are now gated on "not terminal" rather than
+  `ready`** (D1, COPY-5). A `done` card saying it is 「等 2 项」 reads as a bug,
+  and decision cards never have status `ready`, so their 「前置已清」 chip could
+  not appear at all — it simply vanished the moment everything cleared, which is
+  indistinguishable from someone deleting the field.
+- **The reverse chip stated a causal promise that is usually false** (D2,
+  COPY-1). 「解锁 X」 claims that clearing this card unblocks X, while X is
+  usually waiting on other things too, and cards that had already been settled
+  stayed on the list. It now reads 「被 X · Y 等着」 with the title 「这些卡的
+  前置里有它」, and cards in a terminal status drop off the list.
+- **The overview's 可做 row still said 「N 张 ready」** (COPY-2) after 0.16.0
+  changed the count to "ready and unblocked" — so it printed 14 while the
+  backlog tab it links to held 19 ready cards, and the banner right below
+  disclosed the five it had excluded.
+- **Day counts were 24-hour quotients anchored on local midnight** (TQ-8), so a
+  window spanning a daylight-saving change was off by one: an expired settle
+  hold turned amber a day late, a cleared prerequisite kept being named a day
+  too long, and the test suite itself would go red for an hour a year. There is
+  one `daysBetween` now, both ends folded to their UTC day; the copy baked into
+  the page does the same arithmetic inline.
+- **`after` deduplicated on the raw text** (AFTER-DEDUPE-RAW), so `266` and
+  `#266` counted as two prerequisites — one open pull request rendering as
+  「等 2 项」. Deduplication (and `--rm`) now compares the normalised reference
+  while keeping what was written.
+- **`data-line` was interpolated unescaped** (SEC-3) while every sibling
+  attribute on the same tag was escaped; a quote in a card's `line` broke the
+  `<article>` tag open. `gen` also now warns when a `line` value is not in
+  `config.lanes.ids` — such a card renders in no lane at all.
+- **The band header's 「窗口内 N」 counted anchor days while the band draws
+  every overlapping pull request** (TL-INWIN-UNDERCOUNT): on a one-day window
+  the header could read 「窗口内 0」 directly above a subtitle saying 「跨天 3
+  个」. It now counts what `relBar` actually draws.
+- **The `+N` peek said 「未展开 N 个 PR」** (COPY-8) although a `+N` is only
+  ever drawn inside an expanded band — following that word collapses the band.
+  It now says what happened: those are the ones the cell could not fit.
+- **The backlog sort buttons and the count line beside them used different
+  words for the same mode** (COPY-10); the count line echoes the button faces
+  again, as it did when the control was a dropdown.
+- **`ddd card show` printed the resolved prerequisites as a trailing line**
+  (COPY-3) — labelled `after:` in English, exactly like the raw field printed
+  above it, and pushed a dozen lines away from it by long prose in between. The
+  resolved line now follows the field itself, labelled `after (state)`.
+- **The settle-hold reminder attributed the oldest card's age to every card it
+  named** (COPY-6); it now says the number belongs to the oldest.
+- The CLI's dependency context is built once instead of once per ready card
+  (PERF-3), and the pull-request reference syntax, the `reEsc` helper and the
+  `/pull/N` URL pattern each have one home again (R10).
+
+### Changed
+- Repeated constants and duplicated wording folded into one place each, with no
+  visual change: the chip pitch shared by the packer and the whisker renderer
+  (R2), the fold height shared by the two folding paths (R3), the metrics shared
+  by the three card-header chip kinds (R7), the id comparator emitted twice on
+  boards with `backlogSort` (R8), and the three copies of the WIP banner
+  sentence (R9). A dead `iso()` in the release tab's runtime is gone (R6); the
+  dead `.cards` grid rule is marked rather than removed, since deleting it would
+  move the shell's bytes for every board (D5).
+- Documentation: `order` is no longer described as "the display order" (D4) —
+  the backlog and decision panes are ordered by card date, newest first, and
+  what follows the array is the screenshot gallery's grouping and the deep-link
+  table. README and both skills say so, as does the CLI's refusal message.
+
+### Tests
+1128 → 1217. The additions are mutation-checked: the dormancy and settle-hold
+badges are now executed rather than grepped for (TQ-1, four surviving mutants
+killed), the cross-repo prerequisite assertion pins the repository rule instead
+of a number that was missing from the fixture (TQ-2), both sides of the
+`+N` fold and of the guard's 7-day window are pinned (TQ-3), the branch check
+gets all three classification buckets plus the `origin/<main>` fallback and both
+skip messages (TQ-4), the key-order assertion can now fail (TQ-5), the CLI's
+`--from` clock and its WIP caliber are covered (TQ-6), and the English string
+table is compared structurally and exercised by running the guard on an English
+board (TQ-9) — removing one English key used to leave the suite green while the
+guard crashed at stop time.
+
+### Declined
+- R4 (the 400-character preview is baked twice, ~30KB on a real board). The
+  preview is not a pure prefix in the way the finding assumes: `litePreview`
+  cuts on a paragraph boundary, so a field whose first paragraph is short shows
+  that paragraph complete and unclipped, where a single height-clamped copy
+  would cut mid-line. That is a visible difference, and this round had no
+  browser to judge it in.
+
 ## [0.16.0] - 2026-09-05
 
 ### Added

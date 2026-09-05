@@ -9,7 +9,17 @@
 // 两档故意分开:declaredPrs = 人写在卡上的(渲染芯片只认这一档,存量看板逐字节冻结);
 // prsOfCard = 加上 links 兼容的全集(「PR ↔ 卡」反查的唯一来源)。
 
-const REF_RE = /^([\w.-]+\/[\w.-]+)#(\d+)$/
+/** PR ref 的两种写法(一处定:deps.mjs 的 after 与 settle.mjs 的链接判定都 import 这一份 ——
+ *  「语法同 pr 字段」这句话得由同一条正则兑现,各写一遍迟早在边角上漂) */
+export const PR_REF_RE = /^([\w.-]+\/[\w.-]+)#(\d+)$/
+export const PR_NUM_RE = /^#?(\d+)$/
+const REF_RE = PR_REF_RE
+
+/** 字面量进正则前的转义(仓名里有点) */
+export const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** 本仓 /pull/N 的链接正则(links 兼容与「手写状态词过时了没」共用) */
+export const prUrlRe = (repo) => new RegExp(`^https?://(?:www\\.)?github\\.com/${reEsc(repo)}/pull/(\\d+)(?:[/?#]|$)`, 'i')
 
 /** { repo, num } → "owner/repo#230";集合去重的键 */
 export const prKey = (p) => `${p.repo}#${p.num}`
@@ -20,7 +30,7 @@ export function parsePr(v, repo) {
   const s = String(v ?? '').trim()
   const cross = s.match(REF_RE)
   if (cross) return { repo: cross[1], num: Number(cross[2]) }
-  if (/^#?\d+$/.test(s)) { const n = Number(s.replace('#', '')); return n > 0 && repo ? { repo, num: n } : null }
+  if (PR_NUM_RE.test(s)) { const n = Number(s.replace('#', '')); return n > 0 && repo ? { repo, num: n } : null }
   return null
 }
 
@@ -34,8 +44,6 @@ function dedupe(list) {
   return out
 }
 
-const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
 /** 卡上显式写的 pr(不含 links 兼容)—— 卡头芯片只渲染这一档 */
 export function declaredPrs(card, repo) {
   const raw = card && card.pr
@@ -48,7 +56,7 @@ export function declaredPrs(card, repo) {
 export function prsOfCard(card, repo) {
   const out = declaredPrs(card, repo)
   if (repo && card && Array.isArray(card.links)) {
-    const re = new RegExp(`^https?://(?:www\\.)?github\\.com/${reEsc(repo)}/pull/(\\d+)(?:[/?#]|$)`, 'i')
+    const re = prUrlRe(repo)
     for (const l of card.links) {
       const hit = String((l && l.href) || '').match(re)
       if (hit) out.push({ repo, num: Number(hit[1]) })

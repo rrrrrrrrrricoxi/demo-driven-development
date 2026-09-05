@@ -1407,7 +1407,7 @@ console.log('T37 进度响应渲染')
   ok(cardOf('D2').includes('rsp-reopen'), '决策卡 live + PR 开着 → 反向提示')
   ok(cardOf('BL-D').includes('<span class="rspdorm" data-dorm="2026-01-02" hidden></span>'), '沉睡:gen 只烤日期,天数留给浏览器')
   ok(!cardOf('BL-N').includes('rspdorm'), '挂了 PR 的 ready 卡不算沉睡')
-  ok(on.includes("Date.parse(el.getAttribute('data-dorm')") && on.includes('沉睡 ') && on.includes('d <= 30'),
+  ok(on.includes("dayDiff(el.getAttribute('data-dorm'))") && on.includes('沉睡 ') && on.includes('d > 30'),
     '沉睡天数在浏览器算(阈值 30 天),gen 侧无 new Date()')
   ok(!/new Date\(\)/.test(on.split('<script>')[0]), 'gen 零时间:静态部分不含 new Date()')
   ok(cardOf('BL-L').includes('↗ PR#227 阶段二(<s class="stale">开而不合</s>)<span class="prst">已发 v0.0.1</span>'),
@@ -1727,7 +1727,7 @@ console.log('T40 积压提醒 wip')
 console.log('T41 时间线重做')
 {
   const { relAxis, relTicks, relBar, relPack, relGrid, relBandH, relWindow,
-    relRegime, relSqSize, relChipW, relGridBig, relGridChip, relPackChip, relCaps } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+    relRegime, relSqSize, relChipW, relGridBig, relGridChip, relPackChip, relCaps, relChipPitch, CHIP_GAP } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
   const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
   const mkDays = (from, n) => {
     const out = [], t = Date.parse(from + 'T00:00:00Z')
@@ -1833,6 +1833,12 @@ console.log('T41 时间线重做')
     ok(relBar(ax, '2026-08-01', '2026-08-01', 10).w === 10, '当天开当天合:退到 min 宽')
     ok(relBar(ax, '2026-08-01', '2026-08-03', 10).x0 === 200 && relBar(ax, '2026-08-01', '2026-08-03', 10).w === 14, '跨三天 = 3×5 − 1')
     ok(relBar(ax, '2026-07-20', '2026-08-02', 10).x0 === 200, '左边越界的截到窗口左沿')
+    // 表头那句「窗口内 N」数的必须是「画不画得出来」,而不是锚点日落没落在窗口里 —— 判据只此一条
+    for (const [s0, e0] of [['2026-07-01', '2026-07-20'], ['2026-07-20', '2026-08-02'], ['2026-08-01', '2026-08-03'],
+      ['2026-08-10', '2026-08-10'], ['2026-08-11', '2026-08-20'], ['2026-07-01', '2026-08-20']]) {
+      ok((relBar(ax, s0, e0, 10) !== null) === (e0 >= ax.t0 && s0 <= ax.t1),
+        `画得出来 ⇔ 跨度与窗口有交集(${s0}→${e0})`, `${relBar(ax, s0, e0, 10) !== null} vs ${e0 >= ax.t0 && s0 <= ax.t1}`)
+    }
     const items = [
       { n: 1, s: '2026-08-01', e: '2026-08-02' },
       { n: 2, s: '2026-08-01', e: '2026-08-05' },
@@ -1918,7 +1924,8 @@ console.log('T41 时间线重做')
       ok(g.bars.filter((b) => b.more)[0].fold.join(',') === '244,245,246',
         '+N 还记着被收起来的是哪几个号:悬停列的就是它们,不是那一整天',
         JSON.stringify(g.bars.filter((b) => b.more)[0].fold))
-      ok(g.bars.every((b, i) => i === 0 || b.x === g.bars[i - 1].x + 48), '按号横排,间距 = 芯片宽 + 6')
+      ok(g.bars.every((b, i) => i === 0 || b.x === g.bars[i - 1].x + relChipPitch(42)), '按号横排,间距 = 芯片宽 + 一道固定间距')
+      ok(CHIP_GAP === 6 && relChipPitch(42) === 48, '步距一处定:relChipPitch = 芯片宽 + CHIP_GAP', `${CHIP_GAP} ${relChipPitch(42)}`)
       ok(g.bars.every((b) => b.x >= ax.x['2026-09-01'] && b.x + b.w <= ax.x['2026-09-01'] + ax.w['2026-09-01']),
         '连 +N 在内都不越出当天的格子')
       const g4 = relGridChip({ '2026-09-01': four }, ax, 42)
@@ -2135,6 +2142,13 @@ console.log('T41 时间线重做')
   }
   ok(!on.includes('reltlsvg') && !on.includes('rect.relb') && !on.includes('id="reltip"'),
     '旧时间线的 SVG 与浮层一个不留(死代码不留在产物里)')
+  ok(on.includes('if (e0 >= ax.t0 && s0 <= ax.t1) inwin++'),
+    '带头那句「窗口内 N」数的是「画不画得出来」(与 relBar 同一个判据),不是锚点日落没落在窗口里 —— 窗口之前建的、还开着的 PR 会画出来,锚点却在窗口外')
+  ok(count(on, 'function relChipPitch') === 1 && !on.includes('cw + 6'),
+    '芯片步距在产物里只有一处定义:tlWhisk 与 packer 都调 relChipPitch,不再各写一个 6(改一处漏一处,芯片就探出预留块)',
+    `relChipPitch×${count(on, 'function relChipPitch')} / cw+6×${count(on, 'cw + 6')}`)
+  ok(!on.includes('function iso(') && count(on, 'function dstr(') === 1,
+    '发布进度的运行期里没有从没被调用过的 iso()(与 dstr 逐字节相同,0.13.1 加进来就一直没有调用者)')
   const G = JSON.parse(on.match(/\n {4}var G = (\[[\s\S]*?\])\n/)[1])
   ok(G.map((g) => g.g).join(',') === 'dev,test,v0.0.2,v0.0.1,other',
     `带序 = dev → test → 版本(at 降序)→ 其它(实际 ${G.map((g) => g.g).join(',')})`)
@@ -2217,7 +2231,7 @@ console.log('T45 settleHold 暂不收账')
   ok(cardOf('BL-R').includes('rsp-reopen'), '没写字段的反向卡照旧提示')
   ok(cardOf('D-H').includes('rsp-hold') && !cardOf('D-H').includes('rsp-settle'), '决策卡:同一枚灰芯片')
   ok(cardOf('T-H').includes('rsp-hold') && !cardOf('T-H').includes('rsp-settle'), '进度 task 卡:同一枚灰芯片')
-  ok(on.includes('.rsp-part, .rsp-hold {'), '灰芯片与「2/3 已合」同一套安静配色,不引新强调色')
+  ok(/\.rsp-part, \.rsp-hold[^{]*\{ font-weight: 400; color: var\(--mut\)/.test(on), '灰芯片与「2/3 已合」同一套安静配色,不引新强调色')
   ok(on.includes('<p class="rspsh">待收账 · 1 张卡'), '待收账段:hold 的三张卡不占位(4 → 1)', (on.match(/class="rspsh">[^<]*/) || [])[0])
   {
     const seg = on.slice(on.indexOf('class="rspsettle"'), on.indexOf('class="relview"'))
@@ -2680,6 +2694,7 @@ esac
 // ============ T50 写操作 CLI(建卡独占预留 / 校验 / 时间线 / 链接写 pr / export 同形 / 原子写)============
 console.log('T50 写操作 CLI ddd.mjs')
 {
+  const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs')) // 「今天」与 CLI 同一个源(本地日历)
   const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
   const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
   const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
@@ -2904,13 +2919,34 @@ console.log('T50 写操作 CLI ddd.mjs')
   { // ---- wip 联动:建卡之后照守卫的口径数一遍 ready ----
     const fx = mkFixture('fx50c', { 'c1.html': demoHtml('c1') })
     const kb = fx.kb
-    const { cfgP } = seed(kb)
+    const { blP, cfgP } = seed(kb)
     const cfg = rd(cfgP)
     cfg.wip = { soft: 0, hard: 0 }
     wr(cfgP, cfg)
     const r = runCli(kb, ['card', 'new', 'backlog', '--title', '又一张'])
     ok(r.status === 0 && /config\.wip\.hard = 0/.test(r.stderr), 'card new 之后 ready 超 hard:stderr 上一句与守卫同款的提醒')
     ok(!/config\.wip\.hard/.test(r.stdout), '提醒走 stderr,不脏 --json 的管道')
+    // v0.16.0 的口径(等前置的不占额度)在横幅与守卫都有用例,CLI 这句原来没有 —— 种子里一条
+    // after 都没有,waiting 结构上恒 0,把 `ready.length - waiting + own` 改回 `ready.length + own`
+    // 全套仍绿,而 CLI 会用一个和横幅、守卫都对不上的数喊「超过 hard」。
+    const blW = rd(blP); blW.items.find((i) => i.id === 'BL-1').after = ['#230']; wr(blP, blW)
+    writeFileSync(join(kb, 'release-manifest.json'), JSON.stringify(REL_MANIFEST, null, 2) + '\n')
+    const r2 = runCli(kb, ['card', 'new', 'backlog', '--title', '再一张'])
+    ok(/另有 1 张 ready 还等着前置/.test(r2.stderr), 'CLI 与横幅、守卫同一口径:等前置的另计', (r2.stderr.match(/可立即做[^,]*,[^,]*/) || [''])[0])
+    ok(/可立即做\(ready 且前置已清\)的卡有 3 张/.test(r2.stderr), '并且额度只按扣掉它之后的数算(板上 3 张 ready + 刚建的 1 张 − 1 张等前置)', r2.stderr.slice(0, 200))
+  }
+
+  { // ---- --from 带进来的 settleHold 同样记起算日(card set 那条路早有用例,建卡这条路没有)----
+    const fx = mkFixture('fx50e', { 'c1.html': demoHtml('c1') })
+    const kb = fx.kb
+    seed(kb)
+    const fromP = join(kb, 'from.json')
+    writeFileSync(fromP, JSON.stringify({ title: '从模板建的', status: 'ready', tier: '1', priority: 'med', problem: 'p', approach: 'a', settleHold: '只落了一半' }, null, 2))
+    const r = runCli(kb, ['card', 'new', 'backlog', '--from', fromP, '--json'])
+    const made = JSON.parse(r.stdout)
+    ok(r.status === 0 && made.card.settleHoldAt === localDate(), '--from 带进来一个 settleHold:起算日照记(不然那 14 天的钟从卡文件最后改动日起算,甚至根本不起算)',
+      `${r.status} ${made.card && made.card.settleHoldAt}`)
+    rmSync(fromP)
   }
 
   { // ---- pr-sync 别名:原样转调,连退出码 ----
@@ -3081,6 +3117,21 @@ console.log('T54 线别分段 × 懒注入')
     const off = readFileSync(idxP, 'utf8')
     ok(off.includes('id="bllineseg"') && off.includes('ev.target.closest(LINE_BTN_SEL)') && !/lineBtns/.test(off),
       '非懒模式:分段就在壳里,同样走委托(一份实现两种形态)')
+  }
+
+  { // ---- line 是外来输入(卡文件手写):进 data-line= 前要过 esc,不然一个引号能把 <article> 拆开 ----
+    const hostile = JSON.parse(readFileSync(blP, 'utf8'))
+    hostile.items = [{ ...hostile.items[0], id: 'BL-9', line: 'C" onmouseover=alert(77) x="' }]
+    wr(blP, hostile)
+    const r = runGen(NEW_SCRIPTS, fx54.kb)
+    const h = readFileSync(idxP, 'utf8')
+    ok(r.status === 0 && h.includes('id="BL-9" data-line="C&quot; onmouseover=alert(77) x=&quot;"'),
+      'data-line 里的引号转义掉 —— 同一个标签上别的属性本来就都过了 esc,漏这一个就是活的事件处理器',
+      (h.match(/id="BL-9"[^>]{0,120}/) || [''])[0])
+    ok(!h.includes('" onmouseover='), '标签没被拆开:全文没有一处真引号后面跟着 onmouseover=(转义前那是个活的事件处理器)')
+    ok(/line 值不在 config\.lanes\.ids/.test(r.stderr), 'gen 顺带出声:这个 line 不在 ids 里,这张卡在任何一档下都不会出现(CLI 早就拦,手写的卡拦不住)', r.stderr.slice(0, 200))
+    wr(blP, bl)
+    runGen(NEW_SCRIPTS, fx54.kb)
   }
 }
 
@@ -3663,12 +3714,12 @@ console.log('T61 时间线 hover peek')
     const nums = (h) => (h.match(/<b>#(\d+)<\/b>/g) || []).map((x) => x.replace(/\D/g, ''))
     ok(nums(fold).join(',') === '257,259,260',
       '+N 的卡只列折起来的那三个,画出来的几枚不再重列一遍', nums(fold).join(','))
-    ok(fold.includes('09-01 · 未展开 3 个 PR') && fold.includes('test · 4173 (main)'),
-      '卡头说的是「未展开 3 个 PR」,不是那一整天的总数', fold.slice(0, 120))
+    ok(fold.includes('09-01 · 放不下的 3 个 PR') && fold.includes('test · 4173 (main)'),
+      '卡头说的是「放不下的 3 个 PR」,不是那一整天的总数;也不说「未展开」—— 看得见 +N 的时候带一定是开着的', fold.slice(0, 120))
     const all = pkDay('b1', '2026-09-01', undefined)
-    ok(nums(all).length === 8 && all.includes('09-01 · 8 个 PR') && !all.includes('未展开'),
+    ok(nums(all).length === 8 && all.includes('09-01 · 8 个 PR') && !all.includes('放不下的'),
       '不带 data-relfold 的锚点(方块 / 芯片 / 条 / 折叠带那一段)照旧列一整天', nums(all).length + ' 条')
-    ok(pkDay('b1', '2026-09-01', '888').includes('· 未展开 0 个 PR'),
+    ok(pkDay('b1', '2026-09-01', '888').includes('· 放不下的 0 个 PR'),
       '按号挑不按天挑:跨天那组的锚点日被窗口裁掉时,天对不上而号永远对得上')
   }
   { // 「不引新色」的真检法:peek 那几条里出现的色值,样式表里别处已经在用(与总览那条同一把尺)
@@ -3975,10 +4026,16 @@ console.log('T64 Backlog 排序分段 backlogSort')
     const F = new Function(src + '\n  return { tbOrdCmp, tbUdCmp, tbIdAsc, BLS_KEY, BLS_OK, TB_SORT_LABEL }')()
     ok(F.BLS_KEY === 'htest_bl_sort', '记忆键走 LS_PREFIX 老规矩:<brand>_bl_sort', F.BLS_KEY)
     ok(F.BLS_OK.join(' ') === 'ord udate-desc date-asc id', 'BLS_OK 就是分段那四档(存了别的值一律不认)')
+    ok(count(on, 'tbNum(a.id) - tbNum(b.id)') === 1,
+      '编号比较器在产物里只有一份:「按编号」那颗钮与 tbUdCmp 的同日退让走同一把尺(两份迟早给出两种顺序)',
+      String(count(on, 'tbNum(a.id) - tbNum(b.id)')))
     ok(F.BLS_OK.indexOf('cdate-desc') < 0,
       '0.15.12 存下的 cdate-desc 不在白名单里 —— 接线那句会把它落回默认档「最近立卡」,而不是卡住')
-    ok(F.TB_SORT_LABEL['ord'] === '立卡新→旧' && F.TB_SORT_LABEL['udate-desc'] === '更新新→旧' && F.TB_SORT_LABEL['cdate-desc'] === undefined,
-      'meta 行说得出这两档各叫什么,旧那一档的名字不再留着')
+    ok(F.TB_SORT_LABEL['ord'] === '最近立卡' && F.TB_SORT_LABEL['udate-desc'] === '最近更新'
+      && F.TB_SORT_LABEL['cdate-desc'] === undefined,
+      'meta 行回声钮面:分段那两档在同一屏上不说两套话(旧那一档的名字也不再留着)', JSON.stringify(F.TB_SORT_LABEL))
+    ok(F.TB_SORT_LABEL['date-asc'] === '日期旧→新',
+      '与决策那只下拉共用的两个键不动 —— 在这儿改会把决策工具条的 meta 也一起改掉', F.TB_SORT_LABEL['date-asc'])
     const el = (id, udate, date, ord) => ({ id, dataset: { udate, date, ord: String(ord) } })
     // 烤入顺序:同日按编号大→小(BL-11 在 BL-2 前);无日期沉底
     const deck = [el('BL-11', '2026-05-05', '2026-03-03', 0), el('BL-2', '2026-01-09', '2026-03-03', 1),
@@ -4092,7 +4149,77 @@ console.log('T65 看板改动落在哪条分支上 board-branch-check')
     ok(/干净/.test(named.stdout), '--branch 可以点名比别的分支', named.stdout)
     const all = runChk(kb, ['--all'])
     ok(/feat\/dirty/.test(all.stdout) && !/feat\/clean/.test(all.stdout), '--all 扫全部分支,只列真命中的那条', all.stdout.slice(0, 300))
+
+    // 三个桶都装上东西:只提交一个数据文件时 gen[]/other[] 恒空,分类那一行等于没测过
+    mkdirSync(join(kb, 'refs'), { recursive: true })
+    writeFileSync(join(kb, 'index.html'), '<!doctype html>\n<!-- ddd-gen v0.0.0 -->\n')
+    writeFileSync(join(kb, 'refs', 'x.html'), '<p>x</p>\n')
+    writeFileSync(join(kb, 'demos', 'later.html'), demoHtml('later'))
+    const cfg65 = rd(join(kb, 'kanban.config.json')); cfg65.port = 8123; wr(join(kb, 'kanban.config.json'), cfg65)
+    // 只提交这四个:gen 会改写 demo 与 index(注入返回块 / 重生成),-A 会把它们一并带进来,桶数就不定了
+    g('add', 'app/kanban/index.html', 'app/kanban/refs/x.html', 'app/kanban/kanban.config.json', 'app/kanban/demos/later.html')
+    g('commit', '-qm', 'gen + config + demo on the branch')
+    const buckets = runChk(kb)
+    ok(/数据 2 · 产物 2 · 其它 1/.test(buckets.stdout), '三个桶各按各的正则分:kanban.config.json 算数据,index.html 与 refs/ 算产物,demo 算其它',
+      (buckets.stdout.match(/数据 \d+[^\n]*/) || [''])[0])
+    const jb = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(jb.hits[0].gen.some((f) => /refs\//.test(f)) && jb.hits[0].gen.some((f) => /index\.html$/.test(f)), 'refs/ 与 index.html 都进「产物」桶', JSON.stringify(jb.hits[0].gen))
+    ok(jb.hits[0].data.some((f) => /kanban\.config\.json$/.test(f)), 'kanban.config.json 进「数据」桶 —— 开关 tab、改 wip 阈值正是最该拦的那一类', JSON.stringify(jb.hits[0].data))
+    ok(jb.hits[0].other.some((f) => /demos\//.test(f)), 'demo 进「其它」桶', JSON.stringify(jb.hits[0].other))
+
+    // 未提交的看板改动:补救那条 checkout 会连它们一起盖掉,清单不说就是安静地丢内容(SEC-2)
+    const blDirty = rd(blP); blDirty.items[0].title = '甲(改了还没提交)'; wr(blP, blDirty)
+    const withDirty = runChk(kb)
+    ok(/没提交的看板改动/.test(withDirty.stdout) && /backlog-manifest\.json/.test(withDirty.stdout.split('没提交的看板改动')[1] || ''),
+      '工作区里没提交的看板改动单列一段,点名到文件 —— 那条 checkout 会连它们一起盖掉', withDirty.stdout.slice(-400))
+    const dirtyJson = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(dirtyJson.dirty.some((f) => /backlog-manifest\.json$/.test(f)), '--json 里也给 dirty', JSON.stringify(dirtyJson.dirty))
+    const dirtyStop = runStop(NEW_SCRIPTS, root)
+    ok(/没提交的看板改动/.test(dirtyStop.stdout), '守卫那条也带上这句警告(它给的正是同一条命令)', dirtyStop.stdout.slice(0, 600))
+    g('checkout', '-q', '--', '.')
+    ok(JSON.parse(runChk(kb, ['--json']).stdout).dirty.length === 0, '工作区干净时 dirty 为空 —— 文案与 0.15.x 一字不差')
+
+    // 游离 HEAD(rebase / bisect / CI 的 actions/checkout):同一棵树、同一份改动,不许改口
+    g('checkout', '-q', '--detach', 'HEAD')
+    const det = runChk(kb)
+    ok(/⚠/.test(det.stdout) && /数据 2/.test(det.stdout), '游离 HEAD 上照样点名(0.15.14 在这里会说「当前就在 main 上」)', det.stdout.slice(0, 300))
+    ok(/游离/.test(det.stdout) && !/当前就在 main 上/.test(det.stdout), '并且说清按什么比的 —— 不冒充「你在主线上」', (det.stdout.match(/[^\n]*游离[^\n]*/) || [''])[0])
+    ok(runChk(kb, ['--strict']).status === 1, '--strict 在游离 HEAD 上照样是门(CI 的 checkout 默认就是游离的)')
+    const detJson = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(detJson.scanned === 1 && detJson.hits.length === 1 && detJson.detached === true, '--json:游离位置当一条 ref 扫,不是 scanned 0', JSON.stringify({ s: detJson.scanned, d: detJson.detached }))
+    const detStop = runStop(NEW_SCRIPTS, root)
+    ok(/带着看板改动/.test(detStop.stdout), '守卫在游离 HEAD 上也出声', detStop.stdout.slice(0, 200))
+    ok(/当前就在 main 上/.test(runChk(kb, ['--branch', 'main']).stdout), '显式点名主线仍是「没有要比的分支」')
     g('checkout', '-q', 'main') // 收摊:别把这块板留在分支上影响后面的用例
+
+    // 本地没有主线分支(worktree / 只 fetch 过远端的 CI 克隆)→ 退到 origin/<main>,不是整体变哑
+    const mainSha = (g('rev-parse', 'main').stdout || '').trim()
+    g('update-ref', 'refs/remotes/origin/main', mainSha)
+    g('checkout', '-q', '-B', 'tmp-work', mainSha)
+    g('update-ref', '-d', 'refs/heads/main')
+    const fb = JSON.parse(runChk(kb, ['--branch', 'feat/dirty', '--json']).stdout)
+    ok(fb.main === 'origin/main' && (fb.hits || []).length === 1, '本地没 main 时基准退到 origin/main,照常比得出来 —— 少了这条回退,worktree 与只 fetch 过远端的 CI 克隆整体变哑', JSON.stringify(fb))
+    g('update-ref', 'refs/heads/main', mainSha)
+    g('checkout', '-q', 'main')
+  }
+
+  { // ---- 两条 skip:不在 git 仓里 / 找不到主线 —— 都是「本次不做判断」,不是「干净」 ----
+    const fx = mkFixture('fx65c', { 's.html': demoHtml('s') })
+    rmSync(join(fx.root, '.git'), { recursive: true, force: true })
+    const noGit = runChk(fx.kb)
+    ok(noGit.status === 0 && /不在 git 仓里/.test(noGit.stdout) && !/干净/.test(noGit.stdout),
+      '板不在 git 仓里:说明白「本次不做判断」,不冒充干净', noGit.stdout)
+
+    const fx2 = mkFixture('fx65d', { 's.html': demoHtml('s') })
+    const g2 = (...a) => spawnSync('git', a, { cwd: fx2.root, encoding: 'utf8' })
+    g2('config', 'user.email', 't@example.com'); g2('config', 'user.name', 'T')
+    g2('checkout', '-q', '-B', 'trunk')
+    const bl2P = join(fx2.kb, 'backlog-manifest.json')
+    const bl2 = rd(bl2P); bl2.instance.branch = 'no-such-branch'; wr(bl2P, bl2)
+    g2('add', '-A'); g2('commit', '-qm', 'init')
+    const noMain = runChk(fx2.kb)
+    ok(noMain.status === 0 && /找不到主线分支 no-such-branch/.test(noMain.stdout) && !/干净/.test(noMain.stdout),
+      '找不到主线分支:同样是「本次不做判断」', noMain.stdout)
   }
 
   { // ---- 拆过卡的板:分支把 items 数组带回头文件 = gen 会硬报错的那一类,合并前就点出来 ----
@@ -4253,6 +4380,16 @@ console.log('T67 settleHold 14 天到期提醒')
     ok(!/不认识的字段|unknown field/.test(runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHoldAt', '2026-01-01']).stderr), 'settleHoldAt 是已知字段,手工回填不报「不认识」')
   }
 
+  { // ---- 天数是日历日:换个有夏令时的时区跑一遍(本机时区没有切换,不换就看不出这一格)----
+    const probe = join(WORK, 'daysbetween-probe.mjs')
+    writeFileSync(probe, `import { daysBetween } from ${JSON.stringify(join(NEW_SCRIPTS, 'cards.mjs'))}\n` +
+      `console.log(JSON.stringify([daysBetween('2026-03-01', '2026-03-15'), daysBetween('2026-10-25', '2026-11-08'), daysBetween('2026-09-01', '2026-09-01'), daysBetween('x', '2026-09-01')]))\n`)
+    const r = spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles' } })
+    ok(r.stdout.trim() === '[14,14,0,null]',
+      'daysBetween 跨春/秋两次切换都是 14 天,同日是 0,坏日期是 NaN —— 两端折成 UTC 那一天再减,不受时区摆布',
+      `${r.stdout.trim()}${r.stderr.slice(0, 200)}`)
+  }
+
   { // ---- 守卫:13 天不出声,满 14 天出一行;芯片把起算日烤进 data-hold ----
     const fx = mkFixture('fx67b', { 's.html': demoHtml('s') })
     const kb = fx.kb, idxP = join(kb, 'index.html')
@@ -4270,12 +4407,57 @@ console.log('T67 settleHold 14 天到期提醒')
     const on = readFileSync(idxP, 'utf8')
     ok(on.includes(`data-hold="${dayAgo(13)}"`), '芯片把起算日烤进 data-hold(天数照旧在浏览器算,gen 零时间)', (on.match(/data-hold="[^"]*"/) || [''])[0])
     ok(on.includes('.rsp-hold.holdold {') && on.includes('function respHold()'), '有挂账卡时才注入那段琥珀 CSS 与算天数的 JS')
+    { // ---- 把这两只运行期函数抠出来真跑一遍(只断言「在场」的话:类名改一个字母、少一行 hidden、
+      //      floor 换 ceil,四个变异一个都不会红 —— 而它们是这两枚徽章的全部实现)----
+      const holdCls = (on.match(/\.rsp-hold\.(\w+) \{/) || [])[1]
+      const srcH = (on.match(/ {4}function respHold\(\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+      const srcD = (on.match(/ {4}function respDorm\(\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+      const srcDD = (on.match(/ {4}function dayDiff\(s\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+      ok(Boolean(holdCls) && srcH.includes('data-hold') && srcD.includes('data-dorm') && srcDD.includes('Date.UTC'),
+        '抠得到样式表里那个类名与三只函数本体', `${holdCls} ${srcH.length}/${srcD.length}/${srcDD.length}`)
+      const DAY = '2026-09-01'
+      const mkEl = () => { const e = { textContent: '暂不收账', hidden: true, cls: [], getAttribute: () => DAY }; e.classList = { add: (c) => e.cls.push(c) }; return e }
+      // 「现在」按本地日历推出来:与 DAY 之间正好差 days 个日历日,跟机器在哪个时区无关
+      const run = (src, fn, sel, days) => {
+        const el = mkEl()
+        const doc = { querySelectorAll: (s) => (s.includes(sel) ? [el] : []) }
+        const RealDate = Date
+        const at = new RealDate(2026, 8, 1 + days, 3, 0, 0).getTime()
+        const D = function () { return new RealDate(at) }
+        D.UTC = RealDate.UTC; D.parse = RealDate.parse; D.now = () => at
+        new Function('document', 'Date', `${srcDD}\n${src}\n; return ${fn}`)(doc, D)()
+        return el
+      }
+      const h13 = run(srcH, 'respHold', 'rsp-hold', 13)
+      ok(h13.textContent === '暂不收账' && h13.cls.length === 0, '挂满 13 天:字面不动、也不转琥珀', `${h13.textContent} ${h13.cls}`)
+      const h14 = run(srcH, 'respHold', 'rsp-hold', 14)
+      ok(h14.textContent === '暂不收账 · 已 14 天', '满 14 天:改字面,天数是整天数(floor,不四舍五入)', h14.textContent)
+      ok(h14.cls.join(',') === holdCls, '加的类名与样式表里那条 .rsp-hold.X 是同一个 —— 改一处漏一处就是一条死规则', `${h14.cls} vs ${holdCls}`)
+      ok(run(srcH, 'respHold', 'rsp-hold', 41).textContent === '暂不收账 · 已 41 天', '天数照实报')
+      const d30 = run(srcD, 'respDorm', 'rspdorm', 30)
+      ok(d30.hidden === true && d30.textContent === '暂不收账', '沉睡 30 天:还在窗口内,徽章不出(hidden 不动)')
+      const d31 = run(srcD, 'respDorm', 'rspdorm', 31)
+      ok(d31.hidden === false && d31.textContent === '沉睡 31 天', '超 30 天:显示出来并写清天数', `${d31.hidden} ${d31.textContent}`)
+
+      // 跨夏令时:天数是日历日,不是 24h 的商。2026-03-08 那次春季切换让 03-01 → 03-15 只有
+      // 14×24h − 1h,旧写法(本地午夜 + floor)在那一格给 13 —— 满 14 天的卡整整晚一天才转琥珀。
+      const probe = join(WORK, 'dst-probe.mjs')
+      writeFileSync(probe, `${srcDD}\n${srcH}\n` +
+        `const el = { textContent: '暂不收账', cls: [], getAttribute: () => '2026-03-01', classList: { add(c) { el.cls.push(c) } } }\n` +
+        `globalThis.document = { querySelectorAll: () => [el] }\n` +
+        `const RealDate = Date\nconst at = new RealDate(2026, 2, 15, 0, 30).getTime()\n` +
+        `const D = function () { return new RealDate(at) }\nD.UTC = RealDate.UTC; D.parse = RealDate.parse; D.now = () => at\n` +
+        `globalThis.Date = D\nrespHold()\nconsole.log(el.textContent)\n`)
+      const dst = spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles' } })
+      ok(dst.stdout.trim() === '暂不收账 · 已 14 天',
+        '跨夏令时那一格照旧是 14 天(TZ=America/Los_Angeles,03-01 → 03-15)', `${dst.stdout.trim()}${dst.stderr.slice(0, 200)}`)
+    }
     touch(idxP)
     const g13 = runStop(NEW_SCRIPTS, fx.root)
     ok(!/暂不收账已/.test(g13.stdout), '13 天:守卫一个字都不说', g13.stdout.slice(0, 200))
     const bl14 = rd(blP); bl14.items[0].settleHoldAt = dayAgo(14); wr(blP, bl14)
     const g14 = runStop(NEW_SCRIPTS, fx.root)
-    ok(/暂不收账已 14 天/.test(g14.stdout) && /BL-H/.test(g14.stdout), '满 14 天:一行,写清天数与卡号', (g14.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 160))
+    ok(/暂不收账最久已 14 天/.test(g14.stdout) && /BL-H/.test(g14.stdout), '满 14 天:一行,写清天数与卡号(天数说明白是最久那张的 —— 一句话安在几张卡头上就是假的)', (g14.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 160))
     ok(/重设|settleHold/.test(g14.stdout), '这一行顺带说清「续」与「收」各怎么做')
     ok(!/"decision":\s*"block"/.test(g14.stdout), '到期提醒永不阻断')
     // 提醒不解除静音:这张卡照旧不进待收账那条,也照旧不出「PR 已合 · 待收账」芯片
@@ -4287,7 +4469,12 @@ console.log('T67 settleHold 14 天到期提醒')
     for (let i = 2; i <= 6; i++) many.items.push({ ...many.items[0], id: `BL-H${i}`, settleHoldAt: dayAgo(20 + i) })
     wr(blP, many)
     const gN = runStop(NEW_SCRIPTS, fx.root)
-    ok(/…等 6 张/.test(gN.stdout) && (gN.stdout.match(/BL-H\d/g) || []).length === 5, '最多点名 5 张 + 总数(最久的排前面)', (gN.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 200))
+    ok(/…等 6 张/.test(gN.stdout) && (gN.stdout.match(/BL-H\d/g) || []).length === 5, '最多点名 5 张 + 总数(最久的排前面)', (gN.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 200))
+    // 几张卡挂了不同的天数:句子里只有一个数(最久那张的),措辞得说清是谁的 —— 否则「已 41 天:
+    // BL-H BL-H2 …」把最久那张的天数安在了每张卡头上,人会先去动其实没那么急的那几张。
+    const lineN = (gN.stdout.match(/暂不收账[^"\\]*/) || [''])[0]
+    ok(/最久已 26 天/.test(lineN) && /BL-H6/.test(lineN) && /BL-H2/.test(lineN),
+      '一句话里只有一个天数:说明白它是最久那张的(BL-H6 挂了 26 天,同一行里的 BL-H2 只有 22 天)', lineN.slice(0, 200))
   }
 
   { // ---- 老卡(0.15.14 之前挂上的,没有 settleHoldAt):退到卡文件最后提交日 ----
@@ -4314,7 +4501,7 @@ console.log('T67 settleHold 14 天到期提醒')
       '没有 settleHoldAt 的老卡:起算日退到卡文件最后提交日(与 .udate 同源)', (readFileSync(join(kb, 'index.html'), 'utf8').match(/data-hold="[^"]*"/) || [''])[0])
     touch(join(kb, 'index.html'))
     const gs = runStop(NEW_SCRIPTS, root)
-    ok(/暂不收账已 30 天/.test(gs.stdout) && /BL-OLD/.test(gs.stdout), '守卫读同一份卡文件日期,老卡照样催得动', (gs.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 160))
+    ok(/暂不收账最久已 30 天/.test(gs.stdout) && /BL-OLD/.test(gs.stdout), '守卫读同一份卡文件日期,老卡照样催得动', (gs.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 160))
     ok(!readFileSync(join(kb, 'cards', 'backlog', 'BL-OLD.json'), 'utf8').includes('settleHoldAt'),
       '守卫不往卡上补写起算日(收工时改板会跟并行会话抢写)')
   }
@@ -4352,26 +4539,32 @@ console.log('T68 行卡展开时补量折叠')
     '点 .rhead 展开的那一下补量一趟(收起时传 null,clampScan 自己走人)')
   ok(on.includes("if (el.classList.contains('rcard')) { el.classList.add('open'); clampScan(el) }"),
     '深链自动展开的卡也补量')
-  ok(on.includes("pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); clampScan(pane)"),
-    '「展开全部」之后补量一趟')
+  ok(on.includes("pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); if (allOpen) clampScan(pane)"),
+    '「展开全部」之后补量一趟(「收起全部」不必量:全都 display:none)')
   ok(on.includes("pane.querySelectorAll('dd.x, dd.decided, dd.demonote, div.notes, dd.lsrc')"),
     'richText 开着时 source 徽章(dd.lsrc)也进扫描名单')
 
   // ---- 把生成物里那只 clampScan 抠出来真跑一遍(手搭最小 DOM:只实现它用到的那几面)----
   const src = (on.match(/ {2}function clampScan\(pane\) \{[\s\S]*?\n {2}\}/) || [''])[0]
   ok(src.includes('scrollHeight') && src.includes('offsetParent'), '抠得到 clampScan 本体', src.slice(0, 60))
+  // 顺带记下读/写的先后:量(offsetParent / lineHeight / scrollHeight)与写(data-cl / .clamp)
+  // 一旦交替,浏览器每写一次就得为下一次读强制同步重排一整块 pane —— 这是 0.15.18 埋下的那笔。
+  const io68 = []
   const mkEl = (sel, chars, o = {}) => ({
-    sel, dataset: {}, cls: new Set(),
-    offsetParent: o.hidden ? null : {},
+    sel, dataset: new Proxy({}, { set: (t, k, v) => { io68.push('write'); t[k] = v; return true } }), cls: new Set(),
+    get offsetParent() { io68.push('read'); return o.hidden ? null : {} },
     querySelector: (s) => (o.full && s === '.lfull' ? {} : null),
-    scrollHeight: Math.ceil(chars / 40) * 21, // 40 字/行 × 21px 行高
-    classList: { add(c) { this.own.cls.add(c) } },
+    get scrollHeight() { io68.push('read'); return Math.ceil(chars / 40) * 21 }, // 40 字/行 × 21px 行高
+    classList: { add(c) { io68.push('write'); this.own.cls.add(c) } },
   })
   const els = [mkEl('dd.x', 1200), mkEl('dd.decided', 40), mkEl('dd.lsrc', 223), mkEl('div.notes', 900, { full: true }), mkEl('dd.x', 1200, { hidden: true })]
   els.forEach((e) => { e.classList.own = e })
   const pane = { querySelectorAll: (sel) => els.filter((e) => sel.split(', ').includes(e.sel)) }
-  const scan = new Function('getComputedStyle', src + '\n; return clampScan')(() => ({ lineHeight: '21px' }))
+  const scan = new Function('getComputedStyle', src + '\n; return clampScan')((el) => { io68.push('read'); return { lineHeight: '21px' } })
   scan(pane)
+  ok(io68.includes('write') && io68.lastIndexOf('read') < io68.indexOf('write'),
+    '量完再写:一趟只读、一趟只写 —— 中间不夹写,浏览器就不必为每个元素强制重排一次整块 pane',
+    io68.join(','))
   ok(els[0].cls.has('clamp'), '1200 字的 question:量到超 3.3 行 → 打 .clamp(点开有「展开 ▾」)')
   ok(!els[1].cls.has('clamp') && els[1].dataset.cl === '1', '40 字的结论:量过了,不折')
   ok(els[2].cls.has('clamp'), '223 字的 source 徽章同样收得住')
@@ -4399,7 +4592,7 @@ console.log('T68 行卡展开时补量折叠')
 console.log('T69 前置依赖 after')
 {
   const D = await import(join(NEW_SCRIPTS, 'deps.mjs'))
-  const { localDate, stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+  const { boardRepo, localDate, stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
   const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
   const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
@@ -4415,6 +4608,9 @@ console.log('T69 前置依赖 after')
     ok(k('') === 'null' && k('  ') === 'null' && k('BL C74') === 'null' && k('a/b') === 'null' && k('#0') === 'null',
       '空 / 带空白 / 带路径分隔符 / 0 号都不是合法 ref')
     ok(D.afterOf({ after: ['BL-1', 'BL-1', ' BL-2 ', '', null] }).join(',') === 'BL-1,BL-2', 'afterOf 去重去空、保留书写顺序')
+    ok(D.afterOf({ after: ['266', '#266', 'v1.0', 'v1.0'] }).join(',') === '266,v1.0',
+      '去重按归一键:266 与 #266 是同一个 PR,按原文比会各占一项,芯片就会说「等 2 项」而其实只有一个')
+    ok(D.afterKey('266') === '#266' && D.afterKey('#266') === '#266' && D.afterKey('BL-1') === 'BL-1', '归一键就是 parseAfterRef 的 ref')
     ok(D.afterOf({ after: 'BL-1' }).length === 0 && D.afterOf({}).length === 0, '不是数组 = 没写(硬报错在 gen 那道门)')
   }
 
@@ -4422,10 +4618,10 @@ console.log('T69 前置依赖 after')
     const ctx = {
       repo: 'o/r',
       cardById: new Map([
-        ['BL-1', { id: 'BL-1', status: 'done' }], ['BL-2', { id: 'BL-2', status: 'ready' }],
-        ['D1', { id: 'D1', status: 'live' }], ['D2', { id: 'D2', status: 'closed' }], ['D3', { id: 'D3', status: 'draft' }],
+        ['BL-1', { id: 'BL-1', status: 'done', date: '2026-08-01', note: '【2026-08-05】开工\n\n【2026-09-02】status → done' }],
+        ['BL-2', { id: 'BL-2', status: 'ready' }],
+        ['D1', { id: 'D1', status: 'live' }], ['D2', { id: 'D2', status: 'closed', date: '2026-07-07' }], ['D3', { id: 'D3', status: 'draft' }],
       ]),
-      cardUpd: (id) => (id === 'BL-1' ? '2026-09-02' : ''),
       relPr: new Map([
         [227, { number: 227, state: 'merged', mergedAt: '2026-08-19T01:00:00Z' }],
         [230, { number: 230, state: 'open', mergedAt: null }],
@@ -4434,7 +4630,9 @@ console.log('T69 前置依赖 after')
       relTag: new Map([['v0.0.1', '2026-08-20T09:00:00Z']]),
     }
     const r = (s) => D.resolveAfter(s, ctx)
-    ok(r('BL-1').cleared && r('BL-1').at === '2026-09-02', 'backlog 卡 done = 已清,清除日 = 卡文件最后改动日')
+    ok(r('BL-1').cleared && r('BL-1').at === '2026-09-02', 'backlog 卡 done = 已清,清除日 = 时间线里那条终态转移的日期')
+    ok(r('D2').at === '2026-07-07', '没有时间线的卡(决策卡就没有这个字段)退到卡上的 date')
+    ok(r('D1').at === '', 'date 也没有 → 空串:不知道就不说,不硬编一个假日期')
     ok(!r('BL-2').cleared, 'backlog 卡 ready = 没清')
     ok(r('D1').cleared && r('D2').cleared && !r('D3').cleared, '决策卡 live / closed = 已清,其余没清(TERMINAL 一个并集就够)')
     ok(r('#227').cleared && r('#227').at === '2026-08-19', 'PR 合了 = 已清,清除日 = mergedAt')
@@ -4442,15 +4640,31 @@ console.log('T69 前置依赖 after')
     ok(r('v0.0.1').cleared && r('v0.0.1').at === '2026-08-20', '版本 tag 在 releases[] 里 = 已发,清除日 = 打 tag 时刻')
     ok(!r('v9.9.9').cleared && !r('v9.9.9').unknown, '还没发的版本是「没清」,不是错')
     ok(!r('#999').cleared && !r('#999').unknown, '没同步过的 PR 号同上 —— 它本来就是「还没发生」')
-    ok(!r('other/repo#5').cleared, '跨仓 PR 的状态不在本仓 manifest 里,保守算没清(能不能开工这件事,缺数据要保守)')
+    // 号要用 fixture 里真有的那个,判据才压在「仓」上:拿一个板上根本没有的号,走不走跨仓分支都是没清
+    ok(r('#227').cleared && !r('other/repo#227').cleared,
+      '同一个号:本仓的算清了,跨仓的保守算没清 —— 判据是仓不是号(号在两仓之间撞车很常见)')
+    ok(r('o/r#227').cleared, '显式写本仓 owner/repo#N 与 #N 等价')
     ok(r('BL-404').unknown === true, '板上没有的卡号:标出来给上层硬报错')
-    ok(D.depItemText(r('BL-1')) === '✓ BL-1 已收 09-02' && D.depItemText(r('#230')) === '#230 开着'
+    ok(D.depItemText(r('BL-1')) === '✓ BL-1 已收 09-02' && D.depItemText(r('#230')) === '#230 开着'  // 09-02 = 那条终态转移
       && D.depItemText(r('v9.9.9')) === 'v9.9.9 未发', '逐项长形照定稿 §2.1 那三个样子')
     ok(D.depItemShort(r('#227')) === '#227 已合', '守卫那行的短形不带勾也不带日期')
     const mixed = [r('BL-1'), r('#227'), r('v0.0.1')]
     ok(D.openCount(mixed) === 0 && D.clearedAt(mixed) === '2026-09-02', '全清:清除日取各项里最大的那个')
     ok(D.clearedAt([r('BL-2'), r('#227')]) === '2026-08-19' && D.openCount([r('BL-2'), r('#227')]) === 1, '部分清:只数没清的')
     ok(D.clearedAt([r('D1')]) === '', '取不到日期时是空串,不硬编一个假日期')
+    // 收到终态那天:三条取值链 + 「最后一条为准」
+    const tAt = D.terminalAt
+    ok(tAt({ status: 'done', note: '【2026-09-01】status → wip\n\n【2026-09-03】status → done' }) === '2026-09-03',
+      '认 ddd card status 写的那行')
+    ok(tAt({ notes: '【2026-09-04 收账】PR#266 已合(自动)' }) === '2026-09-04', '也认 pr-sync --settle 写的那行')
+    ok(tAt({ note: '【2026-09-01】status → done\n\n【2026-09-02】status → ready\n\n【2026-09-05】status → done' }) === '2026-09-05',
+      '重开又收的卡按最近那次算(取最后一条,不是第一条)')
+    ok(tAt({ note: '【2026-09-01】status → ready', date: '2026-08-08' }) === '2026-08-08',
+      '时间线里只有非终态的转移 → 退到 date(不拿一个「变成 ready 那天」冒充清除日)')
+    ok(tAt({ note: '随手记了两句,没有时间戳', date: '2026-08-08' }) === '2026-08-08', '没有时间线格式的正文不误判')
+    ok(tAt({ date: 'yesterday' }) === '' && tAt({}) === '', 'date 不是日期形制 / 什么都没有 → 空串')
+    ok(tAt({ status: 'done', note: '【2026-09-03】status → done' }) === tAt({ status: 'done', note: '【2026-09-03】status → done' }),
+      '同一张卡拆不拆都是同一个值 —— 清除日不再随「卡文件最后改动日」跑')
   }
 
   { // ---- ③ 未知卡号 / 自指 / 环(纯函数;gen 与 CLI 共用这一份)----
@@ -4501,19 +4715,20 @@ console.log('T69 前置依赖 after')
   const rGen = runGen(NEW_SCRIPTS, kb)
   const on = readFileSync(idxP, 'utf8')
   ok(rGen.status === 0, 'gen 跑得过', rGen.stderr.slice(0, 200))
-  ok(on.includes('<span class="depchip dep-wait" title="✓ BL-5 已收 · #230 开着 · v9.9.9 未发">等 2 项</span>'),
+  ok(on.includes('<span class="depchip dep-wait" title="✓ BL-5 已收 08-01 · #230 开着 · v9.9.9 未发">等 2 项</span>'),
     '未全清:灰芯片「等 N 项」数的是还没清的,逐项状态挂 title')
-  ok(on.includes('<span class="depchip dep-clear" title="✓ BL-5 已收 · ✓ #227 已合 08-19 · ✓ v0.0.1 已发 08-20">前置已清 · 08-20</span>'),
+  ok(on.includes('<span class="depchip dep-clear" title="✓ BL-5 已收 08-01 · ✓ #227 已合 08-19 · ✓ v0.0.1 已发 08-20">前置已清 · 08-20</span>'),
     '全清:安静芯片「前置已清 · MM-DD」,日期取各项清除日的最大值')
-  ok(on.includes('<span class="depchip dep-unlock" title="清掉这张卡就解锁:BL-6 · BL-7 · BL-8 · BL-9">解锁 <a href="#BL-6">BL-6</a> · <a href="#BL-7">BL-7</a> · <a href="#BL-8">BL-8</a><i class="depmore">+1</i></span>'),
-    '反向芯片:面上最多 3 个 + 折一枚 +N,title 列全,每个号点得动')
+  ok(on.includes('<span class="depchip dep-unlock" title="这些卡的前置里有它:BL-6 · BL-7 · BL-8 · BL-9">被 <a href="#BL-6">BL-6</a> · <a href="#BL-7">BL-7</a> · <a href="#BL-8">BL-8</a><i class="depmore">+1</i> 等着</span>'),
+    '反向芯片:陈述「谁的前置里有它」,面上最多 3 个 + 折一枚 +N,title 列全,每个号点得动')
+  ok(!/解锁/.test(on), '不说「清掉这张卡就解锁 X」—— 对方往往还等着别的,那是句常常不成立的承诺')
   ok(count(on, 'class="depchip dep-unlock"') === 1, '被指的 BL-5 已 done(终态)—— 终态卡不出反向芯片')
   ok(count(on, 'data-after-open="1"') === 5, '烤入 data-after-open 的正是那 5 张还等着前置的 ready 卡', String(count(on, 'data-after-open="1"')))
   ok(!/id="BL-2"[^>]*data-after-open/.test(on), '全清的卡不带 data-after-open(它今天动得了手)')
   ok(on.includes('可立即做 3(另 5 等前置) · 已超 2'),
     '横幅改口:「可立即做 N(另 M 等前置)」,软硬阈按可立即做那个数算')
   ok(on.includes(".bl-ready[data-after-open]") && on.includes("'可立即做 ' + wipN + wipAll"),
-    'setLine 的运行期重算数得到 data-after-open,并用同一套措辞')
+    'setLine 的运行期重算数得到 data-after-open,并用同一套措辞(头词与量词是 gen 期常量,一句话只留一处)')
   ok(on.includes('.depchip {') && on.includes('.dep-unlock a {'), '有 after 的板才注入那段 CSS')
   ok(!on.includes('#7c3aed') || off.includes('#7c3aed'), '不引新色(芯片只用既有令牌)')
   { // 运行期重算的算术:把那段抠出来真跑一遍(与烤入的文案对齐)
@@ -4532,16 +4747,80 @@ console.log('T69 前置依赖 after')
     ok(run(8, 0) === '可立即做 8(全板 3) · 已超 2', '当前筛选下没有等前置的卡:括号里不提它', run(8, 0))
   }
 
-  { // 卡离开 ready 之后「前置已清」不再渲染(那时它是句废话);「等 N 项」照旧说话
+  { // 门是「终态」不是「ready」:deferred 只是搁置,前置清没清仍是它身上的事实;done 之后两枚都收声
     const x = rd(blP)
     x.items.find((i) => i.id === 'BL-2').status = 'deferred'
+    x.items.find((i) => i.id === 'BL-1').status = 'deferred'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const hDef = readFileSync(idxP, 'utf8')
+    ok(hDef.includes('class="depchip dep-clear"') && hDef.includes('等 2 项'),
+      'deferred(非终态):两枚芯片照旧 —— 它们说的是事实,不是催促')
+
+    x.items.find((i) => i.id === 'BL-2').status = 'done'
+    x.items.find((i) => i.id === 'BL-1').status = 'done'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const hDone = readFileSync(idxP, 'utf8')
+    ok(!hDone.includes('class="depchip dep-clear"'), '收到终态:「前置已清」是句废话,不再渲染')
+    ok(!hDone.includes('等 2 项'), '收到终态:「等 N 项」读起来像出错了,同样不再渲染')
+
+    x.items.find((i) => i.id === 'BL-2').status = 'ready'
+    x.items.find((i) => i.id === 'BL-1').status = 'ready'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // 总览「可做」那行:面上的字与口径一致(数的是可立即做,不是 ready 张数)
+    const cfgOv = rd(cfgP); cfgOv.overviewTab = true; wr(cfgP, cfgOv)
+    runGen(NEW_SCRIPTS, kb)
+    const hOv = readFileSync(idxP, 'utf8')
+    ok(hOv.includes('<span id="ovreadyn">3</span></b> 张可立即做<span id="ovreadyw">(另 5 张等前置)</span>'),
+      '总览:「3 张可立即做(另 5 张等前置)」—— 与横幅同一个数、同一句交代,不再写「N 张 ready」',
+      (hOv.match(/ovreadyn[\s\S]{0,90}/) || [''])[0])
+    ok(hOv.includes("const ovWEl = document.getElementById('ovreadyw')"), '随线别/筛选重算时括号那半句也跟着改')
+
+    const xOv = rd(blP); xOv.items = mkItems(); wr(blP, xOv)
+    runGen(NEW_SCRIPTS, kb)
+    ok(/<span id="ovreadyn">4<\/span><\/b> 张 ready/.test(readFileSync(idxP, 'utf8')),
+      '板上一条 after 都没有:仍是「N 张 ready」,逐字节冻结')
+    wr(blP, withAfter)
+    cfgOv.overviewTab = false; wr(cfgP, cfgOv)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // 反向名单只列还没终态的那几张:做完的卡不该出现在「谁在等它」里
+    const x = rd(blP)
+    for (const id of ['BL-6', 'BL-7']) x.items.find((i) => i.id === id).status = 'done'
     wr(blP, x)
     runGen(NEW_SCRIPTS, kb)
     const h = readFileSync(idxP, 'utf8')
-    ok(!h.includes('class="depchip dep-clear"'), '卡从 ready 挪走:全清那枚芯片不再渲染')
-    ok(h.includes('等 2 项'), '还没清完的那枚不受状态影响 —— 它说的是事实,不是催促')
-    x.items.find((i) => i.id === 'BL-2').status = 'ready'
+    ok(/dep-unlock" title="这些卡的前置里有它:BL-8 · BL-9">被 <a href="#BL-8">BL-8<\/a> · <a href="#BL-9">BL-9<\/a> 等着/.test(h),
+      '两张依赖卡收掉之后:名单只剩没终态的两张,面上正好列得下,不长 +N', (h.match(/dep-unlock[^<]*<[^>]*>[^<]*/) || [''])[0])
+    for (const id of ['BL-6', 'BL-7', 'BL-8'] ) x.items.find((i) => i.id === id).status = 'done'
     wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const h2 = readFileSync(idxP, 'utf8')
+    ok(/dep-unlock" title="这些卡的前置里有它:BL-9">被 <a href="#BL-9">BL-9<\/a> 等着/.test(h2) && !/<i class="depmore"/.test(h2),
+      '只剩一张:面上就一个号')
+    for (const id of ['BL-6', 'BL-7', 'BL-8', 'BL-9']) x.items.find((i) => i.id === id).status = 'done'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    ok(!readFileSync(idxP, 'utf8').includes('class="depchip dep-unlock"'),
+      '等它的卡全收完了:整枚芯片不出 —— 而不是留一枚「被(已经做完的那几张)等着」')
+    wr(blP, withAfter)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // 正好 DEPS_UNLOCK_SHOW 张:三个号全列在面上,不长一枚写着 +0 的折叠标
+    const x = rd(blP)
+    x.items = x.items.filter((i) => i.id !== 'BL-9')
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const h = readFileSync(idxP, 'utf8')
+    ok(/被 <a href="#BL-6">BL-6<\/a> · <a href="#BL-7">BL-7<\/a> · <a href="#BL-8">BL-8<\/a> 等着/.test(h) && !/<i class="depmore"/.test(h),
+      '正好 3 张:全列在面上,不长 +N(> 写成 >= 就会出「+0」)')
+    wr(blP, withAfter)
     runGen(NEW_SCRIPTS, kb)
   }
 
@@ -4581,6 +4860,10 @@ console.log('T69 前置依赖 after')
     x.items.push({ id: 'BL-C', status: 'ready', date: '2026-09-01', title: '30 天前发的版', ...base, after: ['v0.0.1'] })
     x.items.push({ id: 'BL-D', status: 'done', date: '2026-09-01', title: '清了但卡已收', ...base, after: ['#226'] })
     x.items.push({ id: 'BL-E', status: 'ready', date: '2026-09-01', title: '还等着', ...base, after: ['#230'] })
+    rel.prs.find((p) => p.number === 232).state = 'merged'
+    rel.prs.find((p) => p.number === 232).mergedAt = mergedOn(8) // 天数写死:跟着 DEPS_FRESH_DAYS 算的话,改常数会把用例一起搬走
+    wr(join(kb, 'release-manifest.json'), rel)
+    x.items.push({ id: 'BL-F', status: 'ready', date: '2026-09-01', title: '刚过窗口一天', ...base, after: ['#232'] })
     wr(blP, x)
     runGen(NEW_SCRIPTS, kb)
     touch(idxP)
@@ -4590,6 +4873,7 @@ console.log('T69 前置依赖 after')
     ok(/BL-B/.test(line) && /BL-A/.test(line), '7 天内清掉的卡都点到(边界那天算在内)', line)
     ok(line.indexOf('BL-B') < line.indexOf('BL-A'), '最近清的排前面')
     ok(!/BL-C/.test(line), '30 天前清的:过了 7 天窗口,不再说')
+    ok(!/BL-F/.test(line), '刚过窗口一天(8 天)就不说了 —— 这条线两侧都钉住,不然窗口悄悄放宽没人知道', line)
     ok(!/BL-D/.test(line), '卡已经收了(不再 ready)的不点 —— 它不需要「可以开工了」')
     ok(!/BL-E/.test(line), '还等着前置的当然不点')
     ok(/BL-B\(#226 已合\)/.test(line), '括号里逐项列清掉的是什么', line)
@@ -4633,9 +4917,17 @@ console.log('T69 前置依赖 after')
 
     const a1 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', '#230'])
     ok(a1.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230', 'card after 追加,顺序即书写顺序', a1.stderr)
+    // 同一个号的两种写法是同一项:按原文比会各占一项,卡头就会说「等 2 项」而其实只有一个 PR
+    const a1b = runCli(kb2, ['card', 'after', 'BL-1', '230'])
+    ok(a1b.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230', '换个写法追加同一个号:一个字节都不加', afterOfCard('BL-1').join(','))
+    const a1c = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '230'])
+    ok(a1c.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2', '--rm 也按归一键找:写 230 删得掉 #230')
+    runCli(kb2, ['card', 'after', 'BL-1', '#230'])
     const a2 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', 'v0.0.1'])
     ok(a2.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230,v0.0.1', '再追加:已有的去重,新的落到末尾')
-    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('after'), 'after 落进键序里(blockedOn 旁边)')
+    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('source,after,problem'),
+      'after 插在扁平档末尾 —— 第一个长文字段之前(normalizeCard 按 band 插,不按 K_FLAT 的邻居)',
+      Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(','))
     const a3 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#230'])
     ok(a3.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,v0.0.1', '--rm 只去掉那一项')
     const a4 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#999'])
@@ -4658,23 +4950,133 @@ console.log('T69 前置依赖 after')
     ok(a11.status === 1, '--rm 后面再跟 ref:拒(一次只移除一项)')
     runCli(kb2, ['card', 'set', 'BL-1', 'after', '--json', '["BL-2","#230","v0.0.1"]'])
     const show = runCli(kb2, ['card', 'show', 'BL-1'])
-    ok(show.status === 0 && /前置: ✓ BL-2 已收 · #230 开着 · ✓ v0\.0\.1 已发/.test(show.stdout),
-      'card show 多一行「前置」,逐项带当前状态(与 gen 同一份函数)', (show.stdout.match(/前置.*/) || [''])[0])
-    ok(runCli(kb2, ['card', 'show', 'BL-3']).stdout.includes('前置: BL-1 未收'), '指向还没收的卡:说「未收」')
+    ok(show.status === 0 && /after\(前置\): ✓ BL-2 已收 · #230 开着 · ✓ v0\.0\.1 已发/.test(show.stdout),
+      'card show 多一行「after(前置)」,逐项带当前状态(与 gen 同一份函数)', (show.stdout.match(/after\(前置\).*/) || [''])[0])
+    { // 这一行紧跟在 after 字段本身后面:中间隔着长正文的话,「关联的放一起」就断了
+      const lines = show.stdout.split('\n')
+      const at = lines.findIndex((l) => /^  after: /.test(l))
+      ok(at > 0 && /^  after\(前置\): /.test(lines[at + 1] || ''), '解析行紧贴着字段本身那一行', lines.slice(at, at + 2).join(' | '))
+    }
+    ok(runCli(kb2, ['card', 'show', 'BL-3']).stdout.includes('after(前置): BL-1 未收'), '指向还没收的卡:说「未收」')
     ok(!/不认识的字段|unknown field/.test(runCli(kb2, ['card', 'set', 'BL-2', 'after', '--json', '[]']).stderr), 'after 是已知字段')
     ok(/card after/.test(runCli(kb2, ['--help']).stdout), '--help 里有它')
   }
 
-  { // ---- ⑧ 拆分等价门认得前置芯片里的日期(卡号前置的清除日 = 那张卡的最后改动日,拆分后才有)----
-    const a = '<span class="depchip dep-clear" title="✓ BL-5 已收 09-02">前置已清 · 09-02</span>'
-    const z = '<span class="depchip dep-clear" title="✓ BL-5 已收">前置已清</span>'
-    ok(stripCardUpdated(a) === stripCardUpdated(z), 'cards-split / cards-join 的逐字节等价门把它归一(否则一拆就判「搬坏了」)')
-    const w1 = '<span class="depchip dep-wait" title="✓ BL-5 已收 09-02 · #230 开着">等 1 项</span>'
-    const w2 = '<span class="depchip dep-wait" title="✓ BL-5 已收 · #230 开着">等 1 项</span>'
-    ok(stripCardUpdated(w1) === stripCardUpdated(w2), '「等 N 项」的 title 同样归一')
-    const u = '<span class="depchip dep-unlock" title="x"><a href="#BL-6">BL-6</a></span>'
-    ok(stripCardUpdated(u) === u, '反向芯片不含日期,原样不动')
+  { // ---- ⑧b 三处同一个「板上有哪些卡」:进度卡也是合法前置,CLI 不该拒写 gen 照渲的东西 ----
+    const fx3 = mkFixture('fx69uni', { 's.html': demoHtml('s') })
+    const kb3 = fx3.kb
+    const mP = join(kb3, 'manifest.json'), bl3 = join(kb3, 'backlog-manifest.json')
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const z = rd(join(kb3, f)); z.instance.ghRepo = 'o/r'; wr(join(kb3, f), z)
+    }
+    const mm = rd(mP)
+    mm.iterations = [{ id: 'I1', title: '迭代甲', detail: '' }]
+    mm.tasks = [
+      { id: 'T1', iteration: 'I1', status: 'done', title: '做完的进度卡', approach: 'a' },
+      { id: 'T2', iteration: 'I1', status: 'active', title: '在做的进度卡', approach: 'a' },
+    ]
+    wr(mP, mm)
+    const b3 = rd(bl3); b3.tiers = { 1: '核心' }
+    b3.items = [
+      { id: 'BL-1', status: 'ready', date: '2026-09-01', title: '甲', ...base },
+      { id: 'BL-2', status: 'ready', date: '2026-09-01', title: '乙', ...base, after: ['T2'] },
+    ]
+    wr(bl3, b3)
+    const dec3 = rd(join(kb3, 'decisions-manifest.json')); dec3.entries = []; wr(join(kb3, 'decisions-manifest.json'), dec3)
+
+    const t1 = runCli(kb3, ['card', 'after', 'BL-1', 'T1'])
+    ok(t1.status === 0, '进度卡当前置:CLI 写得进去(0.16.0 会说「板上没有卡号 T1」,而 gen 一直认它)', t1.stderr.slice(0, 160))
+    const rg3 = runGen(NEW_SCRIPTS, kb3)
+    const h3 = rg3.status === 0 ? readFileSync(join(kb3, 'index.html'), 'utf8') : ''
+    ok(rg3.status === 0 && /id="BL-1"[\s\S]{0,600}?depchip dep-clear/.test(h3),
+      '同一条 after,gen 渲染成「前置已清」—— CLI 放过去的 gen 也放得过去', rg3.stderr.slice(0, 160))
+    ok(/id="T2"[\s\S]{0,900}?depchip dep-unlock/.test(h3), '进度卡也长反向芯片(BL-2 在等 T2)')
+    ok(count(h3, 'depchip dep-unlock') === 1 && /dep-unlock" title="[^"]*BL-2/.test(h3),
+      '全板只有 T2 那一枚反向芯片 —— 已终态的 T1 被 BL-1 指着也不出', String(count(h3, 'depchip dep-unlock')))
+    ok(runCli(kb3, ['card', 'show', 'BL-1']).stdout.includes('after(前置): ✓ T1 已收'), 'card show 也解析得出进度卡的状态')
+    ok(runCli(kb3, ['card', 'after', 'BL-1', '--rm', 'T1']).status === 0, '写得进去也删得掉(整条 after 会被重校验一遍)')
+    ok(runCli(kb3, ['card', 'after', 'BL-1', 'T404']).status === 1, '真不存在的号照旧拒写')
+
+    // instance.ghRepo 的取法一处定:manifest.json 优先,空了才退另两份
+    const C = { instance: { ghRepo: 'm/main' } }, B = { instance: { ghRepo: 'b/back' } }
+    ok(boardRepo(C, B) === 'm/main' && boardRepo({}, B) === 'b/back' && boardRepo({}, {}) === '' && boardRepo(null) === '',
+      'boardRepo:manifest.json 优先、空了退下一份、都空是空串')
+    ok(boardRepo({ instance: { ghRepo: ' o/r ' } }) === 'o/r', '顺手去掉首尾空白')
+    const ddSrc = readFileSync(join(NEW_SCRIPTS, 'ddd.mjs'), 'utf8')
+    ok(ddSrc.includes('if (DEP_CTX) return DEP_CTX'), 'CLI 的 depCtx 建一次存下来 —— warnWip 在 ready 卡的 filter 里逐张调它')
+    ok(!/for \(const x of allCards\(\)\) cardById\.set/.test(ddSrc) && ddSrc.includes('depCtxFrom('),
+      '三处都走 deps.mjs 的 depCtxFrom,不再各拼一遍 cardById / relPr / relTag')
   }
+
+  { // ---- ⑧ 拆分等价门:前置芯片整枚原样比(0.16.1 起清除日与拆不拆无关,不必再归一)----
+    const a = '<span class="depchip dep-clear" title="✓ BL-5 已收 09-02">前置已清 · 09-02</span>'
+    ok(stripCardUpdated(a) === a, '前置芯片原样进等价门 —— 清除日取自卡里的时间线 / date,拆不拆都一样')
+    const w1 = '<span class="depchip dep-wait" title="✓ BL-5 已收 09-02 · #230 开着">等 1 项</span>'
+    ok(stripCardUpdated(w1) !== stripCardUpdated(w1.replace('等 1 项', '等 2 项')),
+      '项数变了判得出来 —— 0.16.0 那条规则把整枚芯片抹平,这类真差异会被这道门放过去')
+    ok(stripCardUpdated(w1) !== stripCardUpdated(w1.replace('#230', '#231')), 'title 里换个 ref 同样判得出来')
+    const u = '<span class="depchip dep-unlock" title="x"><a href="#BL-6">BL-6</a></span>'
+    ok(stripCardUpdated(u) === u, '反向芯片原样不动')
+  }
+}
+
+// ============ T70 英文串表(loadStrings 不做逐键回落:少一个键 = 守卫在收工那一刻 TypeError)============
+// 整套测试里只有 T18 用过 lang:'en',而它测的是 gen 的另一张硬报错表 —— 守卫那几十个键一个都没被
+// 调用过。strings.mjs 的 loadStrings 直接返回 tables[lang],不与 zh 合并;stop-hook 又没有顶层
+// try/catch,所以 en 表少一个键 = 守卫以非零码崩在收工那一刻,而全套测试仍是绿的。
+console.log('T70 英文串表')
+{
+  const { pickStrings } = await import(join(NEW_SCRIPTS, 'strings.mjs'))
+  const zhT = pickStrings('zh'), enT = pickStrings('en')
+  const miss = [], typ = [], ari = []
+  const walk = (a, b, path) => {
+    for (const k of Object.keys(a)) {
+      const at = path ? `${path}.${k}` : k
+      if (!(k in b)) { miss.push(at); continue }
+      if (typeof a[k] !== typeof b[k]) { typ.push(`${at}:${typeof a[k]}≠${typeof b[k]}`); continue }
+      if (typeof a[k] === 'function') { if (a[k].length !== b[k].length) ari.push(`${at}(${a[k].length}≠${b[k].length})`); continue }
+      if (a[k] && typeof a[k] === 'object' && !Array.isArray(a[k])) walk(a[k], b[k], at)
+    }
+  }
+  walk(zhT, enT, '')
+  ok(miss.length === 0, 'en 表一个键都不缺(缺了就是 S.<key>(…) 打在 undefined 上)', miss.join(' '))
+  ok(typ.length === 0 && ari.length === 0, '同名键的类型与函数入参个数也对得上', [...typ, ...ari].join(' '))
+
+  // 真跑一趟 en 板的守卫:上面比的是键名,这里是把这一批新键实际调用一遍
+  const fx = mkFixture('fx70', { 's.html': demoHtml('s') })
+  const kb = fx.kb
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const dayAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+  for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+    const x = rd(join(kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(kb, f), x)
+  }
+  const rel = JSON.parse(JSON.stringify(REL_MANIFEST))
+  rel.prs.find((p) => p.number === 227).mergedAt = `${dayAgo(1)}T01:00:00Z`
+  wr(join(kb, 'release-manifest.json'), rel)
+  const bl = rd(join(kb, 'backlog-manifest.json'))
+  bl.tiers = { 1: 'core' }
+  const b70 = { tier: '1', priority: 'high', area: 'x', source: 's', approach: 'a' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', title: 'long prose', ...b70, problem: 'x'.repeat(900) },       // richLongText
+    { id: 'BL-2', status: 'ready', title: 'unsettled', ...b70, problem: 'p', pr: 226 },            // respSettle
+    { id: 'BL-3', status: 'ready', title: 'held', ...b70, problem: 'p', pr: 227, settleHold: 'half landed', settleHoldAt: dayAgo(20) }, // respHoldOld
+    { id: 'BL-4', status: 'ready', title: 'just unblocked', ...b70, problem: 'p', after: ['#227'] }, // depsUnlocked
+  ]
+  wr(join(kb, 'backlog-manifest.json'), bl)
+  const cfg = rd(join(kb, 'kanban.config.json'))
+  cfg.lang = 'en'; cfg.releaseTab = true; cfg.richText = true; cfg.wip = { soft: 0, hard: 0 }
+  wr(join(kb, 'kanban.config.json'), cfg)
+  runGen(NEW_SCRIPTS, kb)
+  touch(join(kb, 'index.html'))
+  const g = runStop(NEW_SCRIPTS, fx.root)
+  ok(g.status === 0, 'lang:en 的板上,守卫跑得完(0.16.0 的 en 表少一个键就会在这里 TypeError)', g.stderr.slice(0, 300))
+  let msg = ''
+  try { msg = JSON.parse(g.stdout || '{}').systemMessage || '' } catch { msg = 'NOT-JSON: ' + g.stdout.slice(0, 200) }
+  ok(!msg.startsWith('NOT-JSON'), 'stdout 是合法 JSON', msg.slice(0, 200))
+  ok(/Kanban guard/.test(msg) && /Prerequisites cleared/.test(msg) && /On settle hold/.test(msg) && /prose field over 800/.test(msg),
+    '这一批 0.15.x/0.16.x 新键真被调用了一遍(前置已清 / 挂账到期 / 长正文 / 积压)', msg.slice(0, 400))
+  ok(!/[\u4e00-\u9fff]/.test(msg), 'en 板上的守卫通知里一个中文字都不该有', (msg.match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

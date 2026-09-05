@@ -62,6 +62,14 @@ export function relTicks(days, ax, special, min) {
   return out
 }
 
+/**
+ * 芯片横排的步距:芯片宽 + 一道固定间距。一处定 —— packer 按它预留横向(blk),gen 的 tlWhisk
+ * 按它摆芯片,relGridChip 按它算一格放得下几个;三处各写一个 6,改一处漏一处,最后一枚芯片与 +N
+ * 就会探出预留块、压到细线与右邻那一格上(v0.15.4「轴的分隔线与带的分隔线差几十像素」同一类)。
+ */
+export var CHIP_GAP = 6
+export function relChipPitch(cw) { return cw + CHIP_GAP }
+
 /** 一条 PR 在轴上的像素区间(s / e 为 ISO 日);整段落在窗口外返回 null */
 export function relBar(ax, s, e, min) {
   if (e < ax.t0 || s > ax.t1) return null
@@ -206,7 +214,7 @@ export function relGridBig(byDay, ax, size, o) {
  * 只画一行是有意的 —— 芯片本身就是「这一格里有谁」的答案,叠成一叠反而又要数。
  */
 export function relGridChip(byDay, ax, cw) {
-  var pitch = cw + 6, out = [], d, arr, cols, show, i, fold
+  var pitch = relChipPitch(cw), out = [], d, arr, cols, show, i, fold
   for (d in byDay) {
     if (ax.x[d] === undefined) continue
     arr = byDay[d].slice().sort(function (a, b) { return a.n - b.n })
@@ -232,7 +240,7 @@ export function relGridChip(byDay, ax, cw) {
  * @returns { used, rows: [{ lane, clip, open, x0, x1, cx, show, list }] } x0→x1 = 细线,cx = 芯片起点
  */
 export function relPackChip(multi, ax, cw, o) {
-  var pitch = cw + 6, gm = {}, order = [], rows = [], ends = [], i, j, q, k, it, g, an, clip, cx, cols, show, blk, x0, x1, lo, hi
+  var pitch = relChipPitch(cw), gm = {}, order = [], rows = [], ends = [], i, j, q, k, it, g, an, clip, cx, cols, show, blk, x0, x1, lo, hi
   for (i = 0; i < multi.length; i++) {
     it = multi[i]
     if (it.e < ax.t0 || it.s > ax.t1) continue
@@ -253,7 +261,7 @@ export function relPackChip(multi, ax, cw, o) {
     cx = g.open && clip ? o.lbl + 14 : ax.x[an] + 4 // 裁掉的那端给 ‹ 让出一点位置
     cols = Math.max(1, Math.floor((ax.x[an] + ax.w[an] - cx - 4) / pitch))
     show = g.list.length > cols ? Math.max(1, cols - 1) : g.list.length
-    blk = (show + (g.list.length > show ? 1 : 0)) * pitch - 6 // 芯片块占的横向
+    blk = (show + (g.list.length > show ? 1 : 0)) * pitch - CHIP_GAP // 芯片块占的横向
     x0 = g.open ? cx + blk : (clip ? o.lbl + 11 : ax.x[g.s] + 5)
     x1 = g.open ? ax.x[g.e] + ax.w[g.e] - 4 : cx
     // 横向不打架的两组并作一行,行数照旧封顶 o.lanes —— 与 relPack 同一条规矩:

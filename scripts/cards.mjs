@@ -24,6 +24,18 @@ export const CARD_KINDS = [
 ]
 
 /**
+ * instance.ghRepo 的取法(一处定):manifest.json 优先,空了才退 backlog / decisions。
+ * 三份 manifest 各存一份是现状(gen 已有「不一致就提醒」那条),但取法只能有一条 —— gen 只读
+ * manifest.json、守卫按三份取第一个非空、CLI 从 backlog 起头,三套顺序会让 `owner/repo#12`
+ * 这种合法写法在 gen 里判「跨仓、算没清」、在守卫与 CLI 里判「本仓、已清」。
+ * @param heads 三份 manifest 的内容,按 manifest.json → backlog → decisions 传
+ */
+export const boardRepo = (...heads) => {
+  for (const h of heads) { const v = String(((h && h.instance) || {}).ghRepo || '').trim(); if (v) return v }
+  return ''
+}
+
+/**
  * 卡目录名必须是看板目录下的一个纯目录名 —— 与 gen 对 docs[].out 同一条规矩。
  * 带路径分隔符或 .. 的值会把整个卡库搬到看板目录外面:gen / CLI / 守卫都跟着走,一切看着正常,
  * 而 `git add app/kanban` 提交出去的板一张卡都没有,别人克隆下来就是空的。
@@ -46,6 +58,21 @@ export const NOTE_FIELD = { tasks: 'notes', items: 'note', entries: '' }
  */
 export function localDate(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * 两个日历日之间差几天(v0.16.1)。两边都折成 UTC 的那一天再相减 —— UTC 没有夏令时,所以
+ * 「差 14 天」永远是日历上的 14 天。原来的写法是 (Date.now() - Date.parse(日 + 'T00:00:00')) / 86400000
+ * 取整:两端都是本地午夜,窗口跨过一次切换就整整差一小时,那一格给出的天数少一天(挂账满 14 天
+ * 的卡在春季切换后的两周里报 13,守卫因此晚一天出声;秋季反过来多一天)。
+ * @returns 整数;任一端不是 YYYY-MM-DD 时 NaN(调用方本就在用 Number.isFinite 兜)
+ */
+export function daysBetween(from, to) {
+  const day = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''))
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN
+  }
+  return Math.round((day(to) - day(from)) / 86400000)
 }
 
 /** config.cardsDir 归一:非空字符串才算开,首尾斜杠去掉;其它一切(缺席/false/空串)= 关。
@@ -142,12 +169,11 @@ export function cardUpdatedMap(kanbanDir, cardsDir, srcOf) {
  *   2. LAZY_BYTES(parts 的未压缩长度,多几枚 span 就多几个字节;parts 本身另比,漏不掉真差异);
  *   3. data-dorm 的取值(沉睡天数改从卡文件最后改动日起算,这是 cardsDir 的既定行为);
  *   4. data-hold 的取值(v0.15.14:没写 settleHoldAt 的老卡,挂账天数同样从卡文件最后改动日起算)。
- *   5. 前置芯片里的日期(v0.16.0:after 指向的卡,清除日 = 那张卡的最后改动日 —— 拆分前根本
- *      没有这个事实,拆分后才有;清没清是 status 说了算,与拆分无关,只有日期会差)。
+ * (v0.16.1 起前置芯片不在此列:清除日改成「卡收到终态那天」,取自卡里已经写着的时间线 / date,
+ *  拆不拆都是同一个值 —— 这道门因此又能逐字节看住那枚芯片的全部内容,包括项数与逐项 ref。)
  */
 export function stripCardUpdated(html) {
   return String(html)
-    .replace(/<span class="depchip dep-(wait|clear)"[^>]*>[^<]*<\/span>/g, '<span class="depchip dep-$1"></span>')
     .replace(/<span class="udate"[^>]*>[^<]*<\/span>/g, '')
     .replace(/\n +\/\* =+ 每卡更新日期[^\n]*\n +\.udate \{[^\n]*/g, '')
     .replace(/const LAZY_BYTES = \{[^}]*\}/g, 'const LAZY_BYTES = {}')

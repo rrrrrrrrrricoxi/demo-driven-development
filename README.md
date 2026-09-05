@@ -321,9 +321,15 @@ status (`done` for backlog cards, `live` or `closed` for decisions); a pull
 request — written the same way as the `pr` field — is cleared when
 `release-manifest.json` has it as `merged`; a release tag is cleared when that
 tag appears in the manifest's `releases[]`. Every one of those is a fact already
-committed somewhere, so `gen` reads no clock: the clear date of a card is its
-file's last change date, of a pull request its `mergedAt`, of a release its
-`at`.
+committed somewhere, so `gen` reads no clock. The clear date of a pull request
+is its `mergedAt` and of a release its `at`; for a card it is the day that card
+reached a terminal status — the last timeline line saying so (`【2026-09-03】
+status → done`, written by `ddd card status`, or `【2026-09-03 收账】…`, written
+by `pr-sync --settle`), failing that the card's own `date`, and failing that
+nothing at all, in which case the chip carries no date and the guard stays
+quiet. It is deliberately not the card file's last change date: that date moves
+every time the finished card is touched again, which would re-date the clearance
+and make the guard repeat a notice it already gave.
 
 A pull request or a tag that is not in the release manifest yet is not cleared,
 and that is not an error — it has simply not happened. A card id that matches
@@ -334,12 +340,19 @@ a person, on something outside"), and the two can sit on the same card.
 
 While a card is waiting its header carries a grey **「等 N 项」** chip whose
 title lists each item and its state (`✓ BL-C74 已收 09-04 · #266 开着 ·
-v0.0.5 未发`). Once everything clears, and while the card is still `ready`, that
-becomes **「前置已清 · MM-DD」**, dated with the latest of the clear dates; the
-chip stops rendering once the card leaves `ready`. A card that others wait on,
-and that is not itself terminal, carries the reverse — **「解锁 BL-C132 ·
-BL-C134」**, three ids on the face at most with the rest folded into `+N`, each
-one a link to that card.
+v0.0.5 未发`). Once everything clears that becomes **「前置已清 · MM-DD」**,
+dated with the latest of the clear dates. Both chips stop once the card reaches
+a terminal status: a card that is done saying it is "waiting on 2 things" reads
+as a bug, and "prerequisites cleared" on it says nothing. Until then the chips
+stay — `deferred` and `blocked` are not verdicts on the prerequisites.
+
+A card that others wait on, and that is not itself terminal, carries the
+reverse — **「被 BL-C132 · BL-C134 等着」**, three ids on the face at most with
+the rest folded into `+N`, each one a link to that card. It names who lists this
+card as a prerequisite; it does not promise that clearing this card unblocks
+them, because they are usually waiting on other things too. Cards that have
+already reached a terminal status drop off that list — nothing finished is
+still waiting.
 
 The guard adds one non-blocking line at stop time — `前置已清:BL-C132(#266
 已合)…` — for cards whose prerequisites cleared within the last 7 days and that
@@ -381,9 +394,13 @@ One path per card either avoids that or turns it into a conflict git can stop.
 A board only one session ever writes to does not need this.
 
 Each card carries an `order` field written by the migration — the array index it
-had before, because array order *was* display order in several places. `gen`
-sorts by `order` then by `id` and deletes the field afterwards. Cards created by
-hand or by the CLI can leave it out; they sort last, by id. With the directory
+had before. `gen` sorts by `order` then by `id` and deletes the field afterwards,
+so the array it works from is the array the board had before the split. That
+array order is not what you see in the backlog and decision panes: those are
+sorted by card date, newest first, ties by id — `order` decides the things that
+do follow the array, the screenshot gallery's group order and the deep-link
+table's key order. Cards created by hand or by the CLI can leave it out; they
+sort last, by id. With the directory
 configured, each card header also shows the date its file was last committed
 (falling back to the file's mtime), and the "dormant N days" note counts from
 that date instead of the card's creation date.
@@ -565,7 +582,9 @@ or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session tag in
 and friends) have to be given as arrays, through `--json`. An unrecognised field
 only warns, since boards grow fields; `id` and `order` cannot be changed at all,
 the first because it is the card's identity and with one file per card its
-filename too, the second because it is the display order. A link's scheme has to
+filename too, the second because it is the array position the split recorded —
+editing it reshuffles what still follows the array (the screenshot gallery, the
+deep-link table) without changing the pane you were looking at. A link's scheme has to
 be `http`, `https`, `mailto` or a path relative to the repository — anything
 else would render as a live link on the board's own origin.
 
