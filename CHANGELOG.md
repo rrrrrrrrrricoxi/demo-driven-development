@@ -9,6 +9,78 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.16.0] - 2026-09-05
+
+### Added
+- **`after` dependencies: a card can say what has to clear before it can be
+  started, and the board works out whether it has.** Until now that sentence
+  only existed as prose — "waiting on #266", "waiting on the next release" —
+  in `blockedOn`, which is free text nothing can check. The new field is an
+  array of references:
+
+  ```json
+  "after": ["BL-C74", "D89", "#266", "owner/repo#12", "v0.0.5"]
+  ```
+
+  Four kinds of reference, each cleared by a fact that is already committed
+  somewhere, so `gen` still reads no clock:
+
+  | reference | cleared when | clear date |
+  |---|---|---|
+  | a backlog card id | its status is terminal (`done`) | the card file's last change date |
+  | a decision card id | its status is `live` or `closed` | same |
+  | `#266` / `owner/repo#12` | `release-manifest.json` has it as `merged` | its `mergedAt` |
+  | `v0.0.5` | `release-manifest.json` `releases[]` has that tag | its `at` |
+
+  A pull request or a tag that has not turned up in the release manifest yet
+  is simply not cleared — that is what "has not happened" looks like, not an
+  error. A card id nothing on the board matches **is** an error: `gen` fails
+  hard and the CLI refuses to write it, the same treatment a filename that
+  disagrees with its card id gets. Self-references and cycles are refused and
+  named the same way. `blockedOn` is untouched and does not migrate: it keeps
+  the reasons no machine can check ("waiting on a person, on something
+  outside").
+
+  On a card that is waiting, the header carries a quiet grey **「等 N 项」**
+  chip whose title lists every item and its state (`✓ BL-C74 已收 09-04 ·
+  #266 开着 · v0.0.5 未发`). Once everything clears, and while the card is
+  still `ready`, that becomes **「前置已清 · MM-DD」**, dated with the latest
+  of the individual clear dates. A card that others are waiting on, and that
+  is not itself terminal, carries the reverse: **「解锁 BL-C132 · BL-C134」**,
+  at most three ids on the face with the rest folded into a `+N` (the title
+  lists them all), each id a link to that card. Both chips reuse the existing
+  chip shapes — no new colours.
+
+  The guard adds one non-blocking line in the same settle pass as the other
+  progress notices: `前置已清:BL-C132(#266 已合)、BL-C73(#264 已合 ·
+  BL-C74 已收)`, listing only cards whose prerequisites cleared within the
+  last 7 days and that are still `ready`, newest first, at most five. It needs
+  no state file — the clear date is derived, so the line goes quiet by itself
+  once the window passes.
+
+  The CLI grew `card after <id> <ref>…` (append, deduped), `card after <id>
+  --rm <ref>` and validation on `card set <id> after --json '[…]'`; `card
+  show` prints a `前置` line with each item's live state. `gen`, the CLI and
+  the guard all import the same `scripts/deps.mjs` — one implementation, so
+  the three cannot drift apart.
+
+  The feature is driven by the field alone; there is no config key. A board
+  where no card has an `after` produces byte-identical output to 0.15.18.
+
+### Changed
+- **The WIP count is now "what can be started today", not "everything marked
+  ready".** A `ready` card still waiting on a prerequisite cannot be picked
+  up, so it no longer takes up room against `config.wip.soft` / `hard`. The
+  banner says 「可立即做 12(另 5 等前置)」 and the overview's "可做" row and
+  the guard's over-`hard` notice follow the same caliber; the lane/filter
+  recount in `setLine` counts the `data-after-open` marker baked onto the
+  cards, so the runtime number and the baked one always agree. This restates
+  §8.4-2 of the 0.13.0 spec ("count only `ready`") as "count only `ready`
+  with every prerequisite cleared". Card status and grouping do not change: a
+  waiting card stays in the ready section, wearing its 「等 N 项」 chip. On a
+  board with no `after` anywhere the wording and the numbers are exactly what
+  they were.
+
 ## [0.15.18] - 2026-09-05
 
 ### Fixed

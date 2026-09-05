@@ -5,6 +5,12 @@
 // 是数据不是报告,不进本表 —— 跨语言幂等,保持 zh。
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { DEP_WORDS_ZH, depItemShort } from './deps.mjs'
+
+/** 前置状态词的英文档(格式化函数与中文共用 depItemShort —— 一份实现,两种语言) */
+const DEP_WORDS_EN = { card: ['settled', 'not settled'], pr: ['merged', 'open'], tag: ['released', 'not released'], bad: ['', 'invalid'] }
+/** 守卫那行的一张卡:「BL-C132(#266 已合)」 */
+const depRow = (r, words, br = '()') => `${r.id}${br[0]}${r.items.map((x) => depItemShort(x, words)).join(' · ')}${br[1]}`
 
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
@@ -59,8 +65,11 @@ const zh = {
     },
     rule: (prefix, main) => `规矩:看板只在 ${main} 上改 —— 分支上不动 ${prefix},demo 与卡都在 ${main} 上单独提交。\n  已经动过的,合并前 git checkout ${main} -- ${prefix} 丢掉分支侧看板改动,再在 ${main} 上重放一遍(重放靠人记,漏了就是安静地丢内容 —— 所以先看这张清单)。`,
   },
-  wipOver: (n, hard) =>
-    `⚠ 看板守卫:可立即做(ready)的卡有 ${n} 张,超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
+  depsUnlocked: (rows, total) =>
+    `前置已清:${rows.map((r) => depRow(r, DEP_WORDS_ZH)).join('、')}${total > rows.length ? ` …等 ${total} 张` : ''} —— 这几张卡等的东西都清掉了,可以开工。`,
+  // waiting > 0 才提前置那半句:板上一条 after 都没有时,这句与 0.15.x 一字不差
+  wipOver: (n, hard, waiting = 0) =>
+    `⚠ 看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
   cardsDirMissing: (rel) =>
     `⚠ 看板守卫:config.cardsDir 开着,但卡目录 ${rel} 不在 —— gen 会硬失败,看板停在上一版。建目录或把 cardsDir 从 kanban.config.json 去掉。`,
   cardIdBad: (rows, total) =>
@@ -146,6 +155,11 @@ const zh = {
       决策卡没有时间线字段(看板不渲染),只改 status。
   card note <id> "<text>"           时间线末尾追一行「【日期】text」(决策卡没有这个字段,会拒)
   card link <id> "<title>" <href>   links 追一条(href 去重);指向本仓 PR 的链接顺手写进 pr 字段
+  card after <id> <ref>…            前置依赖:追加(去重)。ref = 卡号(BL-C74 / D89)/ PR(#266 / owner/repo#12)/ 版本 tag(v0.0.5)
+  card after <id> --rm <ref>        移除一项(整体覆盖用 card set <id> after --json '[…]')
+      清没清由看板自己推:卡收到终态、PR 合进主线、版本 tag 出现在 release-manifest 里。
+      卡号必须在板上、不许自指、不许成环(这三样 CLI 当场拒写,gen 也会硬报错)。
+      「等人 / 等外部」那种没有机器判据的理由,照旧写 blockedOn 那句自由文本。
   card show <id> [--json]
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
   card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
@@ -202,6 +216,17 @@ const zh = {
     linkScheme: (href) => `ddd card link:链接 ${JSON.stringify(href)} 的协议不在白名单。能写的是 http / https / mailto,或者仓库里的相对路径(docs/x.md、demos/y.html、#锚点)。javascript: 这类链接一点就在看板自己的源上跑脚本,不进卡文件。`,
     linkDup: (id, href) => `ddd card link:${id} 上已经有这条链接了,一个字节都没写:${href}`,
     linkDone: (id, href, pr) => `ddd card link:${id} + ${href}` + (pr ? `;顺手把 PR #${pr} 写进了 pr 字段(卡头芯片只认这一档)` : ''),
+    depWords: DEP_WORDS_ZH,
+    afterUsage: () => "ddd card after:写法 card after <id> <ref>…(追加,去重)或 card after <id> --rm <ref>(移除一项)。\n  ref = 卡号(BL-C74 / D89)/ PR(#266 / owner/repo#12)/ 版本 tag(v0.0.5);整体覆盖用 card set <id> after --json '[…]'。",
+    afterRmAlone: () => 'ddd card after --rm:一次只移除一项,后面别再跟别的 ref(要一次换掉整份:card set <id> after --json \'[…]\')。',
+    afterRefBad: (v) => `ddd card after:前置 ${v} 的形制不对。三种写法:卡号(板上存在的 id,如 BL-C74 / D89)、PR(#266 / 266 / owner/repo#12)、版本 tag(v 开头,如 v0.0.5)。`,
+    afterUnknownRef: (id) => `ddd card after:板上没有卡号「${id}」—— 前置指向一张不存在的卡,gen 会硬报错。用 card list 核一遍;要指的是 PR 就写 #号,是版本就写 v 开头的 tag。`,
+    afterSelf: (id) => `ddd card after:${id} 不能把自己写成自己的前置 —— 那张卡永远开不了工。`,
+    afterCycle: (path) => `ddd card after:加上这一条就成环了:${path} —— 互相等着的卡谁都开不了工,本次一个字节都没写。`,
+    afterNotThere: (id, ref, cur) => `ddd card after --rm:${id} 的前置里没有「${ref}」,一个字节都没写。现在写着的是:${cur.length ? cur.join(' · ') : '(空)'}`,
+    afterDone: (id, list, file) => `ddd card after:${id} 的前置 = ${list.join(' · ') || '(空)'} → ${file}`,
+    afterRmDone: (id, ref, list) => `ddd card after --rm:${id} 去掉了「${ref}」,剩下 ${list.join(' · ') || '(空)'}`,
+    afterShow: (rows) => `  前置: ${rows.join(' · ')}`,
     showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
     showHead: (id, kind, file) => `${id}  (${kind === 'backlog' ? 'backlog' : '决策'}卡 · ${file})`,
     listEmpty: () => 'ddd card list:这组筛选下一张卡都没有。',
@@ -378,6 +403,8 @@ const en = {
     `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
   richLongText: (worst, total) =>
     `⚠ Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail (longest: ${worst.key} on ${worst.id}) — keep the card body to conclusions and move long evidence into detail.`,
+  depsUnlocked: (rows, total) =>
+    `Prerequisites cleared: ${rows.map((r) => depRow(r, DEP_WORDS_EN, '()')).join('; ')}${total > rows.length ? ` … ${total} card(s) in all` : ''} — everything these cards were waiting on is done; they are ready to start.`,
   respSettle: (ids, total) =>
     `⚠ Kanban guard: ${total} card(s) have all their pull requests merged but are still in a non-final status (unsettled): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Run \`node <plugin>/scripts/pr-sync.mjs --settle\` for the full list (card → suggested status), then add --write to settle them (add --only <ids> to pick some).\n  For a card that should not be settled this round (its pull request only landed half the work), put "settleHold": "reason" on it — it then leaves the list, drops its chip, and this notice stops naming it.`,
   respReopen: (ids, total) =>
@@ -404,8 +431,8 @@ const en = {
     },
     rule: (prefix, main) => `The rule: the board is only edited on ${main} — branches leave ${prefix} alone, and demos and cards are committed on ${main} in their own commits.\n  Where a branch already touched it: before merging, run git checkout ${main} -- ${prefix} to drop the branch-side board changes, then replay them on ${main} (replaying is done from memory — miss one and the content is lost silently, which is why this list comes first).`,
   },
-  wipOver: (n, hard) =>
-    `⚠ Kanban guard: ${n} card(s) are in the ready status, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  wipOver: (n, hard, waiting = 0) =>
+    `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
   cardsDirMissing: (rel) =>
     `⚠ Kanban guard: config.cardsDir is set but the card directory ${rel} is not there — gen will fail hard and the board stays on its last version. Create the directory, or drop cardsDir from kanban.config.json.`,
   cardIdBad: (rows, total) =>
@@ -495,6 +522,15 @@ Cards:
   card note <id> "<text>"           append one timeline line "【date】text" (refused on decision cards)
   card link <id> "<title>" <href>   append a link (href deduped); a link to this repository's
                                     pull request is written into the pr field as well
+  card after <id> <ref>…            prerequisites: append (deduped). A ref is a card id
+                                    (BL-C74 / D89), a pull request (#266 / owner/repo#12),
+                                    or a release tag (v0.0.5).
+  card after <id> --rm <ref>        drop one (replace the whole list with
+                                    card set <id> after --json '[…]')
+      Whether a prerequisite is cleared is derived: the card reached a terminal status, the
+      pull request merged, or the tag turned up in release-manifest.json. A card ref must
+      exist on the board; self-references and cycles are refused here and fail gen too.
+      For "waiting on a person / something outside" — no machine test — keep using blockedOn.
   card show <id> [--json]
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
   card history <id>                 git history of that card's file (needs one file per card)
@@ -552,6 +588,17 @@ kanban.config.json). This command never commits — git add the card files yours
     linkScheme: (href) => `ddd card link: the scheme in ${JSON.stringify(href)} is not allowed. Use http / https / mailto, or a path relative to the repository (docs/x.md, demos/y.html, #anchor). A javascript: link runs script on the board's own origin the moment someone clicks it, so it does not go into a card.`,
     linkDup: (id, href) => `ddd card link: ${id} already has this link, nothing was written: ${href}`,
     linkDone: (id, href, pr) => `ddd card link: ${id} + ${href}` + (pr ? `; pull request #${pr} went into the pr field too (the chip on the card only reads that one)` : ''),
+    depWords: DEP_WORDS_EN,
+    afterUsage: () => "ddd card after: card after <id> <ref>… (append, deduped) or card after <id> --rm <ref> (drop one).\n  A ref is a card id (BL-C74 / D89), a pull request (#266 / owner/repo#12) or a release tag (v0.0.5); replace the whole list with card set <id> after --json '[…]'.",
+    afterRmAlone: () => "ddd card after --rm: drops exactly one ref, so do not pass more after it (to swap the whole list: card set <id> after --json '[…]').",
+    afterRefBad: (v) => `ddd card after: the prerequisite ${v} is not a valid ref. Three shapes: a card id that exists on this board (BL-C74 / D89), a pull request (#266 / 266 / owner/repo#12), or a release tag starting with v (v0.0.5).`,
+    afterUnknownRef: (id) => `ddd card after: no card "${id}" on this board — a prerequisite pointing at a card that does not exist makes gen fail hard. Check with card list; for a pull request write #<number>, for a release a tag starting with v.`,
+    afterSelf: (id) => `ddd card after: ${id} cannot be its own prerequisite — that card could never start.`,
+    afterCycle: (path) => `ddd card after: adding this would close a cycle: ${path} — cards waiting on each other can never start. Nothing was written.`,
+    afterNotThere: (id, ref, cur) => `ddd card after --rm: ${id} has no prerequisite "${ref}"; nothing was written. It currently has: ${cur.length ? cur.join(' · ') : '(none)'}`,
+    afterDone: (id, list, file) => `ddd card after: prerequisites of ${id} = ${list.join(' · ') || '(none)'} → ${file}`,
+    afterRmDone: (id, ref, list) => `ddd card after --rm: dropped "${ref}" from ${id}; left with ${list.join(' · ') || '(none)'}`,
+    afterShow: (rows) => `  after: ${rows.join(' · ')}`,
     showUsage: () => 'ddd card show: card show <id> [--json].',
     showHead: (id, kind, file) => `${id}  (${kind} card · ${file})`,
     listEmpty: () => 'ddd card list: no card matches those filters.',
@@ -757,6 +804,9 @@ const genZh = {
   cardParseFail: (rel, err) => `卡文件 ${rel} 不是合法 JSON:${err}`,
   cardIdMismatch: (rel, id) => `卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上 —— 文件名就是卡号(一个真源),改文件名或改 id`,
   cardDupId: (id, a, z) => `卡 id「${id}」出现了两次:${a} 与 ${z} —— 深链、截图廊归组、懒加载定位全按 id 走,重复即互相顶掉`,
+  afterNotArray: (id) => `卡 ${id} 的 after 不是数组 —— 形制是 ["BL-C74", "#266", "v0.0.5"](写法见 README「前置依赖」)。悄悄当「没写」处理会让人以为写上了,而板上一个字都不出现`,
+  afterUnknownRef: (id, ref) => `卡 ${id} 的 after 里「${ref}」在板上找不到 —— 前置只认三种写法:卡号(板上存在的 id)、PR(#266 / owner/repo#12)、版本 tag(v 开头,如 v0.0.5)。核一下卡号,或改成 PR / 版本写法`,
+  afterCycle: (path) => `after 成环:${path} —— 互相等着的卡谁都开不了工。拆掉环上任意一条 after(要表达「等人 / 等外部」用 blockedOn 那句自由文本)`,
 }
 const genEn = {
   cfgMissingBrand: () => 'kanban.config.json is missing "brand"',
@@ -793,5 +843,8 @@ const genEn = {
   cardParseFail: (rel, err) => `card file ${rel} is not valid JSON: ${err}`,
   cardIdMismatch: (rel, id) => `card file ${rel} does not match the id "${id}" inside it — the filename is the card id (one source of truth); rename the file or change the id`,
   cardDupId: (id, a, z) => `card id "${id}" appears twice: ${a} and ${z} — deep links, screenshot grouping and lazy-pane routing all work by id, so duplicates shadow each other`,
+  afterNotArray: (id) => `card ${id} has an "after" that is not an array — the shape is ["BL-C74", "#266", "v0.0.5"] (see "prerequisites" in the README). Treating it silently as "not written" would leave you believing it was recorded while the board says nothing`,
+  afterUnknownRef: (id, ref) => `card ${id} lists "${ref}" in after, but nothing on the board matches it — a prerequisite is one of three things: a card id that exists on this board, a pull request (#266 / owner/repo#12), or a release tag (starts with v, e.g. v0.0.5). Check the id, or write it as a PR / release`,
+  afterCycle: (path) => `after forms a cycle: ${path} — cards waiting on each other can never start. Break the cycle by dropping one of those after entries (use the free-text blockedOn for "waiting on a person / something outside")`,
 }
 export function genStrings(lang) { return lang === 'en' ? genEn : genZh }

@@ -27,6 +27,10 @@
 //   5b. 挂账到期(v0.15.14,BL-C112 §3):写了 settleHold 的卡挂满 14 天 → 一行安静的提醒
 //      (「已 N 天,仍成立就重设一下,收账就删」,最多点名 5 张)。只提醒:不解除静音、不改卡。
 //      起算日取卡上的 settleHoldAt(CLI 写 settleHold 时记的);老卡没有就退卡文件最后提交日。
+//   5c. 前置已清(v0.16.0,卡上写了 after 才跑):前置刚刚全清(清除日在 7 天内)且卡仍 ready →
+//      一行安静的「前置已清:BL-C132(#266 已合)…」(最多点名 5 张,最近清的先)。不需要状态
+//      文件:清除日是从卡 status / PR mergedAt / 版本 at 推导出来的。环与未知卡号是 gen 硬报错,
+//      走现有「gen 失败喂回」那条路,守卫这里不另做。
 //   6. 卡文件审计(v0.14.0,只在 config.cardsDir 开时):文件名与卡里的 id 不符 / JSON 解析失败
 //      → 点名文件(各最多 5 个 + 总数)。这几种 gen 会硬失败,但一次只报得出第一个。
 //      同一个键还让新鲜度盯住 <cardsDir>/**/*.json(卡也是 gen 输入)、让孤儿语料纳入卡文件正文。
@@ -52,7 +56,8 @@ import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } from './settle.mjs'
-import { CARD_KINDS, cardUpdatedMap, cardsDirOf, scanCardDir } from './cards.mjs'
+import { CARD_KINDS, cardUpdatedMap, cardsDirOf, localDate, scanCardDir } from './cards.mjs'
+import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, openCount } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 
 const KANBAN = detect()
@@ -100,6 +105,40 @@ const cardsOf = (file, key, sub) => {
   try { return JSON.parse(readFileSync(join(KANBAN, file), 'utf8'))[key] || [] } catch { return [] }
 }
 const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifest.json', 'items', 'backlog'], ['decisions-manifest.json', 'entries', 'decisions']]
+
+/** 每卡最后改动日,按需算一次(一条 git log)。未拆卡 = 空表 —— 那种板取不到「这张卡什么时候动的」。 */
+let CARD_UPD = null
+function cardUpdAll() {
+  if (CARD_UPD) return CARD_UPD
+  CARD_UPD = new Map()
+  if (!CARDS_DIR) return CARD_UPD
+  const srcOf = new Map()
+  for (const k of CARD_KINDS) {
+    const s = cardScan[k.sub]
+    if (!s || s.missing) continue
+    for (const x of s.cards) srcOf.set(String(x.card.id), `${CARDS_DIR}/${k.sub}/${x.file}`)
+  }
+  CARD_UPD = cardUpdatedMap(KANBAN, CARDS_DIR, srcOf)
+  return CARD_UPD
+}
+
+/** 前置依赖(after)的推导上下文,按需建一次 —— ⑥ 积压计数与 ⑧ 前置已清共用同一份口径(deps.mjs) */
+let DEP_CTX = null
+function depCtx() {
+  if (DEP_CTX) return DEP_CTX
+  const cardById = new Map()
+  let repo = ''
+  for (const [f, k, sub] of CARD_SOURCES) {
+    for (const c of cardsOf(f, k, sub)) if (c && c.id) cardById.set(String(c.id), c)
+    if (!repo) { try { repo = String((JSON.parse(readFileSync(join(KANBAN, f), 'utf8')).instance || {}).ghRepo || '') } catch {} }
+  }
+  const relPr = new Map(), relTag = new Map()
+  for (const p of (RLM && RLM.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
+  for (const r of (RLM && RLM.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || ''))
+  const upd = cardUpdAll()
+  DEP_CTX = { repo, cardById, relPr, relTag, cardUpd: (id) => upd.get(id) || '' }
+  return DEP_CTX
+}
 
 // 卡文件审计:gen 遇到这些直接 throw,但一次只报得出第一个;这里一次列全,少来回几趟。
 // 排在新鲜度之前 —— 正是这些错会让下面那趟 gen 失败,消息得赶在那之前备好。
@@ -275,14 +314,21 @@ const orphans = demos.filter((f) => !covered.has(f))
   }
 }
 
+// release-manifest:⑤(进度响应)与 ⑧(前置已清)共读这一份;坏 JSON / 缺席 = null,两段各自按「没有依据」处理
+let RLM = null
+{
+  const relPath = join(KANBAN, 'release-manifest.json')
+  if (existsSync(relPath)) {
+    try { RLM = JSON.parse(readFileSync(relPath, 'utf8')) } catch {} // 坏 JSON:gen 已经出过声,守卫不重复吵
+  }
+}
+
 // ---- ⑤ 进度响应审计(v0.13.0,只在 release-manifest.json 在场时跑):待收账 / 已收账但 PR 未合 ----
 // 与卡上的芯片同一口径(settle.mjs),两边都只提示 —— 「PR 合了」≠「卡可以收」,静默改 manifest
 // 会跟并行会话抢写。收账走 pr-sync.mjs --settle(默认还只打印)。
 {
-  const relPath = join(KANBAN, 'release-manifest.json')
-  if (existsSync(relPath)) {
-    let rlm = null
-    try { rlm = JSON.parse(readFileSync(relPath, 'utf8')) } catch {} // 坏 JSON:gen 已经出过声,守卫不重复吵
+  const rlm = RLM
+  if (rlm) {
     const relPr = new Map()
     for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
     const settle = [], reopen = [], held = [] // held:写了 settleHold 的卡 + 起算日(下面算到期)
@@ -309,15 +355,8 @@ const orphans = demos.filter((f) => !covered.has(f))
     // 0.15.14 之前挂上的老卡没有 settleHoldAt,退到卡文件最后改动日(与 gen 的 .udate 同一份口径);
     // 未拆卡的板取不到「这张卡什么时候动的」,那种老卡就不催 —— 宁可不出声,也不拿假日期点名。
     if (held.length) {
-      const need = held.some((h) => !h.since)
-      if (need && CARDS_DIR) {
-        const srcOf = new Map()
-        for (const k of CARD_KINDS) {
-          const s = cardScan[k.sub]
-          if (!s || s.missing) continue
-          for (const x of s.cards) srcOf.set(String(x.card.id), `${CARDS_DIR}/${k.sub}/${x.file}`)
-        }
-        const upd = cardUpdatedMap(KANBAN, CARDS_DIR, srcOf)
+      if (held.some((h) => !h.since)) {
+        const upd = cardUpdAll()
         for (const h of held) if (!h.since) h.since = upd.get(h.id) || ''
       }
       const today = Date.now()
@@ -327,6 +366,32 @@ const orphans = demos.filter((f) => !covered.has(f))
         .sort((a, z) => z.days - a.days)
       if (old.length) notices.push(S.respHoldOld(old.slice(0, 5).map((h) => h.id), old[0].days, old.length))
     }
+  }
+}
+
+// ---- ⑧ 前置已清(v0.16.0):等前置的卡刚被解锁,说一行 ----
+// 与卡头那枚芯片同一份 deps.mjs 判据。清除日是推导出来的(卡 status / PR mergedAt / 版本 at),
+// 所以不需要状态文件、也不必记「上次说过没有」—— 7 天窗口过了它自己就闭嘴。
+// 「今天」用 localDate(本地日历,与 CLI 写 date 的口径同源);gen 那边一个时钟都不读,窗口只住在这儿。
+{
+  const cards = []
+  for (const [f, k, sub] of CARD_SOURCES) for (const c of cardsOf(f, k, sub)) if (c && c.id) cards.push(c)
+  if (cards.some((c) => afterOf(c).length)) {
+    const ctx = depCtx()
+    const today = Date.parse(`${localDate()}T00:00:00`)
+    const rows = []
+    for (const c of cards) {
+      if (String(c.status || '') !== 'ready') continue
+      const list = afterStates(c, ctx)
+      if (!list.length || openCount(list)) continue
+      const at = clearedAt(list)
+      if (!at) continue // 取不到清除日(未拆卡的板上,卡号前置就是这样)—— 宁可不出声,也不拿假日期点名
+      const days = Math.floor((today - Date.parse(`${at}T00:00:00`)) / 86400000)
+      if (!Number.isFinite(days) || days > DEPS_FRESH_DAYS) continue
+      rows.push({ id: String(c.id), at, items: list })
+    }
+    rows.sort((a, z) => (a.at < z.at ? 1 : a.at > z.at ? -1 : 0)) // 最近清的先(同日保持板上顺序)
+    if (rows.length) notices.push(S.depsUnlocked(rows.slice(0, 5), rows.length))
   }
 }
 
@@ -348,8 +413,14 @@ const orphans = demos.filter((f) => !covered.has(f))
   } catch {}
   if (wip) {
     const hard = Number.isFinite(wip.hard) ? wip.hard : 20
-    const n = cardsOf('backlog-manifest.json', 'items', 'backlog').filter((it) => it && it.status === 'ready').length
-    if (n > hard) notices.push(S.wipOver(n, hard))
+    // 口径与卡上的横幅同一条(v0.16.0):ready 且前置已清才算「可立即做」,等前置的另报一个数。
+    // 板上一条 after 都没有时 waiting 恒 0,这句话与 0.15.x 一字不差。
+    const ready = cardsOf('backlog-manifest.json', 'items', 'backlog').filter((it) => it && it.status === 'ready')
+    const waiting = ready.some((it) => afterOf(it).length)
+      ? ready.filter((it) => openCount(afterStates(it, depCtx()))).length
+      : 0
+    const n = ready.length - waiting
+    if (n > hard) notices.push(S.wipOver(n, hard, waiting))
   }
 }
 

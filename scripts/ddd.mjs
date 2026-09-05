@@ -7,6 +7,7 @@
 //   node scripts/ddd.mjs card status <id> <status> [--no-note]
 //   node scripts/ddd.mjs card note <id> "<text>"
 //   node scripts/ddd.mjs card link <id> "<title>" <href>
+//   node scripts/ddd.mjs card after <id> <ref>… | --rm <ref>        (前置依赖:卡号 / PR / 版本 tag)
 //   node scripts/ddd.mjs card show <id> [--json]
 //   node scripts/ddd.mjs card list [--status s --line X --session Y --since YYYY-MM-DD] [--json]
 //   node scripts/ddd.mjs card history <id>
@@ -30,6 +31,7 @@ import { loadStrings, pickStrings } from './strings.mjs'
 import { CARD_KINDS, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
+import { afterOf, afterStates, auditAfter, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ARGV = process.argv.slice(2)
@@ -41,7 +43,7 @@ if (ARGV[0] === 'pr-sync') {
 }
 
 // ---- 旗子 ----------------------------------------------------------------
-const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since', 'tier'])
+const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since', 'tier', 'rm'])
 const BOOL_FLAGS = new Set(['json', 'help', 'no-note'])
 const die = (msg) => { console.error(msg); process.exit(1) }
 
@@ -136,7 +138,7 @@ const K_LONG = ['question', 'decision', 'problem', 'approach', 'note', 'notes', 
 const K_TAIL = ['links', 'shots', 'pr']
 const K_FLAT = [
   ...K_FRONT,
-  'status', 'tier', 'area', 'priority', 'line', 'session', 'date', 'blockedOn', 'source',
+  'status', 'tier', 'area', 'priority', 'line', 'session', 'date', 'blockedOn', 'after', 'source',
   'demo', 'route', 'routeLive', 'designDoc', 'repro', 'settleHold', 'settleHoldAt', 'order',
   ...K_LONG, ...K_TAIL,
 ]
@@ -207,16 +209,36 @@ function checkPr(value) {
   for (const v of Array.isArray(value) ? value : [value]) if (!parsePr(v, repo)) die(S.prBad(JSON.stringify(v)))
 }
 
-const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'order']
+const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
   entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
 }
 /** 形制上就是数组的字段:塞个标量进去,gen 会在 .map 上当场 TypeError,整块板生成不出来 */
-const ARRAY_FIELDS = ['links', 'shots', 'walkthroughs', 'iters', 'refines']
+const ARRAY_FIELDS = ['links', 'shots', 'walkthroughs', 'iters', 'refines', 'after']
+
+/**
+ * 前置依赖 after 的校验(写之前拦下,不等 gen 硬报错):形制、卡号存在、非自指、加进去之后无环。
+ * 与 gen 同一份 deps.mjs —— CLI 放过去的、gen 一定也放得过去,反之亦然。
+ * @param id 这张卡的卡号;建卡时还没分配(''),那时新卡不可能被谁指着,自指与环都无从谈起
+ */
+function checkAfter(id, value) {
+  const rows = allCards()
+  const ids = new Set(rows.map((r) => String(r.card.id)))
+  for (const v of value) {
+    const p = parseAfterRef(v)
+    if (!p) die(S.afterRefBad(JSON.stringify(v)))
+    if (p.kind !== 'card') continue
+    if (!ids.has(p.id)) die(S.afterUnknownRef(p.id))
+    if (id && p.id === id) die(S.afterSelf(id))
+  }
+  if (!id) return
+  const audit = auditAfter(rows.map((r) => (String(r.card.id) === id ? { ...r.card, after: value } : r.card)))
+  if (audit.cycle) die(S.afterCycle(audit.cycle.join(' → ')))
+}
 
 /** 一处校验,set / status / new 共用 —— 三条路写同一批字段,校验分三份迟早对不上 */
-function checkField(store, field, value) {
+function checkField(store, field, value, id = '') {
   if (field === 'order') die(S.orderLocked())
   // id 是文件名(拆分模式)/ 全板唯一键(未拆),改它就是把卡的身份改掉:gen 下一跑就硬失败,
   // 而 loadKind 见到坏卡即 die,连用来改回来的这条命令也一起锁死。所以这里一个字节都不写。
@@ -227,6 +249,7 @@ function checkField(store, field, value) {
   if (field === 'line') checkTokens(value, laneIds(), S.lineBad)
   if (field === 'session') checkTokens(value, sessionIds(), S.sessionBad)
   if (field === 'pr') checkPr(value)
+  if (field === 'after') checkAfter(id, value)
 }
 
 // ---- 命令 ----------------------------------------------------------------
@@ -381,8 +404,9 @@ function maxNumber(ids, prefix) {
 }
 
 /**
- * 建卡之后照守卫的口径数一遍 ready(只数 backlog:blocked 等外部、deferred 搁置都不占额度),
- * 超 hard 就当场说一句 —— 别等收工才知道又往堆里加了一张。文案与守卫同一句,免得两处走样。
+ * 建卡之后照守卫的口径数一遍 ready(只数 backlog:blocked 等外部、deferred 搁置都不占额度;
+ * v0.16.0 起还等着前置的也不占 —— 它今天动不了手),超 hard 就当场说一句 —— 别等收工才知道
+ * 又往堆里加了一张。文案与守卫同一句,免得两处走样。
  */
 function warnWip(kind, fresh) {
   const wip = CFG.wip
@@ -390,8 +414,12 @@ function warnWip(kind, fresh) {
   const hard = Number.isFinite(wip.hard) ? wip.hard : 20
   const store = storeOf(CARD_KINDS[0])
   const own = kind.key === 'items' && fresh && fresh.status === 'ready' ? 1 : 0 // 刚写的那张还不在缓存里
-  const n = store.rows.filter((r) => r.card && r.card.status === 'ready').length + own
-  if (n > hard) console.error(loadStrings(KANBAN).wipOver(n, hard))
+  const ready = store.rows.map((r) => r.card).filter((c) => c && c.status === 'ready')
+  const waiting = ready.some((c) => afterOf(c).length)
+    ? ready.filter((c) => afterStates(c, depCtx()).some((x) => !x.cleared)).length
+    : 0
+  const n = ready.length - waiting + own
+  if (n > hard) console.error(loadStrings(KANBAN).wipOver(n, hard, waiting))
 }
 
 function cmdSet() {
@@ -401,7 +429,7 @@ function cmdSet() {
   let value = rest.join(' ')
   if (flags.json) { try { value = JSON.parse(value) } catch (e) { die(S.valueNotJson(e.message)) } }
   else if (field === 'pr' && /^\d+$/.test(value)) value = Number(value)
-  checkField(store, field, value)
+  checkField(store, field, value, id)
   if (!KNOWN_FIELDS[store.k.key].includes(field)) console.error(S.unknownField(field, KIND_NAME[store.k.key]))
   const patch = { ...row.card, [field]: value }
   // 挂账是有寿命的承诺(v0.15.14,BL-C112 §3):写下 settleHold 的同时记下日期,守卫按它算
@@ -473,6 +501,45 @@ function cmdLink() {
   say({ ok: true, id, added: true, title, href, pr: prAdded, file: row.where, card: written }, S.linkDone(id, href, prAdded))
 }
 
+/**
+ * 前置依赖:追加(去重)或移除一项。整体覆盖走 `card set <id> after --json '[…]'`,三条路
+ * 同一道 checkAfter —— 卡号得在板上、不许自指、加进去不许成环。
+ */
+function cmdAfter() {
+  const [id, ...refs] = pos.slice(2)
+  if (!id) die(S.afterUsage())
+  const { store, row } = findCard(id)
+  const cur = afterOf(row.card)
+  let next, removed = ''
+  if (flags.rm !== undefined) {
+    if (refs.length) die(S.afterRmAlone())
+    const want = String(flags.rm).trim()
+    if (!cur.includes(want)) die(S.afterNotThere(id, want, cur))
+    next = cur.filter((x) => x !== want)
+    removed = want
+  } else {
+    if (!refs.length) die(S.afterUsage())
+    next = [...cur]
+    for (const r of refs) { const v = String(r).trim(); if (v && !next.includes(v)) next.push(v) }
+  }
+  checkField(store, 'after', next, id)
+  const card = writeCard(store, row, { ...row.card, after: next })
+  say({ ok: true, id, after: next, removed: removed || null, file: row.where, card },
+    removed ? S.afterRmDone(id, removed, next) : S.afterDone(id, next, row.where))
+}
+
+/** 前置逐项的当前状态(与 gen 同一份 deps.mjs;清除日不在 CLI 里算 —— 那要一条 git log,card show 不值当) */
+function depCtx() {
+  let rlm = null
+  try { rlm = JSON.parse(readFileSync(join(KANBAN, 'release-manifest.json'), 'utf8')) } catch {}
+  const relPr = new Map(), relTag = new Map()
+  for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
+  for (const r of (rlm && rlm.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || ''))
+  const cardById = new Map()
+  for (const x of allCards()) cardById.set(String(x.card.id), x.card)
+  return { repo: repoOf(), cardById, relPr, relTag, cardUpd: () => '' }
+}
+
 function cmdShow() {
   const id = pos[2]
   if (!id) die(S.showUsage())
@@ -483,6 +550,11 @@ function cmdShow() {
     if (key === 'id') continue
     const text = typeof value === 'string' ? value : JSON.stringify(value)
     console.log(`  ${key}: ${String(text).replace(/\n/g, '\n    ')}`)
+  }
+  const dep = afterOf(row.card)
+  if (dep.length) {
+    const ctx = depCtx()
+    console.log(S.afterShow(dep.map((r) => depItemText(resolveAfter(r, ctx), S.depWords))))
   }
 }
 
@@ -548,7 +620,7 @@ function cmdExport() {
 }
 
 // ---- 分派 ----------------------------------------------------------------
-const CARD_CMDS = { new: cmdNew, set: cmdSet, status: cmdStatus, note: cmdNote, link: cmdLink, show: cmdShow, list: cmdList, history: cmdHistory }
+const CARD_CMDS = { new: cmdNew, set: cmdSet, status: cmdStatus, note: cmdNote, link: cmdLink, after: cmdAfter, show: cmdShow, list: cmdList, history: cmdHistory }
 if (pos[0] === 'card') {
   const run = CARD_CMDS[pos[1]]
   if (!run) die(S.unknownCardCmd(String(pos[1] ?? ''), Object.keys(CARD_CMDS)))

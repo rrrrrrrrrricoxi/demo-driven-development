@@ -307,12 +307,56 @@ recognise falls back to the default. The archive
 tab does not get the control in this version. Left unset, output is
 byte-identical to a board without the feature.
 
+## Prerequisites: the `after` field
+
+A card can name what has to clear before it can be started, and the board works
+out whether it has:
+
+```json
+"after": ["BL-C74", "D89", "#266", "owner/repo#12", "v0.0.5"]
+```
+
+Four kinds of reference. A card id is cleared when that card reaches a terminal
+status (`done` for backlog cards, `live` or `closed` for decisions); a pull
+request — written the same way as the `pr` field — is cleared when
+`release-manifest.json` has it as `merged`; a release tag is cleared when that
+tag appears in the manifest's `releases[]`. Every one of those is a fact already
+committed somewhere, so `gen` reads no clock: the clear date of a card is its
+file's last change date, of a pull request its `mergedAt`, of a release its
+`at`.
+
+A pull request or a tag that is not in the release manifest yet is not cleared,
+and that is not an error — it has simply not happened. A card id that matches
+nothing on the board **is** an error: `gen` fails hard and the CLI refuses to
+write it. So do self-references and cycles, and the message names the cycle.
+`blockedOn` is untouched: it keeps the reasons no machine can check ("waiting on
+a person, on something outside"), and the two can sit on the same card.
+
+While a card is waiting its header carries a grey **「等 N 项」** chip whose
+title lists each item and its state (`✓ BL-C74 已收 09-04 · #266 开着 ·
+v0.0.5 未发`). Once everything clears, and while the card is still `ready`, that
+becomes **「前置已清 · MM-DD」**, dated with the latest of the clear dates; the
+chip stops rendering once the card leaves `ready`. A card that others wait on,
+and that is not itself terminal, carries the reverse — **「解锁 BL-C132 ·
+BL-C134」**, three ids on the face at most with the rest folded into `+N`, each
+one a link to that card.
+
+The guard adds one non-blocking line at stop time — `前置已清:BL-C132(#266
+已合)…` — for cards whose prerequisites cleared within the last 7 days and that
+are still `ready`, newest first, five at most. There is no state file behind it:
+the clear date is derived, so the line goes quiet on its own.
+
+Nothing here has a config key; the field is the switch. A board where no card
+has an `after` produces byte-identical output.
+
 ## WIP limits (optional)
 
 Set `config.wip` to an object — `{ "soft": 10, "hard": 20 }`; the object itself
 is the switch, and the two thresholds default to those values. The count is the
 `ready` cards only: `blocked` is waiting on somebody else and `deferred` is
-parked, so neither takes up room in what can be started today. Over `soft`, the
+parked, so neither takes up room in what can be started today — and neither does
+a `ready` card still waiting on an `after` prerequisite, which is counted
+separately and read out as 「可立即做 12(另 5 等前置)」. Over `soft`, the
 backlog tab gets an amber dot and the pane a quiet grey line reading how many
 cards are ready; over `hard`, the dot turns red and the line becomes a standing
 banner suggesting the pile be cleared before new cards are added. With lanes
@@ -482,6 +526,8 @@ node <plugin>/scripts/ddd.mjs card set <id> <field> <value> [--json]
 node <plugin>/scripts/ddd.mjs card status <id> <status> [--no-note]
 node <plugin>/scripts/ddd.mjs card note <id> "<text>"
 node <plugin>/scripts/ddd.mjs card link <id> "<title>" <href>
+node <plugin>/scripts/ddd.mjs card after <id> <ref>…            # BL-C74 / D89 / #266 / owner/repo#12 / v0.0.5
+node <plugin>/scripts/ddd.mjs card after <id> --rm <ref>
 node <plugin>/scripts/ddd.mjs card show|history <id>
 node <plugin>/scripts/ddd.mjs card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD]
 node <plugin>/scripts/ddd.mjs export [--out f.json]
@@ -497,6 +543,20 @@ overrides any of them.
 `card set <id> settleHold "<reason>"` also stamps `settleHoldAt` with today's
 date, so the 14-day reminder has a clock to run against; setting the reason to
 an empty string takes the date away with it.
+
+`card after` appends prerequisites and dedupes them, `--rm` drops one, and
+`card set <id> after --json '[…]'` replaces the list; all three go through the
+same checks — a card reference has to exist on the board, and nothing may
+reference itself or close a cycle. `card show` prints a `前置` line with each
+item's current state, derived from the same module `gen` uses:
+
+```
+$ ddd card after BL-C73 "#264" BL-C74 D89
+ddd card after:BL-C73 的前置 = #264 · BL-C74 · D89 → cards/backlog/BL-C73.json
+$ ddd card after BL-C73 --rm D89
+$ ddd card show BL-C73 | tail -1
+  前置: #264 已合 · BL-C74 未收
+```
 
 The write commands check what they write — the status has to be one the board
 declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number, `#12`

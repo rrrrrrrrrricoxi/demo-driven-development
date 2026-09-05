@@ -25,8 +25,9 @@ import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
-import { SETTLE_HOLD_DAYS, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
+import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
 import { CARD_KINDS, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depItemText, openCount, reverseAfter } from './deps.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -756,6 +757,53 @@ const respLinkParts = (l) => {
   }
 }
 
+// ———— 前置依赖 after(v0.16.0,字段驱动:板上一条 after 都没有 = 本节全部空串,逐字节冻结)————
+// 判据、状态词、环检测全在 deps.mjs 里,与 ddd CLI / 守卫同一份。清除日取自已提交的事实
+// (卡文件最后改动日 / mergedAt / 打 tag 时刻),gen 照旧一个时钟都不读。
+// 形制不对(after 不是数组)先拦:悄悄当「没写」会让人以为写上了,而板上一个字都不出现。
+for (const c of ALL_CARDS) if (c && c.after !== undefined && !Array.isArray(c.after)) throw new Error(GS.afterNotArray(String(c.id ?? '?')))
+const AFTER_ANY = ALL_CARDS.some((c) => afterOf(c).length)
+const DEP_CTX = { repo: PR_REPO, cardById: new Map(), cardUpd, relPr, relTag: new Map() }
+const DEP_REV = AFTER_ANY ? reverseAfter(ALL_CARDS) : new Map()
+if (AFTER_ANY) {
+  for (const c of ALL_CARDS) if (c && c.id != null) DEP_CTX.cardById.set(String(c.id), c)
+  if (rlm) for (const r of rlm.releases || []) if (r && r.tag) DEP_CTX.relTag.set(String(r.tag), String(r.at || ''))
+  // 未知卡号与环是硬报错(与「文件名≠id」同级):静默断链的教训见 refines,不再学一遍。
+  // PR / 版本尚未出现在 release-manifest 里不是错 —— 它们本来就是「还没发生」。
+  const audit = auditAfter(ALL_CARDS)
+  if (audit.unknown.length) throw new Error(GS.afterUnknownRef(audit.unknown[0].id, audit.unknown[0].ref))
+  if (audit.cycle) throw new Error(GS.afterCycle(audit.cycle.join(' → ')))
+}
+const depOf = (entry) => (AFTER_ANY ? afterStates(entry, DEP_CTX) : [])
+/** 还有没清的前置(WIP 口径与 data-after-open 同一个谓词) */
+const depOpen = (entry) => openCount(depOf(entry)) > 0
+// 卡头芯片两枚:等前置的一枚(灰,逐项状态挂 title)、被依赖的一枚(列卡号,点得动)。
+// 形制照 settleHold「暂不收账」与 refines「⤴ 修订」,不加新颜色。
+const depChips = (entry) => {
+  if (!AFTER_ANY) return ''
+  let out = ''
+  const list = depOf(entry)
+  if (list.length) {
+    const title = esc(list.map((r) => depItemText(r)).join(' · '))
+    const open = openCount(list)
+    if (open) out += `<span class="depchip dep-wait" title="${title}">等 ${open} 项</span>`
+    // 全清那枚只在卡还 ready 时说话:done / deferred 之后「前置已清」是句废话
+    else if (String(entry.status || '') === 'ready') {
+      const at = clearedAt(list)
+      out += `<span class="depchip dep-clear" title="${title}">前置已清${at ? ` · ${esc(at.slice(5))}` : ''}</span>`
+    }
+  }
+  const rev = DEP_REV.get(String(entry.id ?? ''))
+  if (rev && rev.length && !TERMINAL.has(String(entry.status || ''))) {
+    const show = rev.slice(0, DEPS_UNLOCK_SHOW).map((id) => `<a href="#${esc(id)}">${esc(id)}</a>`).join(' · ')
+    const more = rev.length > DEPS_UNLOCK_SHOW ? `<i class="depmore">+${rev.length - DEPS_UNLOCK_SHOW}</i>` : ''
+    out += `<span class="depchip dep-unlock" title="${esc(`清掉这张卡就解锁:${rev.join(' · ')}`)}">解锁 ${show}${more}</span>`
+  }
+  return out
+}
+// WIP 重算要在浏览器里数「还等着前置的 ready 卡」——把结论烤在卡上,运行期不重算判据
+const depAttr = (entry) => (AFTER_ANY && depOpen(entry) ? ' data-after-open="1"' : '')
+
 // ———— acceptance-manifest.json(config.acceptanceTab === true 才读;缺省即使文件在也不读)————
 const ACC = cfg.acceptanceTab === true
 let acm = null
@@ -1469,7 +1517,7 @@ const rowHead = ({ id, badge, title, tags = '', line = '', date = '', upd = '' }
 
 const card = (t) => `
   <article class="card lcard rcard card-${t.status}" id="${esc(t.id)}" data-line="${taskLine(t)}" style="--c:${escC(STATUS_COLOR[t.status])}">
-    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t) + respChips(t), line: taskLine(t) })}
+    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t) + respChips(t) + depChips(t), line: taskLine(t) })}
     <div class="rbody">
       <dl>
         ${t.problem ? `<dt>问题</dt><dd class="x">${rt(t.problem)}</dd>` : ''}
@@ -1722,12 +1770,12 @@ const wtBlock = (list) =>
 // data-ord = 分区内的烤入下标:排序是 DOM 重排不是重渲,「最近立卡」那一档得原样还回去。
 const blSortAttr = (it, i) => !BLSORT ? '' : ` data-udate="${esc(cardUpd(it.id) || it.date || '')}" data-ord="${i}"`
 const blCard = (it, i) => `
-  <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${blLine(it)}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}" data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${blSortAttr(it, i)}${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
+  <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${blLine(it)}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}"${depAttr(it)} data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${blSortAttr(it, i)}${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
     ${rowHead({
       id: it.id,
       badge: `<span class="badge" style="--c:${escC(BL_STATUS_COLOR[it.status])}">${esc(b.statuses[it.status])}</span>`,
       title: it.title,
-      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}${respChips(it)}${dormChip(it)}`,
+      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}${respChips(it)}${depChips(it)}${dormChip(it)}`,
       line: blLine(it),
       date: it.date,
       upd: cardUpd(it.id),
@@ -1772,13 +1820,21 @@ const blLegend =
 
 // ———— 积压提醒(v0.13.0,定稿 §8.2;config.wip = { soft, hard },给对象即开)————
 // 计数只数 ready(定稿 §8.4-2):blocked 是等外部、deferred 是搁置,都不占「今天能动手」的额度。
+// v0.16.0 改口(after 定稿 §2.3):还等着前置的 ready 卡也不占额度 —— 它今天动不了手。等前置的
+// 那些另计一个数报出来,软 / 硬阈按「可立即做」那个数算。板上一条 after 都没有时 WIP_WAIT 恒 0、
+// 措辞照旧「可做的卡 N 张」,逐字节冻结。
 // gen 烤入全线别的档,运行期按当前线别/筛选重算(见 setLine 里的 WIP_SETLINE);未配 = 全空串。
 const WIP = (cfg.wip && typeof cfg.wip === 'object' && !Array.isArray(cfg.wip)) ? cfg.wip : null
 const WIP_SOFT = WIP && Number.isFinite(WIP.soft) ? WIP.soft : 10
 const WIP_HARD = WIP && Number.isFinite(WIP.hard) ? WIP.hard : 20
-const WIP_READY = !WIP ? 0 : b.items.filter((it) => it.status === 'ready').length
+const wipReady = !WIP ? [] : b.items.filter((it) => it.status === 'ready')
+const WIP_WAIT = wipReady.filter((it) => depOpen(it)).length
+const WIP_READY = wipReady.length - WIP_WAIT
 const wipLevel = (n) => (n > WIP_HARD ? 'hard' : n > WIP_SOFT ? 'soft' : '')
-const wipText = (n) => (n > WIP_HARD ? `可做的卡 ${n} 张 · 超过 ${WIP_HARD} —— 先清一些再立新卡` : n > WIP_SOFT ? `可做的卡 ${n} 张 · 已超 ${WIP_SOFT}` : '')
+// 括号里那一段:筛掉了卡就补「全板 N」,有等前置的就补「另 M 等前置」,两个都有就并排(· 分隔)
+const wipHead = (n, note) => (AFTER_ANY ? `可立即做 ${n}` : `可做的卡 ${n} 张`) + (note ? `(${note})` : '')
+const WIP_NOTE = WIP_WAIT ? `另 ${WIP_WAIT} 等前置` : ''
+const wipText = (n) => (n > WIP_HARD ? `${wipHead(n, WIP_NOTE)} · 超过 ${WIP_HARD} —— 先清一些再立新卡` : n > WIP_SOFT ? `${wipHead(n, WIP_NOTE)} · 已超 ${WIP_SOFT}` : '')
 const WIP_LV0 = !WIP ? '' : wipLevel(WIP_READY) // 烤入档:懒加载未取 pane 时也先说得出话
 const WIP_TAB_CLS = !WIP_LV0 ? '' : ` wip-${WIP_LV0}`
 const WIP_BAR = !WIP ? '' : `
@@ -1818,7 +1874,8 @@ const ARCH_GRP = !ARCH ? '' : ` || pane.id === 'pane-archive'` // 线别把归�
 const WIP_SETLINE = !WIP ? '' : `
     const wipPane = document.getElementById('pane-backlog')
     if (wipPane && wipPane.dataset.lazyPending === undefined) { // 未取 pane:保持烤入的档,别先归零再跳
-      const wipN = nVis(wipPane, '.bl-ready')
+      ${AFTER_ANY ? `const wipW = nVis(wipPane, '.bl-ready[data-after-open]')
+      const wipN = nVis(wipPane, '.bl-ready') - wipW` : `const wipN = nVis(wipPane, '.bl-ready')`}
       const wipLv = wipN > ${WIP_HARD} ? 'hard' : wipN > ${WIP_SOFT} ? 'soft' : ''
       const wipTab = document.querySelector('.tab[data-pane="backlog"]')
       if (wipTab) { wipTab.classList.toggle('wip-soft', wipLv === 'soft'); wipTab.classList.toggle('wip-hard', wipLv === 'hard') }
@@ -1829,9 +1886,14 @@ const WIP_SETLINE = !WIP ? '' : `
         wipEl.classList.toggle('wip-hard', wipLv === 'hard')
         // 当前筛选只数得到一部分卡时,把全板数一并说出来(定稿 §8.2「并给总数」):
         // 守卫那条 notice 用的是全板数,两处各报一个数会读起来像在说两块板。
-        const wipAll = wipN === ${WIP_READY} ? '' : '(全板 ${WIP_READY})'
+        ${AFTER_ANY ? `const wipNote = []
+        if (wipN !== ${WIP_READY}) wipNote.push('全板 ${WIP_READY}')
+        if (wipW) wipNote.push('另 ' + wipW + ' 等前置')
+        const wipAll = wipNote.length ? '(' + wipNote.join(' · ') + ')' : ''
+        wipEl.textContent = wipLv === 'hard' ? '可立即做 ' + wipN + wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
+          : wipLv === 'soft' ? '可立即做 ' + wipN + wipAll + ' · 已超 ${WIP_SOFT}' : ''` : `const wipAll = wipN === ${WIP_READY} ? '' : '(全板 ${WIP_READY})'
         wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
-          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 已超 ${WIP_SOFT}' : ''
+          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 已超 ${WIP_SOFT}' : ''`}
       }
     }`
 
@@ -1869,7 +1931,7 @@ const decCard = (e) => {
   const iters = (e.iters || []).map((c) => `<a class="iterchip" href="#TC${esc(c.slice(1))}" title="迭代 ${esc(c)}">${esc(c)}</a>`).join('')
   const refines = (e.refines || []).map((r) => `<a class="refchip" href="#${esc(r.code)}" title="${esc(r.note)}">⤴ 修订 ${esc(r.code)}</a>`).join('')
   const hasMeta = secs || iters || refines
-  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e) + respChips(e)
+  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e) + respChips(e) + depChips(e)
   return `
   <article class="deccard lcard rcard dec-${e.status}" id="${esc(e.id)}" data-line="${decLine(e)}" data-date="${esc(e.date || '')}" data-status="${esc(e.status)}" data-type="${esc(tbPrefix(e.id))}" data-search="${esc((e.id + ' ' + e.title).toLowerCase())}"${sessAttr(e)} style="--c:${escC(DEC_STATUS_COLOR[e.status])}">
     ${rowHead({
@@ -3132,7 +3194,8 @@ const OV_ACC = !OVERVIEW || !ACC ? '' : ACC_CUR ? ovRow({
 })
 
 // ③ 可做:与积压提醒(wip)同一个计数,同一套档位色。lanes 开着时随线别重算(见 OV_SETLINE)
-const ovReadyCards = !OVERVIEW ? [] : b.items.filter((it) => it.status === 'ready')
+// v0.16.0:口径跟着 wip 一起改口 —— 还等着前置的 ready 卡不算「可做」(不然总览与横幅各报一个数)
+const ovReadyCards = !OVERVIEW ? [] : b.items.filter((it) => it.status === 'ready' && !depOpen(it))
 const OV_READY_N = ovReadyCards.length
 const OV_READY_LV = !OVERVIEW || !WIP ? '' : wipLevel(OV_READY_N)
 const OV_READY = !OVERVIEW ? '' : ovRow({
@@ -3335,7 +3398,7 @@ const OV_SETLINE = !OVERVIEW ? '' : `
     const ovN = document.getElementById('ovreadyn')
     const ovBl = document.getElementById('pane-backlog')
     if (ovN && ovBl && ovBl.dataset.lazyPending === undefined) { // 未取 pane:保持烤入的数,别先归零再跳
-      const ovV = nVis(ovBl, '.bl-ready')
+      const ovV = nVis(ovBl, '.bl-ready')${AFTER_ANY ? ` - nVis(ovBl, '.bl-ready[data-after-open]')` : ''}
       ovN.textContent = ovV${!WIP ? '' : `
       const ovRow = ovN.closest('.ovrow')
       if (ovRow) {
@@ -4112,6 +4175,18 @@ const RESP_JS = !RESP ? '' : `
   })()`
 const RESP_INJECTED = !RESP ? '' : `\n    if (window.respDorm) window.respDorm()${!HOLD_ANY ? '' : `\n    if (window.respHold) window.respHold()`}`
 
+// ———— 前置依赖 after:门控 CSS(板上一条 after 都没有 = 空串,逐字节冻结)————
+// 只用既有令牌:灰底走 seg-bg(与「暂不收账」「2/3 已合」同一档),链接走 --mut / --ink。不引新色。
+const DEP_CSS = !AFTER_ANY ? '' : `
+  /* ============ 前置依赖 after(v0.16.0,卡上写了 after 才注入)============ */
+  .depchip { display: inline-flex; align-items: baseline; font-size: 10.5px; font-weight: 400; line-height: 17px;
+     padding: 0 7px; border-radius: 5px; white-space: nowrap; color: var(--mut); background: ${tk('seg-bg')};
+     font-variant-numeric: tabular-nums; }
+  .dep-wait, .dep-clear { cursor: help; } /* 逐项状态在 title 里,给个可悬停的暗示 */
+  .dep-unlock a { color: var(--mut); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+  .dep-unlock a:hover { color: var(--ink); }
+  .depmore { font-style: normal; margin-left: 4px; color: var(--faint); }`
+
 // ———— 归档 / 积压提醒:门控 CSS(两项都关 = 空串)————
 // 琥珀走 warn 一族(与进度响应同源),红走 .accbad 已在用的 #d44c47;暗档由 darkStyle 统一包 light-dark()。
 const ARCH_CSS = !ARCH ? '' : `
@@ -4744,7 +4819,7 @@ ${PATH_CSS_B}
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${DEP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">

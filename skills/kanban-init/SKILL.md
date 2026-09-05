@@ -45,6 +45,8 @@ v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片�
 
 **卡片可选字段(v0.15.14)**:`settleHoldAt`(`YYYY-MM-DD`)—— 挂账的起算日,CLI 写 `settleHold` 时顺手记下,重设即续期、清空即一并收走。挂满 **14 天**:灰芯片转琥珀并把天数写在面上,收工守卫出一行安静的提醒(最多点名 5 张)。**只提醒,不解除静音、不改卡、不阻断** —— 挂起还成不成立是判断,机器只替人记「多久了」。0.15.14 之前挂上的老卡没有这个字段,起算日退到卡文件最后提交日(与卡头「更新」灰字同源),所以在卡上写一句近况也算续期。阈值 14 比沉睡的 30 短一半:沉睡是「从没人碰过」,挂起是「人看过、判过、承诺了下一轮」,承诺该问得更勤。没有一张挂账卡的板,输出逐字节不变。
 
+**卡片可选字段(v0.16.0)**:三类卡都可加 `after`(前置依赖,数组)—— 元素是卡号(`"BL-C74"` / `"D89"`,必须在板上,否则 gen 硬报错)、PR(`"#266"` / `"owner/repo#12"`,语法同 `pr`)或版本 tag(`"v0.0.5"`,语法同 `releases[].tag`)。清除判据全部取自已提交的事实:卡的 status 进终态、PR 在 release-manifest 里 `merged`、tag 出现在 `releases[]`;清除日分别是卡文件最后改动日 / `mergedAt` / `at`,**gen 照旧不读时钟**。PR 与版本还没出现在 manifest 里 = 未清,不报错;自指与环 → CLI 拒写、gen 硬报错并点名环。卡头两枚芯片:等着的出灰芯片「等 N 项」(逐项状态挂 title),全清且卡仍 `ready` 出「前置已清 · MM-DD」;被 ≥1 张卡指着且自身未终态的卡出「解锁 A · B」(面上最多 3 个 + `+N`,点号跳卡)。**`config.wip` 的计数随之改口**:只数 `ready` 且前置已清的卡,等前置的另计(「可立即做 12(另 5 等前置)」)。收工守卫多一行非阻断的「前置已清:…」(清除日在 7 天内、卡仍 `ready`,最多 5 张)。与 `blockedOn` 分工:那句自由文本留给「等人 / 等外部」这类没有机器判据的理由,两者可同时存在。**字段驱动、无 config 键;板上一条 `after` 都没有 = 输出逐字节不变。**
+
 **卡片可选字段(v0.13.0)**:三类卡都可加 `detail`(长查证 / 逐文件证据,渲染成卡最下面一个默认折叠的「查证细节」块)。只在 `config.richText` 开着时渲染;缺省 = 输出逐字节不变。见下文「卡正文轻 markdown」。
 
 **卡片可选字段(v0.11.4)**:决策卡与 backlog 卡可加 `shots`(现场截图,`["x.png"]` 或 `[{file,caption}]`;纯文件名默认取 `shots/` 下,文件名以卡号打头可与截图廊自动归组),backlog 卡可加 `repro`(复现流程,字符串或步骤数组)。两者都缺省 = 输出逐字节不变。
@@ -367,12 +369,13 @@ app/kanban/
 card new backlog|decision [--title "…"] [--line C] [--session dev] [--from f.json]
 card set <id> <field> <value> [--json]      card status <id> <status> [--no-note]
 card note <id> "<text>"                     card link <id> "<title>" <href>
+card after <id> <ref>… | --rm <ref>         (前置依赖:卡号 / PR / 版本 tag)
 card show <id> [--json]                     card list [--status s --line X --session Y --since YYYY-MM-DD]
 card history <id>                           export [--out f.json]        pr-sync […]
 ```
 
 - **`card new` 分配并预留卡号**:拆分模式用 `openSync(path,'wx')` 独占创建,两个会话同时算出同一个号时,抢输的自己退到下一号 —— 号是预留出来的,不是各算各的。backlog 取板上现有 id 的主流前缀(如 `BL-C`),决策固定 `D`。模板正文是 `<…>` 占位,`--from f.json` 的字段覆盖模板。
-- **写之前先验**:status ∈ 该类卡的 statuses、date 形如 `YYYY-MM-DD`、`pr` 形如 `12` / `"#12"` / `"owner/repo#12"`、`line` ∈ `config.lanes.ids`、`session` ∈ `config.sessionTags`。不认识的字段只警告不拒(板上的字段一直在长),`order` 一律不许改 —— 它就是显示顺序。
+- **写之前先验**:status ∈ 该类卡的 statuses、date 形如 `YYYY-MM-DD`、`pr` 形如 `12` / `"#12"` / `"owner/repo#12"`、`line` ∈ `config.lanes.ids`、`session` ∈ `config.sessionTags`、`after` 里的卡号在板上且不自指不成环。不认识的字段只警告不拒(板上的字段一直在长),`order` 一律不许改 —— 它就是显示顺序。
 - **形制由脚本保证**:临时文件 + rename 原子替换,已有键的相对顺序原样保留、新键按规范插位(id/title 在前,长文居中,`links`/`shots`/`pr` 收尾),2 空格缩进 + 末尾换行。**从不 commit** —— `git add` 那几个文件仍是会话自己的事。
 - **`card new` 之后照守卫的口径数一遍 `ready`**,超 `config.wip.hard` 就在 stderr 上给同一句提醒(不是收工才说)。
 - **退路**:CLI 说不清的(重排一整段结构、批量改)直接编辑卡文件,形制照旧。
