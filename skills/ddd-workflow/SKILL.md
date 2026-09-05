@@ -28,6 +28,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 | 记一条进展 | `ddd.mjs card note <id> "上游 PR 开了,等合"` |
 | 挂链接 / 挂 PR | `ddd.mjs card link <id> "这个 PR 干了什么" <链接>` —— 本仓 PR 链接顺手写进 `pr` 字段 |
 | 改一个字段 | `ddd.mjs card set <id> tier 1`;数组/对象加 `--json`,如 `card set <id> shots --json '["bl-c72-filter-jump.png"]'` |
+| 写前置依赖 | `ddd.mjs card after <id> BL-C74 "#266" v0.0.5` —— 追加去重;`--rm <ref>` 移除一项 |
 | 看一张卡 / 一批卡 | `ddd.mjs card show <id>` / `ddd.mjs card list --status ready --session dev` |
 | 这张卡改过几次 | `ddd.mjs card history <id>`(板拆成一卡一文件之后才有) |
 
@@ -64,6 +65,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
    **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。
    **合完 PR 用 `pr-sync.mjs --settle` 收账**(v0.13.0):它同步之后列出「关联 PR 都合了、卡还停在非终态」的卡与建议 status(backlog / 进度卡 `done`,决策卡 `live`),**默认只打印**;核对无误再加 `--write`(改 status,并在 `note` / `notes` 末尾追一行时间线)。守卫在收工时也会点名这两种卡(待收账 / 已收账但 PR 未合),非阻断。
    **一张卡跨几轮 PR 时写 `settleHold`**(v0.13.1):这一轮的 PR 只落了一半 / 只落了接口,卡该留在 `ready` —— `ddd.mjs card set <id> settleHold "理由"`,它从此不进待收账清单、不出芯片、守卫不催,卡头换成一枚灰芯片「暂不收账」(理由挂 title)。新一轮 PR 开了照旧 `card link` 挂上去(号自己并进 `pr` 数组);真收账时把 `settleHold` 从卡文件里删掉。清单上只有几张该收时,用 `--settle --write --only BL-1,D2` 挑着收(点名了清单外的卡号会报错,一个字节都不写)。
+   **「等 X 清掉才能动」写成 `after`,别写成散文**(v0.16.0):卡上 `after: ["BL-C74", "D89", "#266", "owner/repo#12", "v0.0.5"]` —— 四种 ref,清没清由看板自己推(卡收到终态 / PR 合进主线 / 版本 tag 出现在 release-manifest)。等着的卡头出一枚灰芯片「等 N 项」(逐项状态挂 title),全清且卡仍 `ready` 时转成「前置已清 · MM-DD」;被依赖的卡头出「解锁 A · B」,点号跳过去。**WIP 的「可立即做」从此只数前置已清的那些**,等前置的另计:「可立即做 12(另 5 等前置)」。前置刚清的卡,收工守卫会安静地报一行(7 天内、仍 ready、最多 5 张)。写法 `ddd.mjs card after <id> <ref>…`;未知卡号 / 自指 / 成环当场拒写,gen 也硬报错。**没有机器判据的理由(等人、等外部)照旧写 `blockedOn`** —— 两者分工清楚,不互相替代。
    **挂账有寿命,满 14 天要么续要么收**(v0.15.14):CLI 写 `settleHold` 时顺手记下 `settleHoldAt`(今天)。挂满 14 天,灰芯片转琥珀并把天数写在面上,守卫出一行安静的提醒(最多点名 5 张,最久的排前面)。**它只提醒,不解除静音、不改卡、不阻断** —— 续期就是把 `settleHold` 重设一遍(理由写新的近况,起算日跟着归零),收账就是删掉那个字段。0.15.14 之前挂上的老卡没有 `settleHoldAt`,起算日退到卡文件最后提交日,所以在卡上写一句近况同样算续期。
    **`links[]` 的标题不写状态词**:「(开而不合)」「(待合)」「(已合并)」这类手写注解一定会过时 —— 板上有了 `release-manifest.json` 之后,指向本仓 PR 的链接自动带真实状态(开着 / 已合 08-26 / 已发 v0.0.3),写过的旧词若与实际不符会被划掉。标题只写这个 PR 干了什么。
 

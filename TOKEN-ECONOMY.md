@@ -27,7 +27,8 @@
 
 | 想查 | 走这里(源头) | 别做 |
 |---|---|---|
-| 卡片状态 / 某字段 | `jq` 点查对应 manifest | Read 整个 manifest |
+| 卡片状态 / 某字段 | `jq` 点查对应 manifest,或 `ddd.mjs card show <id>` | Read 整个 manifest |
+| 这张卡的前置清了没 | `ddd.mjs card show <id>` 的「前置」行(逐项当前状态) | 自己去 release-manifest 里对号 |
 | 文档正文 | 读 `docs/` 下 markdown 源 | Read 渲染后的 `refs/*.html` |
 | 渲染对不对 | 跑 `node gen.mjs`,看报错 | Read `index.html` 肉眼找 |
 | 某字符串在不在生成物里 | `Grep` 精确匹配 | Read 全文 |

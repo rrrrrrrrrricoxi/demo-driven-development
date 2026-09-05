@@ -39,6 +39,9 @@
 // 时间线左栏(四拍冻结 / 整格 role=button+aria-expanded 而非只有文字那颗钮 / 点击与 Enter·Space
 // 共用一个 toggleBand 且重画后交还焦点 / 左栏宽只有一处字面值,轴行与带行读同一个 --relgut
 // 并画同样的右边框 / TL.lbl 与 --relgut 同一个数)等。
+// 卡片前置依赖 after(0.16.0:四种 ref 的清除判据穷举 / 未知卡号与环的硬报错 / 两枚芯片与 +N 折叠 /
+//   WIP 改口「可立即做 N(另 M 等前置)」并与 setLine 重算对齐 / 守卫 7 天窗口 / CLI 追加去重 --rm --json /
+//   撤掉 after 回冻结基线 / 拆分等价门认得芯片里的日期)、
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -4387,6 +4390,291 @@ console.log('T68 行卡展开时补量折叠')
     'richText 关着:选择器里没有 dd.lsrc(那一行本就不渲染)')
   ok(off.includes("clampScan(rc.classList.toggle('open') ? rc : null)"),
     '补量这三处是核心行为,不随 richText 开关(关着的板同样收得住长正文)')
+}
+
+// ============ T69 卡片前置依赖 after(0.16.0:四种 ref / 两枚芯片 / WIP 口径 / 守卫一行 / CLI)============
+// 「等 X 清掉才能动」以前只能写成散文,守卫核不动、WIP 照数不误。四种 ref 的清除判据都取自
+// 已提交的事实(卡 status / PR mergedAt / 版本 at),所以 gen 照旧一个时钟都不读 —— 7 天窗口
+// 只住在守卫里,用 localDate(本地日历,0.15.16 那条 UTC 坑的教训)。
+console.log('T69 前置依赖 after')
+{
+  const D = await import(join(NEW_SCRIPTS, 'deps.mjs'))
+  const { localDate, stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
+  const dayAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return localDate(d) }
+
+  { // ---- ① ref 形制:三种写法靠语法分,不靠「板上查得到就算卡号」----
+    const k = (s) => { const p = D.parseAfterRef(s); return p ? `${p.kind}:${p.ref}` : 'null' }
+    ok(k('#266') === 'pr:#266' && k('266') === 'pr:#266', '#266 与 266 是同一个 PR(语法同 pr 字段)')
+    ok(k('owner/repo#12') === 'pr:owner/repo#12', '跨仓 PR 认得')
+    ok(k('v0.0.5') === 'tag:v0.0.5' && k('v9') === 'tag:v9', 'v 开头紧跟数字 = 版本 tag')
+    ok(k('BL-C74') === 'card:BL-C74' && k('D89') === 'card:D89' && k('UXC34') === 'card:UXC34', '其余是卡号')
+    ok(k('video-tab') === 'card:video-tab', 'v 后面不是数字的照旧是卡号(不抢 vXxx 这类卡号)')
+    ok(k('') === 'null' && k('  ') === 'null' && k('BL C74') === 'null' && k('a/b') === 'null' && k('#0') === 'null',
+      '空 / 带空白 / 带路径分隔符 / 0 号都不是合法 ref')
+    ok(D.afterOf({ after: ['BL-1', 'BL-1', ' BL-2 ', '', null] }).join(',') === 'BL-1,BL-2', 'afterOf 去重去空、保留书写顺序')
+    ok(D.afterOf({ after: 'BL-1' }).length === 0 && D.afterOf({}).length === 0, '不是数组 = 没写(硬报错在 gen 那道门)')
+  }
+
+  { // ---- ② 四种 ref 的清除判据各一(纯函数,固定日期)----
+    const ctx = {
+      repo: 'o/r',
+      cardById: new Map([
+        ['BL-1', { id: 'BL-1', status: 'done' }], ['BL-2', { id: 'BL-2', status: 'ready' }],
+        ['D1', { id: 'D1', status: 'live' }], ['D2', { id: 'D2', status: 'closed' }], ['D3', { id: 'D3', status: 'draft' }],
+      ]),
+      cardUpd: (id) => (id === 'BL-1' ? '2026-09-02' : ''),
+      relPr: new Map([
+        [227, { number: 227, state: 'merged', mergedAt: '2026-08-19T01:00:00Z' }],
+        [230, { number: 230, state: 'open', mergedAt: null }],
+        [225, { number: 225, state: 'closed', mergedAt: null }],
+      ]),
+      relTag: new Map([['v0.0.1', '2026-08-20T09:00:00Z']]),
+    }
+    const r = (s) => D.resolveAfter(s, ctx)
+    ok(r('BL-1').cleared && r('BL-1').at === '2026-09-02', 'backlog 卡 done = 已清,清除日 = 卡文件最后改动日')
+    ok(!r('BL-2').cleared, 'backlog 卡 ready = 没清')
+    ok(r('D1').cleared && r('D2').cleared && !r('D3').cleared, '决策卡 live / closed = 已清,其余没清(TERMINAL 一个并集就够)')
+    ok(r('#227').cleared && r('#227').at === '2026-08-19', 'PR 合了 = 已清,清除日 = mergedAt')
+    ok(!r('#230').cleared && !r('#225').cleared, '开着的与关掉未合的 PR 都没清')
+    ok(r('v0.0.1').cleared && r('v0.0.1').at === '2026-08-20', '版本 tag 在 releases[] 里 = 已发,清除日 = 打 tag 时刻')
+    ok(!r('v9.9.9').cleared && !r('v9.9.9').unknown, '还没发的版本是「没清」,不是错')
+    ok(!r('#999').cleared && !r('#999').unknown, '没同步过的 PR 号同上 —— 它本来就是「还没发生」')
+    ok(!r('other/repo#5').cleared, '跨仓 PR 的状态不在本仓 manifest 里,保守算没清(能不能开工这件事,缺数据要保守)')
+    ok(r('BL-404').unknown === true, '板上没有的卡号:标出来给上层硬报错')
+    ok(D.depItemText(r('BL-1')) === '✓ BL-1 已收 09-02' && D.depItemText(r('#230')) === '#230 开着'
+      && D.depItemText(r('v9.9.9')) === 'v9.9.9 未发', '逐项长形照定稿 §2.1 那三个样子')
+    ok(D.depItemShort(r('#227')) === '#227 已合', '守卫那行的短形不带勾也不带日期')
+    const mixed = [r('BL-1'), r('#227'), r('v0.0.1')]
+    ok(D.openCount(mixed) === 0 && D.clearedAt(mixed) === '2026-09-02', '全清:清除日取各项里最大的那个')
+    ok(D.clearedAt([r('BL-2'), r('#227')]) === '2026-08-19' && D.openCount([r('BL-2'), r('#227')]) === 1, '部分清:只数没清的')
+    ok(D.clearedAt([r('D1')]) === '', '取不到日期时是空串,不硬编一个假日期')
+  }
+
+  { // ---- ③ 未知卡号 / 自指 / 环(纯函数;gen 与 CLI 共用这一份)----
+    const A = (cards) => D.auditAfter(cards)
+    ok(A([{ id: 'a', after: ['zz'] }]).unknown[0].ref === 'zz', '未知卡号点得出是哪张卡的哪一条')
+    ok(A([{ id: 'a', after: ['#9', 'v1.0'] }]).unknown.length === 0, 'PR / 版本从不算「未知」')
+    ok(A([{ id: 'a', after: ['a'] }]).cycle.join('→') === 'a→a', '自指就是长度 1 的环')
+    ok(A([{ id: 'a', after: ['b'] }, { id: 'b', after: ['a'] }]).cycle.join('→') === 'a→b→a', '两张卡互等')
+    ok(A([{ id: 'a', after: ['b'] }, { id: 'b', after: ['c'] }, { id: 'c', after: ['a'] }]).cycle.join('→') === 'a→b→c→a', '三张卡绕一圈')
+    ok(A([{ id: 'a', after: ['b'] }, { id: 'b', after: ['c'] }, { id: 'c', after: [] }]).cycle === null, '链不是环')
+    ok(A([{ id: 'a', after: ['c'] }, { id: 'b', after: ['c'] }, { id: 'c', after: [] }]).cycle === null, '两张卡等同一张也不是环')
+    const rev = D.reverseAfter([{ id: 'a', after: ['c'] }, { id: 'b', after: ['c', 'c'] }, { id: 'c', after: [] }])
+    ok(rev.get('c').join(',') === 'a,b' && !rev.has('a'), '反查按卡序、去重;没人指的卡不进表')
+  }
+
+  // ---- ④ 渲染:两枚芯片 / data-after-open / WIP 口径 / 字段驱动零差异 ----
+  const fx = mkFixture('fx69', { 's.html': demoHtml('s') })
+  const kb = fx.kb, idxP = join(kb, 'index.html')
+  const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+  for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+    const x = rd(join(kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(kb, f), x)
+  }
+  const base = { priority: 'high', tier: '1', area: 'x', source: 's', problem: 'p', approach: 'a' }
+  const mkItems = (extra = {}) => [
+    { id: 'BL-1', status: 'ready', date: '2026-09-01', title: '等三样', ...base, ...(extra['BL-1'] || {}) },
+    { id: 'BL-2', status: 'ready', date: '2026-09-02', title: '全清了', ...base, ...(extra['BL-2'] || {}) },
+    { id: 'BL-3', status: 'ready', date: '2026-09-03', title: '没前置', ...base },
+    { id: 'BL-4', status: 'ready', date: '2026-09-04', title: '被依赖的', ...base },
+    { id: 'BL-5', status: 'done', date: '2026-08-01', title: '已收的', ...base },
+  ]
+  const bl0 = rd(blP); bl0.tiers = { 1: '核心' }; bl0.items = mkItems(); wr(blP, bl0)
+  const dec0 = rd(join(kb, 'decisions-manifest.json')); dec0.entries = []; wr(join(kb, 'decisions-manifest.json'), dec0)
+  wr(join(kb, 'release-manifest.json'), REL_MANIFEST)
+  const cfg0 = rd(cfgP); cfg0.releaseTab = true; cfg0.wip = { soft: 2, hard: 9 }; wr(cfgP, cfg0)
+  runGen(NEW_SCRIPTS, kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('depchip') && !off.includes('data-after-open') && off.includes('可做的卡 4 张 · 已超 2'),
+    '板上一条 after 都没有:一枚芯片都没有,横幅照旧「可做的卡 N 张」')
+
+  const withAfter = rd(blP)
+  withAfter.items = mkItems({
+    'BL-1': { after: ['BL-5', '#230', 'v9.9.9'] },   // 一清两没清
+    'BL-2': { after: ['BL-5', '#227', 'v0.0.1'] },   // 三样全清
+  })
+  for (const id of ['BL-6', 'BL-7', 'BL-8', 'BL-9']) withAfter.items.push({ id, status: 'ready', date: '2026-09-05', title: '等 BL-4', ...base, after: ['BL-4'] })
+  wr(blP, withAfter)
+  const rGen = runGen(NEW_SCRIPTS, kb)
+  const on = readFileSync(idxP, 'utf8')
+  ok(rGen.status === 0, 'gen 跑得过', rGen.stderr.slice(0, 200))
+  ok(on.includes('<span class="depchip dep-wait" title="✓ BL-5 已收 · #230 开着 · v9.9.9 未发">等 2 项</span>'),
+    '未全清:灰芯片「等 N 项」数的是还没清的,逐项状态挂 title')
+  ok(on.includes('<span class="depchip dep-clear" title="✓ BL-5 已收 · ✓ #227 已合 08-19 · ✓ v0.0.1 已发 08-20">前置已清 · 08-20</span>'),
+    '全清:安静芯片「前置已清 · MM-DD」,日期取各项清除日的最大值')
+  ok(on.includes('<span class="depchip dep-unlock" title="清掉这张卡就解锁:BL-6 · BL-7 · BL-8 · BL-9">解锁 <a href="#BL-6">BL-6</a> · <a href="#BL-7">BL-7</a> · <a href="#BL-8">BL-8</a><i class="depmore">+1</i></span>'),
+    '反向芯片:面上最多 3 个 + 折一枚 +N,title 列全,每个号点得动')
+  ok(count(on, 'class="depchip dep-unlock"') === 1, '被指的 BL-5 已 done(终态)—— 终态卡不出反向芯片')
+  ok(count(on, 'data-after-open="1"') === 5, '烤入 data-after-open 的正是那 5 张还等着前置的 ready 卡', String(count(on, 'data-after-open="1"')))
+  ok(!/id="BL-2"[^>]*data-after-open/.test(on), '全清的卡不带 data-after-open(它今天动得了手)')
+  ok(on.includes('可立即做 3(另 5 等前置) · 已超 2'),
+    '横幅改口:「可立即做 N(另 M 等前置)」,软硬阈按可立即做那个数算')
+  ok(on.includes(".bl-ready[data-after-open]") && on.includes("'可立即做 ' + wipN + wipAll"),
+    'setLine 的运行期重算数得到 data-after-open,并用同一套措辞')
+  ok(on.includes('.depchip {') && on.includes('.dep-unlock a {'), '有 after 的板才注入那段 CSS')
+  ok(!on.includes('#7c3aed') || off.includes('#7c3aed'), '不引新色(芯片只用既有令牌)')
+  { // 运行期重算的算术:把那段抠出来真跑一遍(与烤入的文案对齐)
+    const lines = on.split('\n')
+    const at = lines.findIndex((l) => l.includes("const wipPane = document.getElementById('pane-backlog')"))
+    ok(at > 0 && lines[at + 2].includes(".bl-ready[data-after-open]"), '抠得到那段重算')
+    const src = lines.slice(at, at + 23).join('\n')
+    const run = (vis, wait) => {
+      const el = { hidden: false, classList: { toggle() {} }, textContent: '' }
+      const doc = { getElementById: (id) => (id === 'pane-backlog' ? { dataset: {} } : id === 'wipbar' ? el : null), querySelector: () => null }
+      new Function('document', 'nVis', src)(doc, (root, sel) => (sel.includes('data-after-open') ? wait : vis))
+      return el.textContent
+    }
+    ok(run(8, 5) === '可立即做 3(另 5 等前置) · 已超 2', '无筛选:重算与烤入的一字不差', run(8, 5))
+    ok(run(7, 3) === '可立即做 4(全板 3 · 另 3 等前置) · 已超 2', '筛掉一部分:全板数与等前置数并排在同一个括号里', run(7, 3))
+    ok(run(8, 0) === '可立即做 8(全板 3) · 已超 2', '当前筛选下没有等前置的卡:括号里不提它', run(8, 0))
+  }
+
+  { // 卡离开 ready 之后「前置已清」不再渲染(那时它是句废话);「等 N 项」照旧说话
+    const x = rd(blP)
+    x.items.find((i) => i.id === 'BL-2').status = 'deferred'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const h = readFileSync(idxP, 'utf8')
+    ok(!h.includes('class="depchip dep-clear"'), '卡从 ready 挪走:全清那枚芯片不再渲染')
+    ok(h.includes('等 2 项'), '还没清完的那枚不受状态影响 —— 它说的是事实,不是催促')
+    x.items.find((i) => i.id === 'BL-2').status = 'ready'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // 撤掉全部 after → 回到冻结基线(字段驱动,不加 config 键)
+    const x = rd(blP); x.items = mkItems(); wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    ok(sha(idxP) === offSha, '撤掉所有 after 后与未写 after 的基线逐字节相同')
+    wr(blP, withAfter)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // ---- ⑤ gen 硬报错三种 ----
+    const x = rd(blP)
+    const bad = (mut) => { const y = rd(blP); mut(y); wr(blP, y); const r = runGen(NEW_SCRIPTS, kb); wr(blP, x); return r }
+    const r1 = bad((y) => { y.items[2].after = ['BL-404'] })
+    ok(r1.status !== 0 && /BL-404/.test(r1.stderr) && /BL-3/.test(r1.stderr), '未知卡号:硬报错并点名是哪张卡的哪一条', r1.stderr.slice(0, 160))
+    const r2 = bad((y) => { y.items[2].after = ['BL-3'] })
+    ok(r2.status !== 0 && /BL-3 → BL-3/.test(r2.stderr), '自指:硬报错并把环画出来', r2.stderr.slice(0, 160))
+    const r3 = bad((y) => { y.items[2].after = ['BL-4']; y.items[3].after = ['BL-3'] })
+    ok(r3.status !== 0 && /BL-3 → BL-4 → BL-3/.test(r3.stderr), '两张卡互等:点名环上的卡', r3.stderr.slice(0, 160))
+    const r4 = bad((y) => { y.items[2].after = 'BL-4' })
+    ok(r4.status !== 0 && /不是数组|not an array/.test(r4.stderr), 'after 不是数组也硬报错(悄悄当没写会骗人)', r4.stderr.slice(0, 160))
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // ---- ⑥ 守卫:7 天窗口(固定日期)、只报仍 ready 的、最多 5 张、最近清的先、永不阻断 ----
+    const rel = JSON.parse(JSON.stringify(REL_MANIFEST))
+    const mergedOn = (n) => `${dayAgo(n)}T01:00:00Z`
+    rel.prs.find((p) => p.number === 227).mergedAt = mergedOn(7)
+    rel.prs.find((p) => p.number === 226).mergedAt = mergedOn(1)
+    rel.releases[0].at = `${dayAgo(30)}T09:00:00Z`
+    wr(join(kb, 'release-manifest.json'), rel)
+    const x = rd(blP)
+    x.items = mkItems()
+    x.items.push({ id: 'BL-A', status: 'ready', date: '2026-09-01', title: '刚清 7 天', ...base, after: ['#227'] })
+    x.items.push({ id: 'BL-B', status: 'ready', date: '2026-09-01', title: '昨天清的', ...base, after: ['#226'] })
+    x.items.push({ id: 'BL-C', status: 'ready', date: '2026-09-01', title: '30 天前发的版', ...base, after: ['v0.0.1'] })
+    x.items.push({ id: 'BL-D', status: 'done', date: '2026-09-01', title: '清了但卡已收', ...base, after: ['#226'] })
+    x.items.push({ id: 'BL-E', status: 'ready', date: '2026-09-01', title: '还等着', ...base, after: ['#230'] })
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    touch(idxP)
+    const g = runStop(NEW_SCRIPTS, fx.root)
+    const line = (g.stdout.match(/前置已清:[^"\\]*/) || [''])[0]
+    ok(g.status === 0 && !/"decision":\s*"block"/.test(g.stdout), '这条通知永不阻断收工')
+    ok(/BL-B/.test(line) && /BL-A/.test(line), '7 天内清掉的卡都点到(边界那天算在内)', line)
+    ok(line.indexOf('BL-B') < line.indexOf('BL-A'), '最近清的排前面')
+    ok(!/BL-C/.test(line), '30 天前清的:过了 7 天窗口,不再说')
+    ok(!/BL-D/.test(line), '卡已经收了(不再 ready)的不点 —— 它不需要「可以开工了」')
+    ok(!/BL-E/.test(line), '还等着前置的当然不点')
+    ok(/BL-B\(#226 已合\)/.test(line), '括号里逐项列清掉的是什么', line)
+    // 六张一起解锁:只点 5 个 + 总数
+    const many = rd(blP)
+    for (let i = 1; i <= 5; i++) many.items.push({ id: `BL-M${i}`, status: 'ready', date: '2026-09-01', title: `批量 ${i}`, ...base, after: ['#226'] })
+    wr(blP, many)
+    runGen(NEW_SCRIPTS, kb)
+    touch(idxP)
+    const gN = runStop(NEW_SCRIPTS, fx.root)
+    const lineN = (gN.stdout.match(/前置已清:[^"\\]*/) || [''])[0]
+    ok(/…等 7 张/.test(lineN) && (lineN.match(/BL-[MAB]/g) || []).length === 5, '最多点名 5 张 + 总数', lineN)
+    // 积压那条也换了口径:等前置的不占额度
+    const wipCfg = rd(cfgP); wipCfg.wip = { soft: 1, hard: 2 }; wr(cfgP, wipCfg)
+    runGen(NEW_SCRIPTS, kb)
+    touch(idxP)
+    const gW = runStop(NEW_SCRIPTS, fx.root)
+    ok(/可立即做\(ready 且前置已清\)的卡有 \d+ 张,另有 1 张 ready 还等着前置/.test(gW.stdout),
+      '守卫的积压那条同一口径:等前置的另计,不顶阈值', (gW.stdout.match(/可立即做[^,]*,[^,]*/) || [''])[0])
+    wipCfg.wip = { soft: 2, hard: 9 }; wr(cfgP, wipCfg)
+    wr(blP, withAfter)
+    wr(join(kb, 'release-manifest.json'), REL_MANIFEST)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // ---- ⑦ CLI:追加去重 / --rm / --json 覆盖 / 三种拒绝 / card show 的「前置」行 ----
+    const fx2 = mkFixture('fx69cli', { 's.html': demoHtml('s') })
+    const kb2 = fx2.kb, bl2 = join(kb2, 'backlog-manifest.json')
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const y = rd(join(kb2, f)); y.instance.ghRepo = 'o/r'; wr(join(kb2, f), y)
+    }
+    const y = rd(bl2); y.tiers = { 1: '核心' }
+    y.items = [
+      { id: 'BL-1', status: 'ready', title: '甲', ...base },
+      { id: 'BL-2', status: 'done', title: '乙', ...base },
+      { id: 'BL-3', status: 'ready', title: '丙', ...base },
+    ]
+    wr(bl2, y)
+    wr(join(kb2, 'release-manifest.json'), REL_MANIFEST)
+    const afterOfCard = (id) => (rd(bl2).items.find((i) => i.id === id).after || [])
+
+    const a1 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', '#230'])
+    ok(a1.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230', 'card after 追加,顺序即书写顺序', a1.stderr)
+    const a2 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', 'v0.0.1'])
+    ok(a2.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230,v0.0.1', '再追加:已有的去重,新的落到末尾')
+    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('after'), 'after 落进键序里(blockedOn 旁边)')
+    const a3 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#230'])
+    ok(a3.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,v0.0.1', '--rm 只去掉那一项')
+    const a4 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#999'])
+    ok(a4.status === 1 && afterOfCard('BL-1').join(',') === 'BL-2,v0.0.1', '--rm 一个不在的项:拒绝,一个字节都不写', a4.stderr.slice(0, 80))
+    const a5 = runCli(kb2, ['card', 'set', 'BL-1', 'after', '--json', '["#227"]'])
+    ok(a5.status === 0 && afterOfCard('BL-1').join(',') === '#227', 'card set … after --json 整体覆盖')
+    const a6 = runCli(kb2, ['card', 'set', 'BL-1', 'after', 'BL-2'])
+    ok(a6.status === 1 && /数组|array/.test(a6.stderr), '不给 --json 的标量值被形制那道门挡下')
+    const a7 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-404'])
+    ok(a7.status === 1 && /BL-404/.test(a7.stderr) && afterOfCard('BL-1').join(',') === '#227', '未知卡号:CLI 拒写')
+    const a8 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-1'])
+    ok(a8.status === 1 && /自己|itself|its own/.test(a8.stderr), '自指:CLI 拒写')
+    runCli(kb2, ['card', 'after', 'BL-3', 'BL-1'])
+    const a9 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-3'])
+    ok(a9.status === 1 && /BL-1 → BL-3 → BL-1|BL-3 → BL-1 → BL-3/.test(a9.stderr) && afterOfCard('BL-1').join(',') === '#227',
+      '成环:CLI 拒写并把环画出来', a9.stderr.slice(0, 120))
+    const a10 = runCli(kb2, ['card', 'after', 'BL-1', 'BL C4'])
+    ok(a10.status === 1 && /形制|not a valid ref/.test(a10.stderr), '形制不合法的 ref 也拒')
+    const a11 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#227', 'BL-2'])
+    ok(a11.status === 1, '--rm 后面再跟 ref:拒(一次只移除一项)')
+    runCli(kb2, ['card', 'set', 'BL-1', 'after', '--json', '["BL-2","#230","v0.0.1"]'])
+    const show = runCli(kb2, ['card', 'show', 'BL-1'])
+    ok(show.status === 0 && /前置: ✓ BL-2 已收 · #230 开着 · ✓ v0\.0\.1 已发/.test(show.stdout),
+      'card show 多一行「前置」,逐项带当前状态(与 gen 同一份函数)', (show.stdout.match(/前置.*/) || [''])[0])
+    ok(runCli(kb2, ['card', 'show', 'BL-3']).stdout.includes('前置: BL-1 未收'), '指向还没收的卡:说「未收」')
+    ok(!/不认识的字段|unknown field/.test(runCli(kb2, ['card', 'set', 'BL-2', 'after', '--json', '[]']).stderr), 'after 是已知字段')
+    ok(/card after/.test(runCli(kb2, ['--help']).stdout), '--help 里有它')
+  }
+
+  { // ---- ⑧ 拆分等价门认得前置芯片里的日期(卡号前置的清除日 = 那张卡的最后改动日,拆分后才有)----
+    const a = '<span class="depchip dep-clear" title="✓ BL-5 已收 09-02">前置已清 · 09-02</span>'
+    const z = '<span class="depchip dep-clear" title="✓ BL-5 已收">前置已清</span>'
+    ok(stripCardUpdated(a) === stripCardUpdated(z), 'cards-split / cards-join 的逐字节等价门把它归一(否则一拆就判「搬坏了」)')
+    const w1 = '<span class="depchip dep-wait" title="✓ BL-5 已收 09-02 · #230 开着">等 1 项</span>'
+    const w2 = '<span class="depchip dep-wait" title="✓ BL-5 已收 · #230 开着">等 1 项</span>'
+    ok(stripCardUpdated(w1) === stripCardUpdated(w2), '「等 N 项」的 title 同样归一')
+    const u = '<span class="depchip dep-unlock" title="x"><a href="#BL-6">BL-6</a></span>'
+    ok(stripCardUpdated(u) === u, '反向芯片不含日期,原样不动')
+  }
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
