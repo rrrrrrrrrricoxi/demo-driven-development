@@ -1727,7 +1727,7 @@ console.log('T40 积压提醒 wip')
 console.log('T41 时间线重做')
 {
   const { relAxis, relTicks, relBar, relPack, relGrid, relBandH, relWindow,
-    relRegime, relSqSize, relChipW, relGridBig, relGridChip, relPackChip, relCaps } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+    relRegime, relSqSize, relChipW, relGridBig, relGridChip, relPackChip, relCaps, relChipPitch, CHIP_GAP } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
   const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
   const mkDays = (from, n) => {
     const out = [], t = Date.parse(from + 'T00:00:00Z')
@@ -1833,6 +1833,12 @@ console.log('T41 时间线重做')
     ok(relBar(ax, '2026-08-01', '2026-08-01', 10).w === 10, '当天开当天合:退到 min 宽')
     ok(relBar(ax, '2026-08-01', '2026-08-03', 10).x0 === 200 && relBar(ax, '2026-08-01', '2026-08-03', 10).w === 14, '跨三天 = 3×5 − 1')
     ok(relBar(ax, '2026-07-20', '2026-08-02', 10).x0 === 200, '左边越界的截到窗口左沿')
+    // 表头那句「窗口内 N」数的必须是「画不画得出来」,而不是锚点日落没落在窗口里 —— 判据只此一条
+    for (const [s0, e0] of [['2026-07-01', '2026-07-20'], ['2026-07-20', '2026-08-02'], ['2026-08-01', '2026-08-03'],
+      ['2026-08-10', '2026-08-10'], ['2026-08-11', '2026-08-20'], ['2026-07-01', '2026-08-20']]) {
+      ok((relBar(ax, s0, e0, 10) !== null) === (e0 >= ax.t0 && s0 <= ax.t1),
+        `画得出来 ⇔ 跨度与窗口有交集(${s0}→${e0})`, `${relBar(ax, s0, e0, 10) !== null} vs ${e0 >= ax.t0 && s0 <= ax.t1}`)
+    }
     const items = [
       { n: 1, s: '2026-08-01', e: '2026-08-02' },
       { n: 2, s: '2026-08-01', e: '2026-08-05' },
@@ -1918,7 +1924,8 @@ console.log('T41 时间线重做')
       ok(g.bars.filter((b) => b.more)[0].fold.join(',') === '244,245,246',
         '+N 还记着被收起来的是哪几个号:悬停列的就是它们,不是那一整天',
         JSON.stringify(g.bars.filter((b) => b.more)[0].fold))
-      ok(g.bars.every((b, i) => i === 0 || b.x === g.bars[i - 1].x + 48), '按号横排,间距 = 芯片宽 + 6')
+      ok(g.bars.every((b, i) => i === 0 || b.x === g.bars[i - 1].x + relChipPitch(42)), '按号横排,间距 = 芯片宽 + 一道固定间距')
+      ok(CHIP_GAP === 6 && relChipPitch(42) === 48, '步距一处定:relChipPitch = 芯片宽 + CHIP_GAP', `${CHIP_GAP} ${relChipPitch(42)}`)
       ok(g.bars.every((b) => b.x >= ax.x['2026-09-01'] && b.x + b.w <= ax.x['2026-09-01'] + ax.w['2026-09-01']),
         '连 +N 在内都不越出当天的格子')
       const g4 = relGridChip({ '2026-09-01': four }, ax, 42)
@@ -2135,6 +2142,13 @@ console.log('T41 时间线重做')
   }
   ok(!on.includes('reltlsvg') && !on.includes('rect.relb') && !on.includes('id="reltip"'),
     '旧时间线的 SVG 与浮层一个不留(死代码不留在产物里)')
+  ok(on.includes('if (e0 >= ax.t0 && s0 <= ax.t1) inwin++'),
+    '带头那句「窗口内 N」数的是「画不画得出来」(与 relBar 同一个判据),不是锚点日落没落在窗口里 —— 窗口之前建的、还开着的 PR 会画出来,锚点却在窗口外')
+  ok(count(on, 'function relChipPitch') === 1 && !on.includes('cw + 6'),
+    '芯片步距在产物里只有一处定义:tlWhisk 与 packer 都调 relChipPitch,不再各写一个 6(改一处漏一处,芯片就探出预留块)',
+    `relChipPitch×${count(on, 'function relChipPitch')} / cw+6×${count(on, 'cw + 6')}`)
+  ok(!on.includes('function iso(') && count(on, 'function dstr(') === 1,
+    '发布进度的运行期里没有从没被调用过的 iso()(与 dstr 逐字节相同,0.13.1 加进来就一直没有调用者)')
   const G = JSON.parse(on.match(/\n {4}var G = (\[[\s\S]*?\])\n/)[1])
   ok(G.map((g) => g.g).join(',') === 'dev,test,v0.0.2,v0.0.1,other',
     `带序 = dev → test → 版本(at 降序)→ 其它(实际 ${G.map((g) => g.g).join(',')})`)
@@ -2217,7 +2231,7 @@ console.log('T45 settleHold 暂不收账')
   ok(cardOf('BL-R').includes('rsp-reopen'), '没写字段的反向卡照旧提示')
   ok(cardOf('D-H').includes('rsp-hold') && !cardOf('D-H').includes('rsp-settle'), '决策卡:同一枚灰芯片')
   ok(cardOf('T-H').includes('rsp-hold') && !cardOf('T-H').includes('rsp-settle'), '进度 task 卡:同一枚灰芯片')
-  ok(on.includes('.rsp-part, .rsp-hold {'), '灰芯片与「2/3 已合」同一套安静配色,不引新强调色')
+  ok(/\.rsp-part, \.rsp-hold[^{]*\{ font-weight: 400; color: var\(--mut\)/.test(on), '灰芯片与「2/3 已合」同一套安静配色,不引新强调色')
   ok(on.includes('<p class="rspsh">待收账 · 1 张卡'), '待收账段:hold 的三张卡不占位(4 → 1)', (on.match(/class="rspsh">[^<]*/) || [])[0])
   {
     const seg = on.slice(on.indexOf('class="rspsettle"'), on.indexOf('class="relview"'))
@@ -3104,6 +3118,21 @@ console.log('T54 线别分段 × 懒注入')
     ok(off.includes('id="bllineseg"') && off.includes('ev.target.closest(LINE_BTN_SEL)') && !/lineBtns/.test(off),
       '非懒模式:分段就在壳里,同样走委托(一份实现两种形态)')
   }
+
+  { // ---- line 是外来输入(卡文件手写):进 data-line= 前要过 esc,不然一个引号能把 <article> 拆开 ----
+    const hostile = JSON.parse(readFileSync(blP, 'utf8'))
+    hostile.items = [{ ...hostile.items[0], id: 'BL-9', line: 'C" onmouseover=alert(77) x="' }]
+    wr(blP, hostile)
+    const r = runGen(NEW_SCRIPTS, fx54.kb)
+    const h = readFileSync(idxP, 'utf8')
+    ok(r.status === 0 && h.includes('id="BL-9" data-line="C&quot; onmouseover=alert(77) x=&quot;"'),
+      'data-line 里的引号转义掉 —— 同一个标签上别的属性本来就都过了 esc,漏这一个就是活的事件处理器',
+      (h.match(/id="BL-9"[^>]{0,120}/) || [''])[0])
+    ok(!h.includes('" onmouseover='), '标签没被拆开:全文没有一处真引号后面跟着 onmouseover=(转义前那是个活的事件处理器)')
+    ok(/line 值不在 config\.lanes\.ids/.test(r.stderr), 'gen 顺带出声:这个 line 不在 ids 里,这张卡在任何一档下都不会出现(CLI 早就拦,手写的卡拦不住)', r.stderr.slice(0, 200))
+    wr(blP, bl)
+    runGen(NEW_SCRIPTS, fx54.kb)
+  }
 }
 
 // ============ T55 左侧竖向 tab 导航 tabRail(opt-in;关档逐字节冻结;清单与 tab 条同一份)============
@@ -3685,12 +3714,12 @@ console.log('T61 时间线 hover peek')
     const nums = (h) => (h.match(/<b>#(\d+)<\/b>/g) || []).map((x) => x.replace(/\D/g, ''))
     ok(nums(fold).join(',') === '257,259,260',
       '+N 的卡只列折起来的那三个,画出来的几枚不再重列一遍', nums(fold).join(','))
-    ok(fold.includes('09-01 · 未展开 3 个 PR') && fold.includes('test · 4173 (main)'),
-      '卡头说的是「未展开 3 个 PR」,不是那一整天的总数', fold.slice(0, 120))
+    ok(fold.includes('09-01 · 放不下的 3 个 PR') && fold.includes('test · 4173 (main)'),
+      '卡头说的是「放不下的 3 个 PR」,不是那一整天的总数;也不说「未展开」—— 看得见 +N 的时候带一定是开着的', fold.slice(0, 120))
     const all = pkDay('b1', '2026-09-01', undefined)
-    ok(nums(all).length === 8 && all.includes('09-01 · 8 个 PR') && !all.includes('未展开'),
+    ok(nums(all).length === 8 && all.includes('09-01 · 8 个 PR') && !all.includes('放不下的'),
       '不带 data-relfold 的锚点(方块 / 芯片 / 条 / 折叠带那一段)照旧列一整天', nums(all).length + ' 条')
-    ok(pkDay('b1', '2026-09-01', '888').includes('· 未展开 0 个 PR'),
+    ok(pkDay('b1', '2026-09-01', '888').includes('· 放不下的 0 个 PR'),
       '按号挑不按天挑:跨天那组的锚点日被窗口裁掉时,天对不上而号永远对得上')
   }
   { // 「不引新色」的真检法:peek 那几条里出现的色值,样式表里别处已经在用(与总览那条同一把尺)
@@ -3997,10 +4026,16 @@ console.log('T64 Backlog 排序分段 backlogSort')
     const F = new Function(src + '\n  return { tbOrdCmp, tbUdCmp, tbIdAsc, BLS_KEY, BLS_OK, TB_SORT_LABEL }')()
     ok(F.BLS_KEY === 'htest_bl_sort', '记忆键走 LS_PREFIX 老规矩:<brand>_bl_sort', F.BLS_KEY)
     ok(F.BLS_OK.join(' ') === 'ord udate-desc date-asc id', 'BLS_OK 就是分段那四档(存了别的值一律不认)')
+    ok(count(on, 'tbNum(a.id) - tbNum(b.id)') === 1,
+      '编号比较器在产物里只有一份:「按编号」那颗钮与 tbUdCmp 的同日退让走同一把尺(两份迟早给出两种顺序)',
+      String(count(on, 'tbNum(a.id) - tbNum(b.id)')))
     ok(F.BLS_OK.indexOf('cdate-desc') < 0,
       '0.15.12 存下的 cdate-desc 不在白名单里 —— 接线那句会把它落回默认档「最近立卡」,而不是卡住')
-    ok(F.TB_SORT_LABEL['ord'] === '立卡新→旧' && F.TB_SORT_LABEL['udate-desc'] === '更新新→旧' && F.TB_SORT_LABEL['cdate-desc'] === undefined,
-      'meta 行说得出这两档各叫什么,旧那一档的名字不再留着')
+    ok(F.TB_SORT_LABEL['ord'] === '最近立卡' && F.TB_SORT_LABEL['udate-desc'] === '最近更新'
+      && F.TB_SORT_LABEL['cdate-desc'] === undefined,
+      'meta 行回声钮面:分段那两档在同一屏上不说两套话(旧那一档的名字也不再留着)', JSON.stringify(F.TB_SORT_LABEL))
+    ok(F.TB_SORT_LABEL['date-asc'] === '日期旧→新',
+      '与决策那只下拉共用的两个键不动 —— 在这儿改会把决策工具条的 meta 也一起改掉', F.TB_SORT_LABEL['date-asc'])
     const el = (id, udate, date, ord) => ({ id, dataset: { udate, date, ord: String(ord) } })
     // 烤入顺序:同日按编号大→小(BL-11 在 BL-2 前);无日期沉底
     const deck = [el('BL-11', '2026-05-05', '2026-03-03', 0), el('BL-2', '2026-01-09', '2026-03-03', 1),
@@ -4693,7 +4728,7 @@ console.log('T69 前置依赖 after')
   ok(on.includes('可立即做 3(另 5 等前置) · 已超 2'),
     '横幅改口:「可立即做 N(另 M 等前置)」,软硬阈按可立即做那个数算')
   ok(on.includes(".bl-ready[data-after-open]") && on.includes("'可立即做 ' + wipN + wipAll"),
-    'setLine 的运行期重算数得到 data-after-open,并用同一套措辞')
+    'setLine 的运行期重算数得到 data-after-open,并用同一套措辞(头词与量词是 gen 期常量,一句话只留一处)')
   ok(on.includes('.depchip {') && on.includes('.dep-unlock a {'), '有 after 的板才注入那段 CSS')
   ok(!on.includes('#7c3aed') || off.includes('#7c3aed'), '不引新色(芯片只用既有令牌)')
   { // 运行期重算的算术:把那段抠出来真跑一遍(与烤入的文案对齐)

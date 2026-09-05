@@ -32,7 +32,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 | 看一张卡 / 一批卡 | `ddd.mjs card show <id>` / `ddd.mjs card list --status ready --session dev` |
 | 这张卡改过几次 | `ddd.mjs card history <id>`(板拆成一卡一文件之后才有) |
 
-**为什么不再手改 JSON**:①卡号原来靠各会话自己算「最大号 +1」,同一晚两条线撞号只是时间问题 —— CLI 用 `openSync(path,'wx')` 独占创建把号预留下来,抢输的那个自己退到下一号;②手写会漏末尾换行、写错 status / 日期形制 / 线别拼错,gen 要么硬失败要么静默渲染成别的样子,CLI 当场拒(`order` 一律不许改,它就是显示顺序);③板拆成一卡一文件之后,写一张卡只动那一张卡的文件,别的会话在途的卡不会被整份重写带走。
+**为什么不再手改 JSON**:①卡号原来靠各会话自己算「最大号 +1」,同一晚两条线撞号只是时间问题 —— CLI 用 `openSync(path,'wx')` 独占创建把号预留下来,抢输的那个自己退到下一号;②手写会漏末尾换行、写错 status / 日期形制 / 线别拼错,gen 要么硬失败要么静默渲染成别的样子,CLI 当场拒(`order` 一律不许改:它是拆卡时记下的原数组下标,gen 读回时按它再按 id 排、排完就删;面上 Backlog / 决策两个 pane 是按卡日期新→旧排的,不看它 —— 跟着数组走的是截图廊的组序与深链表的键序);③板拆成一卡一文件之后,写一张卡只动那一张卡的文件,别的会话在途的卡不会被整份重写带走。
 
 **退路**:CLI 说不清的(一次重排一整段结构、批量改、要写它还不认识的形制)直接编辑卡文件 / manifest —— 形制照旧是 2 空格缩进 + 末尾换行,改完让守卫重跑 gen。CLI 从不 commit,`git add` 那几个文件仍是自己的事。
 

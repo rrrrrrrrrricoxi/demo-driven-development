@@ -394,9 +394,13 @@ One path per card either avoids that or turns it into a conflict git can stop.
 A board only one session ever writes to does not need this.
 
 Each card carries an `order` field written by the migration — the array index it
-had before, because array order *was* display order in several places. `gen`
-sorts by `order` then by `id` and deletes the field afterwards. Cards created by
-hand or by the CLI can leave it out; they sort last, by id. With the directory
+had before. `gen` sorts by `order` then by `id` and deletes the field afterwards,
+so the array it works from is the array the board had before the split. That
+array order is not what you see in the backlog and decision panes: those are
+sorted by card date, newest first, ties by id — `order` decides the things that
+do follow the array, the screenshot gallery's group order and the deep-link
+table's key order. Cards created by hand or by the CLI can leave it out; they
+sort last, by id. With the directory
 configured, each card header also shows the date its file was last committed
 (falling back to the file's mtime), and the "dormant N days" note counts from
 that date instead of the card's creation date.
@@ -578,7 +582,9 @@ or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session tag in
 and friends) have to be given as arrays, through `--json`. An unrecognised field
 only warns, since boards grow fields; `id` and `order` cannot be changed at all,
 the first because it is the card's identity and with one file per card its
-filename too, the second because it is the display order. A link's scheme has to
+filename too, the second because it is the array position the split recorded —
+editing it reshuffles what still follows the array (the screenshot gallery, the
+deep-link table) without changing the pane you were looking at. A link's scheme has to
 be `http`, `https`, `mailto` or a path relative to the repository — anything
 else would render as a live link on the board's own origin.
 

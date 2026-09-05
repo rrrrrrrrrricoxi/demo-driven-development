@@ -81,8 +81,8 @@ const dm = JSON.parse(readFileSync(join(HERE, 'decisions-manifest.json'), 'utf8'
 // ———— 一卡一文件(v0.14.0,config.cardsDir;未配 = 一切照旧,输出逐字节冻结)————
 // 卡从 <cardsDir>/backlog/*.json 与 <cardsDir>/decisions/*.json 逐文件读,头文件只剩表头
 // ($comment / instance / statuses / priorities / tiers / groups)。文件按名排序后读,与文件系统顺序无关;
-// 显示顺序按拆分写入的 order(= 原数组下标)再按 id —— 数组顺序在这份 gen 里就是显示顺序
-// (截图廊组序靠 decisionRank、深链表 LAZY_IDMAP 靠键序、byDateDesc 是稳定排序)。
+// 数组顺序按拆分写入的 order(= 原数组下标)再按 id 还原 —— 跟着数组走的是截图廊组序
+// (decisionRank)与深链表键序(LAZY_IDMAP);Backlog / 决策两个 pane 面上的顺序另按 byDateDesc。
 const CARDS_DIR = cardsDirOf(cfg)
 const CARD_SRC = new Map() // id → 卡文件相对看板目录的路径(更新日期与报错点名共用)
 if (CARDS_DIR) {
@@ -555,6 +555,9 @@ const LANE_IDS = LANES_ON ? LANES.ids : []
 // (线别规整在这一行才完成,所以这个字段在 REF_DOCS 建好之后补,不在建的时候写。)
 if (LANES_ON && PATH_DOCS) { const d = REF_DOCS.find((x) => x.type === 'path'); if (d) d.line = LANE_IDS.join(' ') }
 // 线别归属:开时读每条 entry 的显式 line 字段(通用、可审计);关时恒空 —— 产物与未开线别逐字节一致。
+// 值是外来输入(卡文件与 config.docs[] 都是手写的),每个 data-line= 插值都要过 esc:同一个标签上的
+// 别的属性(id / data-date / data-status / data-search)本来就都过了,漏这一个就是一个引号能把
+// <article> 标签拆开,连带卡的筛选/排序属性一起废掉。
 const lineOf = (e) => LANES_ON ? String((e && e.line) || '') : ''
 const decLine = lineOf, iterLine = lineOf, docLine = lineOf, taskLine = lineOf, blLine = lineOf
 // 线别开时的每档 hint 区块:按 ids 序渲染有 hint 的档;值按可信 HTML 原样注入(id 过 esc)
@@ -596,8 +599,13 @@ const LANE = LANES_ON ? {
   decStamp: '由 <code>gen.mjs</code> 生成自 <code>decisions-manifest.json</code> — demo 存 <code>kanban/demos/</code>。',
 }
 
-// 长文折叠(信息密度):运行期在 pane 可见时量高打 .clamp(字符数近似会被列宽骗——
-// 三列栅格下 96 字 ≈5 行;display:none 面板量高为 0,故只量可见元素,见内联 clampScan)
+// 折叠高度(两条路径共用一个数):超 400 字的字段烤预览走 .lpre.lclamp,没超的交给 clampScan 打
+// .clamp —— 同一张卡上两个长字段收下来必须一样高,不然折叠线不齐。运行期那条按行高反算行数,
+// 与这个 em 值是隐式绑定的,所以三处都从这里取(REL_GUT 那条注释点名的失败模式,同源)。
+const CLAMP_LINES = 3.3
+const CLAMP_MAX = `${CLAMP_LINES}em`
+// 长文折叠(信息密度):运行期在 pane 可见时量高打 .clamp(字符数近似会被列宽骗 —— 同样 96 字,
+// 窄一列就多好几行;display:none 面板量高为 0,故只量可见元素,见内联 clampScan)
 
 const ghCommit = (hash) => `https://github.com/${m.instance.ghRepo}/commit/${hash}`
 
@@ -659,6 +667,17 @@ const ALL_CARDS = [...m.tasks, ...b.items, ...dm.entries]
 // 芯片只认显式 pr 字段;links 兼容(prsOfCard)只用于「PR ↔ 卡」反查 —— 否则存量看板的
 // 旧 PR 链接会凭空长出芯片,冻结承诺当场破。
 const HAS_PR = ALL_CARDS.some((c) => c && c.pr !== undefined && c.pr !== null)
+
+// 线别值不在 config.lanes.ids 里 = 这张卡/这篇文档在任何一档下都不出现(CLI 写卡时早就拦这个,
+// 手写的卡与 docs[] 拦不住)。不阻断 —— 板上可能正在加一档;但得出声,不然它是悄悄消失的。
+if (LANES_ON) {
+  const badLines = []
+  const chk = (what, id, e) => { for (const t of lineOf(e).split(/\s+/).filter(Boolean)) if (!LANE_IDS.includes(t)) badLines.push(`${what} ${id} 的「${t}」`) }
+  for (const c of ALL_CARDS) chk('卡', (c && c.id) ?? '?', c)
+  for (const it of m.iterations) chk('迭代', (it && it.id) ?? '?', it)
+  for (const d of REF_DOCS) chk('文档', (d && d.out) ?? '?', d)
+  if (badLines.length) console.warn(`[gen] ⚠ 这些 line 值不在 config.lanes.ids(${LANE_IDS.join(' ')})里,对应的卡/文档在任何一档下都不会出现:${badLines.slice(0, 8).join('、')}${badLines.length > 8 ? ` …等 ${badLines.length} 处` : ''}`)
+}
 const prUrl = (p) => `https://github.com/${p.repo}/pull/${p.num}`
 const prLabel = (p) => (p.repo === PR_REPO ? `PR #${p.num}` : `${p.repo.split('/').pop()}#${p.num}`)
 
@@ -1493,14 +1512,14 @@ const iterDecChips = (id) =>
 const pnodeItems = iterStats.map((it) => ({
   line: iterLine(it),
   html: `
-    <button class="pnode pnode-${it.state}" data-iter="${esc(it.id)}" data-line="${iterLine(it)}" style="--c:${escC(STATUS_COLOR[it.state])}">
+    <button class="pnode pnode-${it.state}" data-iter="${esc(it.id)}" data-line="${esc(iterLine(it))}" style="--c:${escC(STATUS_COLOR[it.state])}">
       <span class="pdot">${esc(it.id)}</span>
       <span class="ptitle">${esc(it.title)}</span>
       <span class="pcount">${it.done}/${it.total}</span>
     </button>`,
 }))
 const pathNodes = pnodeItems
-  .map((n, i) => (i ? `<span class="plink" data-line="${pnodeItems[i - 1].line === n.line ? n.line : ''}"></span>` : '') + n.html)
+  .map((n, i) => (i ? `<span class="plink" data-line="${esc(pnodeItems[i - 1].line === n.line ? n.line : '')}"></span>` : '') + n.html)
   .join('')
 
 // ———— 统一行卡(collapsed = 单行等高,点 .rhead 展开 .rbody;杀「忽大忽小」)————
@@ -1524,7 +1543,7 @@ const rowHead = ({ id, badge, title, tags = '', line = '', date = '', upd = '' }
     </div>`
 
 const card = (t) => `
-  <article class="card lcard rcard card-${t.status}" id="${esc(t.id)}" data-line="${taskLine(t)}" style="--c:${escC(STATUS_COLOR[t.status])}">
+  <article class="card lcard rcard card-${t.status}" id="${esc(t.id)}" data-line="${esc(taskLine(t))}" style="--c:${escC(STATUS_COLOR[t.status])}">
     ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t) + respChips(t) + depChips(t), line: taskLine(t) })}
     <div class="rbody">
       <dl>
@@ -1551,7 +1570,7 @@ const pathPanels = iterStats
     if (!ts.length) return ''
     const decs = iterDecChips(it.id)
     return `
-  <section class="pathpanel" id="${esc(it.id)}" data-iter="${esc(it.id)}" data-line="${iterLine(it)}">
+  <section class="pathpanel" id="${esc(it.id)}" data-iter="${esc(it.id)}" data-line="${esc(iterLine(it))}">
     <header class="pp-head" style="--c:${escC(STATUS_COLOR[it.state])}">
       <span class="gid">${esc(it.id)}</span>
       <h2>${esc(it.title)}</h2>
@@ -1778,7 +1797,7 @@ const wtBlock = (list) =>
 // data-ord = 分区内的烤入下标:排序是 DOM 重排不是重渲,「最近立卡」那一档得原样还回去。
 const blSortAttr = (it, i) => !BLSORT ? '' : ` data-udate="${esc(cardUpd(it.id) || it.date || '')}" data-ord="${i}"`
 const blCard = (it, i) => `
-  <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${blLine(it)}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}"${depAttr(it)} data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${blSortAttr(it, i)}${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
+  <article class="blcard lcard rcard bl-${it.status}" id="${esc(it.id)}" data-line="${esc(blLine(it))}" data-date="${esc(it.date || '')}" data-status="${esc(it.status)}"${depAttr(it)} data-priority="${esc(it.priority)}" data-search="${esc((it.id + ' ' + it.title).toLowerCase())}"${blSortAttr(it, i)}${sessAttr(it)} style="--c:${escC(BL_STATUS_COLOR[it.status])}">
     ${rowHead({
       id: it.id,
       badge: `<span class="badge" style="--c:${escC(BL_STATUS_COLOR[it.status])}">${esc(b.statuses[it.status])}</span>`,
@@ -1840,7 +1859,12 @@ const WIP_WAIT = wipReady.filter((it) => depOpen(it)).length
 const WIP_READY = wipReady.length - WIP_WAIT
 const wipLevel = (n) => (n > WIP_HARD ? 'hard' : n > WIP_SOFT ? 'soft' : '')
 // 括号里那一段:筛掉了卡就补「全板 N」,有等前置的就补「另 M 等前置」,两个都有就并排(· 分隔)
-const wipHead = (n, note) => (AFTER_ANY ? `可立即做 ${n}` : `可做的卡 ${n} 张`) + (note ? `(${note})` : '')
+// 这句话的措辞只此一处:烤入那份与运行期重算那份都从这对常量取词,免得改文案漏一处
+// (0.16.0 把运行期那份复制成了两份,差别只有头词与量词)。
+const WIP_PRE = AFTER_ANY ? '可立即做 ' : '可做的卡 '
+const WIP_SUF = AFTER_ANY ? '' : ' 张'
+const WIP_SUF_JS = WIP_SUF ? `'${WIP_SUF}' + ` : '' // 运行期那句里的量词(空的就整段不出,别留个 + '')
+const wipHead = (n, note) => `${WIP_PRE}${n}${WIP_SUF}` + (note ? `(${note})` : '')
 const WIP_NOTE = WIP_WAIT ? `另 ${WIP_WAIT} 等前置` : ''
 const wipText = (n) => (n > WIP_HARD ? `${wipHead(n, WIP_NOTE)} · 超过 ${WIP_HARD} —— 先清一些再立新卡` : n > WIP_SOFT ? `${wipHead(n, WIP_NOTE)} · 已超 ${WIP_SOFT}` : '')
 const WIP_LV0 = !WIP ? '' : wipLevel(WIP_READY) // 烤入档:懒加载未取 pane 时也先说得出话
@@ -1897,11 +1921,9 @@ const WIP_SETLINE = !WIP ? '' : `
         ${AFTER_ANY ? `const wipNote = []
         if (wipN !== ${WIP_READY}) wipNote.push('全板 ${WIP_READY}')
         if (wipW) wipNote.push('另 ' + wipW + ' 等前置')
-        const wipAll = wipNote.length ? '(' + wipNote.join(' · ') + ')' : ''
-        wipEl.textContent = wipLv === 'hard' ? '可立即做 ' + wipN + wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
-          : wipLv === 'soft' ? '可立即做 ' + wipN + wipAll + ' · 已超 ${WIP_SOFT}' : ''` : `const wipAll = wipN === ${WIP_READY} ? '' : '(全板 ${WIP_READY})'
-        wipEl.textContent = wipLv === 'hard' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
-          : wipLv === 'soft' ? '可做的卡 ' + wipN + ' 张' + wipAll + ' · 已超 ${WIP_SOFT}' : ''`}
+        const wipAll = wipNote.length ? '(' + wipNote.join(' · ') + ')' : ''` : `const wipAll = wipN === ${WIP_READY} ? '' : '(全板 ${WIP_READY})'`}
+        wipEl.textContent = wipLv === 'hard' ? '${WIP_PRE}' + wipN + ${WIP_SUF_JS}wipAll + ' · 超过 ${WIP_HARD} —— 先清一些再立新卡'
+          : wipLv === 'soft' ? '${WIP_PRE}' + wipN + ${WIP_SUF_JS}wipAll + ' · 已超 ${WIP_SOFT}' : ''
       }
     }`
 
@@ -1941,7 +1963,7 @@ const decCard = (e) => {
   const hasMeta = secs || iters || refines
   const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e) + respChips(e) + depChips(e)
   return `
-  <article class="deccard lcard rcard dec-${e.status}" id="${esc(e.id)}" data-line="${decLine(e)}" data-date="${esc(e.date || '')}" data-status="${esc(e.status)}" data-type="${esc(tbPrefix(e.id))}" data-search="${esc((e.id + ' ' + e.title).toLowerCase())}"${sessAttr(e)} style="--c:${escC(DEC_STATUS_COLOR[e.status])}">
+  <article class="deccard lcard rcard dec-${e.status}" id="${esc(e.id)}" data-line="${esc(decLine(e))}" data-date="${esc(e.date || '')}" data-status="${esc(e.status)}" data-type="${esc(tbPrefix(e.id))}" data-search="${esc((e.id + ' ' + e.title).toLowerCase())}"${sessAttr(e)} style="--c:${escC(DEC_STATUS_COLOR[e.status])}">
     ${rowHead({
       id: e.id,
       badge: `<span class="badge" style="--c:${escC(DEC_STATUS_COLOR[e.status])}">${esc(e.status === 'closed' ? (e.closedKind === 'dropped' ? '不做' : '归档') : dm.statuses[e.status])}</span>`,
@@ -2397,7 +2419,7 @@ const docCard = (d) => {
   const badges = LANES_ON ? docLineBadges(d) : ''
   const live = d.liveUrl ? `<span class="dlive" data-live="${esc(d.liveUrl)}" title="活实例:${esc(d.liveUrl)}(新 tab)">live ↗</span>` : ''
   return `
-      <a class="doccard lcard" href="refs/${esc(d.out)}" data-doc="${esc(d.out)}" data-line="${docLine(d)}"${d.order != null ? ` data-order="${d.order}"` : ''} data-updated="${esc(d.updated)}" style="--c:${escC(seg.color)}">
+      <a class="doccard lcard" href="refs/${esc(d.out)}" data-doc="${esc(d.out)}" data-line="${esc(docLine(d))}"${d.order != null ? ` data-order="${d.order}"` : ''} data-updated="${esc(d.updated)}" style="--c:${escC(seg.color)}">
         <div class="dchead">${d.order != null ? `<span class="obadge">${d.order}</span>` : ''}<h3>${esc(d.title)}</h3>${badges ? `<span class="dbadges">${badges}</span>` : ''}${live}</div>
         ${d.desc ? `<p class="doneline">${esc(d.desc)}</p>` : ''}
         <div class="dmeta"><span class="dcat">${esc(d.cat)}</span><span class="dupdated"></span></div>
@@ -2476,7 +2498,13 @@ const SESS_WIRE = !SESSION_ON ? '' : `\n    if (el('sesschips')) el('sesschips')
 const SESS_INIT = !SESSION_ON ? '' : `\n    try { const s = localStorage.getItem(SESS_KEY); if (s) state.session = s } catch (e) {}\n    if (state.session !== 'all') cards.forEach((c) => { if (!(c.dataset.session || '').split(' ').includes(state.session)) c.classList.add('flt-hide') })`
 
 // —— Backlog 排序注入点(v0.15.12,config.backlogSort;每处 off 均为 '',逐字节冻结)——
-const BLS_LABEL = !BLSORT ? '' : `, 'ord': '立卡新→旧', 'udate-desc': '更新新→旧'`
+// meta 那行回声钮面:同一个档位在同一屏上说两套话(钮面「最近立卡」、meta「按立卡新→旧」)是
+// 分段钮换掉下拉时丢的那点东西 —— 原来的下拉选项与 meta 去掉前缀后一字不差。
+// 只补分段钮独有的那两档:date-asc / id 这两个键是与决策那只下拉共用的,在这里改会把决策工具条的
+// meta 也一起改掉(那边的选项还叫「日期旧→新」)。
+const BLS_LABEL = !BLSORT ? '' : BLSORT_MODES
+  .filter(([k]) => !['date-desc', 'date-asc', 'id'].includes(k))
+  .map(([k, lbl]) => `, '${k}': '${lbl}'`).join('')
 const BLS_DEFS = !BLSORT ? '' : `
   const BLS_KEY = '${LS_PREFIX}_bl_sort'
   const BLS_OK = ${JSON.stringify(BLSORT_MODES.map(([k]) => k))}
@@ -2662,11 +2690,18 @@ const ACC_SHOW = !ACC ? '' : `\n    if (window.accSync) accSync()`
 const ACC_INJECTED = !ACC ? '' : `\n    if (name === 'acceptance') initAcceptance(document.getElementById('pane-acceptance'))
     else if (!lazyDone.acceptance && document.querySelector('[data-acc]')) ensurePane('acceptance') // 分子算得出来,靠的是验收那份数据
     if (window.accSync) accSync()`
+// 三种卡头芯片(PR / 进度响应 / 前置依赖)共用的那组度量:字号、行高、内边距、圆角、不换行、
+// 等宽数字。一处定 —— 各写一遍的话,改一次度量要动三处,漏一处就是同一张卡头上几种芯片不等高
+// (D88 / BL-C134 那轮「全站芯片挨文字位置扫描」改的正是这一层)。选择器按各自的门拼,
+// 板上没有的芯片不进来。
+const CHIP_SEL = [HAS_PR && '.prchip', RESP && '.rspchip', AFTER_ANY && '.depchip'].filter(Boolean).join(', ')
+const CHIP_BASE_CSS = !CHIP_SEL ? '' : `
+  /* 卡头芯片共用度量(改字号 / 行高 / 内边距只此一处)*/
+  ${CHIP_SEL} { display: inline-flex; align-items: baseline; font-size: 10.5px; line-height: 17px;
+     padding: 0 7px; border-radius: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }`
 const PRCHIP_CSS = !HAS_PR ? '' : `
   /* 卡头 PR 芯片(v0.12.0,卡上 pr 字段):与 session 小章同排,安静不抢戏 */
-  .prchip { display: inline-flex; align-items: baseline; gap: 4px; font-size: 10.5px; font-weight: 600; line-height: 17px;
-     padding: 0 7px; border-radius: 5px; text-decoration: none; color: var(--accent); background: var(--accent-soft);
-     white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .prchip { gap: 4px; font-weight: 600; text-decoration: none; color: var(--accent); background: var(--accent-soft); }
   .prchip:hover { color: var(--accent-deep); }
   .prchip .prst { font-weight: 400; color: var(--mut); }`
 const ACC_CSS = !ACC ? '' : `
@@ -3693,7 +3728,6 @@ const REL_JS = !REL ? '' : `
       }
     }
     function day(s) { return Date.parse(String(s).slice(0, 10) + 'T00:00:00Z') }
-    function iso(t) { return new Date(t).toISOString().slice(0, 10) }
     function dstr(t) { return new Date(t).toISOString().slice(0, 10) }
     function md(s) { return String(s).slice(5, 10) }
     // 锚点日与 gen 烤日桶时同一条规则:开着看 createdAt,合了看 mergedAt,关掉看 closedAt
@@ -3752,7 +3786,7 @@ const REL_JS = !REL ? '' : `
     }
     function foldNs(list, from) { var o = [], j; for (j = from; j < list.length; j++) o.push(list[j].n); return o }
     function tlWhisk(r, g, top, rowM, q, cw) { // 一组(同开同合)共用一行一条细线,whisker 才不含糊指向谁
-      var out = [], y = top + r.lane * rowM + 1, cy = y + Math.round(TL.chip / 2), pitch = cw + 6, j
+      var out = [], y = top + r.lane * rowM + 1, cy = y + Math.round(TL.chip / 2), pitch = relChipPitch(cw), j // 步距与 packer 同一处定(relgeom.mjs)
       if (r.x1 > r.x0) out.push('<i class="relwk relc s-' + g.sg + ' q' + g.q + '" style="left:' + r.x0 + 'px;top:' + cy + 'px;width:' + (r.x1 - r.x0) + 'px"></i>')
       if (r.clip) out.push('<i class="relwx relc relink s-' + g.sg + '" style="left:' + TL.lbl + 'px;top:' + (cy - 6) + 'px">‹</i>')
       else out.push('<i class="relwt relc s-' + g.sg + ' q' + g.q + '" style="left:' + ((r.open ? r.x1 : r.x0) - 1) + 'px;top:' + (cy - 3) + 'px"></i>')
@@ -3803,7 +3837,7 @@ const REL_JS = !REL ? '' : `
       }
       hit.sort(function (a, b) { return a.n - b.n })
       var out = ['<div class="relpkh"><b>' + xe(nm) + '</b><span class="relpkt">' + md(dy) + ' · '
-        + (only ? '未展开 ' : '') + hit.length + ' 个 PR</span></div>']
+        + (only ? '放不下的 ' : '') + hit.length + ' 个 PR</span></div>']
       var li = []
       for (k = 0; k < hit.length && k < 10; k++) li.push('<span class="relpkr"><b>#' + hit[k].n + '</b><span>' + xe(hit[k].t) + '</span></span>')
       out.push('<div class="relpkl">' + li.join('') + '</div>')
@@ -3879,7 +3913,10 @@ const REL_JS = !REL ? '' : `
           if (e0 < s0) e0 = s0
           if (s0 === e0) { if (!byDay[s0]) byDay[s0] = []; byDay[s0].push({ n: d.n, s: s0, e: e0, d: d }) }
           else multi.push({ n: d.n, s: s0, e: e0, d: d, open: d.s === 'open' })
-          if (ax.x[anc(d)] !== undefined) inwin++
+          // 数的是「这一条画不画得出来」(与 relBar 同一个判据:跨度与窗口有交集),不是锚点日落没落在窗口里。
+          // 两者对已合的 PR 一致(锚点就是结束日),对窗口之前建的、还开着的 PR 不一致 —— 带里画着 3 条,
+          // 表头却写「窗口内 0」,而它下面那行副标题正说着「跨天 3 个」。
+          if (e0 >= ax.t0 && s0 <= ax.t1) inwin++
           if (q && pass(d)) hit++
         }
         var op = !!bOpen[g.g]
@@ -4098,11 +4135,11 @@ const RICH_CSS = !RICH ? '' : `
   /* 【日期】小节:段前一条细线;首段不画(否则字段一开头就顶着一条线) */
   .lite .tsec { border-top: 1px solid var(--line); padding-top: .55em; margin-top: .35em; }
   .lite .tsec:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-  /* 预览段按高度收,3.3em 与 .clamp 同一个数 —— 两条折叠路径(超 400 字烤预览 / 没超交给 clampScan)
+  /* 预览段按高度收,与 .clamp 同一个数(CLAMP_MAX)—— 两条折叠路径(超 400 字烤预览 / 没超交给 clampScan)
      收下来一样高。400 字在 320px 列宽下是十几行,一张卡三个长字段就能滚到 40 行,字数管不住卡高。
      不画 .clamp 那道渐隐:首段短的时候预览根本不溢出,渐隐会在没截断的地方留一道假边;
      下面那颗「展开全文 · N 字」的钮一直在,是唯一入口,也把「还有多少」说明白了。 */
-  .lpre.lclamp { max-height: 3.3em; overflow: hidden; }
+  .lpre.lclamp { max-height: ${CLAMP_MAX}; overflow: hidden; }
   .litemore { appearance: none; border: 0; background: none; padding: 0; margin-top: 6px; font: inherit;
      font-size: 11.5px; color: var(--faint); cursor: pointer; }
   .litemore:hover { color: var(--accent); }
@@ -4139,10 +4176,8 @@ const RICH_JS = !RICH ? '' : `
 // 颜色只用既有令牌/变量:琥珀走 warn 一族(与「没有验收清单的 PR」那块同源),暗档由 darkStyle 包。
 const RESP_CSS = !RESP ? '' : `
   /* ============ 进度响应(v0.13.0,release-manifest.json 在场即生效)============ */
-  .rspchip { display: inline-flex; align-items: baseline; font-size: 10.5px; font-weight: 600; line-height: 17px;
-     padding: 0 7px; border-radius: 5px; white-space: nowrap; color: ${tk('warn-ink')}; background: ${tk('warn-bg')};
-     font-variant-numeric: tabular-nums; }
-  .rsp-part, .rsp-hold { font-weight: 400; color: var(--mut); background: ${tk('seg-bg')}; }
+  .rspchip { font-weight: 600; color: ${tk('warn-ink')}; background: ${tk('warn-bg')}; }
+  .rsp-part, .rsp-hold${AFTER_ANY ? ', .depchip' : ''} { font-weight: 400; color: var(--mut); background: ${tk('seg-bg')}; }
   .rsp-hold { cursor: help; } /* 理由在 title 里,给个可悬停的暗示 */
   .rspdorm { font-size: 10.5px; line-height: 17px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
   /* 手写状态词过时:划掉但不删 —— 数据是人写的,看板只表态不改口 */
@@ -4196,9 +4231,8 @@ const RESP_INJECTED = !RESP ? '' : `\n    if (window.respDorm) window.respDorm()
 // 只用既有令牌:灰底走 seg-bg(与「暂不收账」「2/3 已合」同一档),链接走 --mut / --ink。不引新色。
 const DEP_CSS = !AFTER_ANY ? '' : `
   /* ============ 前置依赖 after(v0.16.0,卡上写了 after 才注入)============ */
-  .depchip { display: inline-flex; align-items: baseline; font-size: 10.5px; font-weight: 400; line-height: 17px;
-     padding: 0 7px; border-radius: 5px; white-space: nowrap; color: var(--mut); background: ${tk('seg-bg')};
-     font-variant-numeric: tabular-nums; }
+${RESP ? '' : `
+  .depchip { font-weight: 400; color: var(--mut); background: ${tk('seg-bg')}; }`}
   .dep-wait, .dep-clear { cursor: help; } /* 逐项状态在 title 里,给个可悬停的暗示 */
   .dep-unlock a { color: var(--mut); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
   .dep-unlock a:hover { color: var(--ink); }
@@ -4668,6 +4702,9 @@ const html = `<!doctype html>
   .gdetail { color: var(--mut); font-size: 13px; }
   .gprog { margin-left: auto; font-size: 12.5px; color: var(--mut); }
 
+  /* 死规则:同一张表下面那条 .cards(display: flex 那条)同特异度、在后,整条盖掉它;
+     grid-template-columns 在 display: flex 下本来也无效。留着只为不动壳的字节,
+     下一个本来就要改壳的版本里删掉。全板三个 .cards 容器装的都是整行一张的行卡。 */
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
   .card, .blcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
           padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -4732,8 +4769,8 @@ const html = `<!doctype html>
   .deccard dl { margin: 0; font-size: 13.5px; }
   .deccard dt { float: left; clear: left; width: 34px; color: var(--mut); font-weight: 600; }
   .deccard dd { margin: 0 0 6px 44px; color: ${tk('body-ink')}; }
-  /* 长文折叠(信息密度):默认收 2 行(3.3em 容住两整行),点击展开;渐隐只压裁切缘 */
-  .lcard .clamp { position: relative; max-height: 3.3em; overflow: hidden; cursor: pointer; }
+  /* 长文折叠(信息密度):默认收 2 行(CLAMP_MAX 容住两整行),点击展开;渐隐只压裁切缘 */
+  .lcard .clamp { position: relative; max-height: ${CLAMP_MAX}; overflow: hidden; cursor: pointer; }
   .lcard .clamp:not(.open)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
     height: .9em; background: linear-gradient(rgba(255,255,255,0), var(--card) 92%); pointer-events: none; }
   .lcard .clamp:not(.open)::before { content: "展开 ▾"; position: absolute; right: 0; bottom: 0; z-index: 1;
@@ -4836,7 +4873,7 @@ ${PATH_CSS_B}
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${DEP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${CHIP_BASE_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${DEP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -4874,7 +4911,7 @@ ${PATH_CSS_B}
     pane.querySelectorAll('dd.x, dd.decided, dd.demonote, ${NOTES_TAG}.notes${RICH ? ', dd.lsrc' : ''}').forEach(function (el) {
       if (el.dataset.cl || el.offsetParent === null) return
       ${RICH_CLAMP_SKIP}const lh = parseFloat(getComputedStyle(el).lineHeight) || 21
-      todo.push([el, el.scrollHeight > lh * 3.3])
+      todo.push([el, el.scrollHeight > lh * ${CLAMP_LINES}])
     })
     todo.forEach(function (row) {
       row[0].dataset.cl = '1'
@@ -5097,7 +5134,7 @@ ${PATH_CSS_B}
       })
       // 排序:组内重排(看板保留状态分组,排序作用于每组内部;编号=前缀字母序+数字)
       const cmp = ${BLS_CMP}state.sort === 'id'
-        ? (a, b) => tbPre(a.id).localeCompare(tbPre(b.id)) || tbNum(a.id) - tbNum(b.id) || a.id.localeCompare(b.id)
+        ? ${BLSORT ? 'tbIdAsc // 与 tbUdCmp 的同日退让同一把尺(BLS_DEFS 里那一个)' : `(a, b) => tbPre(a.id).localeCompare(tbPre(b.id)) || tbNum(a.id) - tbNum(b.id) || a.id.localeCompare(b.id)`}
         : tbDateCmp(state.sort === 'date-asc' ? 1 : -1)
       pane.querySelectorAll('.group .cards').forEach((box) => {
         const cs = [...box.children].filter((n) => n.matches(opts.cardSel))
