@@ -7,7 +7,7 @@
 //
 // 四种 ref 与它们的清除判据(全部取自已提交的事实,不读时钟 —— gen 零时间是硬纪律):
 //
-//   卡(backlog / 决策)   status ∈ TERMINAL(done / live / closed,沿用 settle.mjs)  清除日 = 卡文件最后改动日
+//   卡(进度 / backlog / 决策)  status ∈ TERMINAL(done / live / closed,沿用 settle.mjs)  清除日见下
 //   PR(#N / owner/repo#N) release-manifest 的 prs[] 里该号 state === 'merged'        清除日 = mergedAt
 //   版本 tag(v 开头)      release-manifest 的 releases[] 里有这个 tag                清除日 = at
 //
@@ -87,6 +87,21 @@ export function resolveAfter(raw, ctx = {}) {
   }
   const at = ctx.relTag ? ctx.relTag.get(p.tag) : undefined
   return { ...p, cleared: at !== undefined, at: at ? String(at).slice(0, 10) : '' }
+}
+
+/**
+ * 推导上下文的组装(v0.16.1)。以前 gen / 守卫 / CLI 各拼一遍,于是「板上有哪些卡」拼出了三份:
+ * CLI 少算进度卡,写不进 gen 照渲的前置。判据共用一份而上下文各拼各的,等于还是三套账。
+ * @param cards 全板卡 —— 三种都算(进度 tasks / backlog items / 决策 entries),与 auditAfter 同一个集合
+ * @param repo  本仓 owner/repo(取法见 cards.mjs 的 boardRepo:三份 manifest 里第一个非空)
+ * @param rlm   release-manifest 的内容(没有就传 null);已经建好 relPr / relTag 的调用方可直接传进来
+ */
+export function depCtxFrom({ cards = [], repo = '', rlm = null, relPr = null, relTag = null, cardUpd = () => '' }) {
+  const cardById = new Map()
+  for (const c of cards) if (c && c.id != null) cardById.set(String(c.id), c)
+  if (!relPr) { relPr = new Map(); for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p) }
+  if (!relTag) { relTag = new Map(); for (const r of (rlm && rlm.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || '')) }
+  return { repo, cardById, relPr, relTag, cardUpd }
 }
 
 /** 一张卡的全部前置(顺序即书写顺序) */

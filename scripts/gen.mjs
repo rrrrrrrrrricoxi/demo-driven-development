@@ -26,8 +26,8 @@ import { resolveKanbanDir } from './kanban-dir.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
-import { CARD_KINDS, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
-import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depItemText, openCount, reverseAfter } from './deps.mjs'
+import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFrom, depItemText, openCount, reverseAfter } from './deps.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
@@ -654,7 +654,7 @@ const linkA = (l) => {
 //  卡上可选 `pr` 字段 → 卡头芯片;acceptance-manifest.json(opt-in)→「验收」tab。
 //  两者都缺席时,以下全部片段求值成空串 —— 输出对 0.11.4 逐字节冻结。
 // ============================================================================
-const PR_REPO = (m.instance && m.instance.ghRepo) || ''
+const PR_REPO = boardRepo(m, b, dm) // 三份 manifest 里第一个非空(取法一处定,见 cards.mjs)
 const ALL_CARDS = [...m.tasks, ...b.items, ...dm.entries]
 // 芯片只认显式 pr 字段;links 兼容(prsOfCard)只用于「PR ↔ 卡」反查 —— 否则存量看板的
 // 旧 PR 链接会凭空长出芯片,冻结承诺当场破。
@@ -763,11 +763,10 @@ const respLinkParts = (l) => {
 // 形制不对(after 不是数组)先拦:悄悄当「没写」会让人以为写上了,而板上一个字都不出现。
 for (const c of ALL_CARDS) if (c && c.after !== undefined && !Array.isArray(c.after)) throw new Error(GS.afterNotArray(String(c.id ?? '?')))
 const AFTER_ANY = ALL_CARDS.some((c) => afterOf(c).length)
-const DEP_CTX = { repo: PR_REPO, cardById: new Map(), cardUpd, relPr, relTag: new Map() }
+// 上下文的组装也在 deps.mjs 里(v0.16.1):三处各拼一遍,拼出来的「板上有哪些卡」就会不一样
+const DEP_CTX = depCtxFrom({ cards: ALL_CARDS, repo: PR_REPO, rlm, relPr, cardUpd })
 const DEP_REV = AFTER_ANY ? reverseAfter(ALL_CARDS) : new Map()
 if (AFTER_ANY) {
-  for (const c of ALL_CARDS) if (c && c.id != null) DEP_CTX.cardById.set(String(c.id), c)
-  if (rlm) for (const r of rlm.releases || []) if (r && r.tag) DEP_CTX.relTag.set(String(r.tag), String(r.at || ''))
   // 未知卡号与环是硬报错(与「文件名≠id」同级):静默断链的教训见 refines,不再学一遍。
   // PR / 版本尚未出现在 release-manifest 里不是错 —— 它们本来就是「还没发生」。
   const audit = auditAfter(ALL_CARDS)

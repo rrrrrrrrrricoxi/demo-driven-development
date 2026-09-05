@@ -56,8 +56,8 @@ import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } from './settle.mjs'
-import { CARD_KINDS, cardUpdatedMap, cardsDirOf, localDate, scanCardDir } from './cards.mjs'
-import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, openCount } from './deps.mjs'
+import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, localDate, scanCardDir } from './cards.mjs'
+import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 
 const KANBAN = detect()
@@ -126,17 +126,14 @@ function cardUpdAll() {
 let DEP_CTX = null
 function depCtx() {
   if (DEP_CTX) return DEP_CTX
-  const cardById = new Map()
-  let repo = ''
+  const cards = []
+  const heads = []
   for (const [f, k, sub] of CARD_SOURCES) {
-    for (const c of cardsOf(f, k, sub)) if (c && c.id) cardById.set(String(c.id), c)
-    if (!repo) { try { repo = String((JSON.parse(readFileSync(join(KANBAN, f), 'utf8')).instance || {}).ghRepo || '') } catch {} }
+    for (const c of cardsOf(f, k, sub)) if (c && c.id) cards.push(c)
+    try { heads.push(JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))) } catch { heads.push(null) }
   }
-  const relPr = new Map(), relTag = new Map()
-  for (const p of (RLM && RLM.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p)
-  for (const r of (RLM && RLM.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || ''))
   const upd = cardUpdAll()
-  DEP_CTX = { repo, cardById, relPr, relTag, cardUpd: (id) => upd.get(id) || '' }
+  DEP_CTX = depCtxFrom({ cards, repo: boardRepo(...heads), rlm: RLM, cardUpd: (id) => upd.get(id) || '' })
   return DEP_CTX
 }
 

@@ -4475,7 +4475,7 @@ console.log('T68 行卡展开时补量折叠')
 console.log('T69 前置依赖 after')
 {
   const D = await import(join(NEW_SCRIPTS, 'deps.mjs'))
-  const { localDate, stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+  const { boardRepo, localDate, stripCardUpdated } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
   const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
   const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
@@ -4711,7 +4711,9 @@ console.log('T69 前置依赖 after')
     ok(a1.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230', 'card after 追加,顺序即书写顺序', a1.stderr)
     const a2 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', 'v0.0.1'])
     ok(a2.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230,v0.0.1', '再追加:已有的去重,新的落到末尾')
-    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('after'), 'after 落进键序里(blockedOn 旁边)')
+    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('source,after,problem'),
+      'after 插在扁平档末尾 —— 第一个长文字段之前(normalizeCard 按 band 插,不按 K_FLAT 的邻居)',
+      Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(','))
     const a3 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#230'])
     ok(a3.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,v0.0.1', '--rm 只去掉那一项')
     const a4 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#999'])
@@ -4739,6 +4741,52 @@ console.log('T69 前置依赖 after')
     ok(runCli(kb2, ['card', 'show', 'BL-3']).stdout.includes('前置: BL-1 未收'), '指向还没收的卡:说「未收」')
     ok(!/不认识的字段|unknown field/.test(runCli(kb2, ['card', 'set', 'BL-2', 'after', '--json', '[]']).stderr), 'after 是已知字段')
     ok(/card after/.test(runCli(kb2, ['--help']).stdout), '--help 里有它')
+  }
+
+  { // ---- ⑧b 三处同一个「板上有哪些卡」:进度卡也是合法前置,CLI 不该拒写 gen 照渲的东西 ----
+    const fx3 = mkFixture('fx69uni', { 's.html': demoHtml('s') })
+    const kb3 = fx3.kb
+    const mP = join(kb3, 'manifest.json'), bl3 = join(kb3, 'backlog-manifest.json')
+    for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+      const z = rd(join(kb3, f)); z.instance.ghRepo = 'o/r'; wr(join(kb3, f), z)
+    }
+    const mm = rd(mP)
+    mm.iterations = [{ id: 'I1', title: '迭代甲', detail: '' }]
+    mm.tasks = [
+      { id: 'T1', iteration: 'I1', status: 'done', title: '做完的进度卡', approach: 'a' },
+      { id: 'T2', iteration: 'I1', status: 'active', title: '在做的进度卡', approach: 'a' },
+    ]
+    wr(mP, mm)
+    const b3 = rd(bl3); b3.tiers = { 1: '核心' }
+    b3.items = [
+      { id: 'BL-1', status: 'ready', date: '2026-09-01', title: '甲', ...base },
+      { id: 'BL-2', status: 'ready', date: '2026-09-01', title: '乙', ...base, after: ['T2'] },
+    ]
+    wr(bl3, b3)
+    const dec3 = rd(join(kb3, 'decisions-manifest.json')); dec3.entries = []; wr(join(kb3, 'decisions-manifest.json'), dec3)
+
+    const t1 = runCli(kb3, ['card', 'after', 'BL-1', 'T1'])
+    ok(t1.status === 0, '进度卡当前置:CLI 写得进去(0.16.0 会说「板上没有卡号 T1」,而 gen 一直认它)', t1.stderr.slice(0, 160))
+    const rg3 = runGen(NEW_SCRIPTS, kb3)
+    const h3 = rg3.status === 0 ? readFileSync(join(kb3, 'index.html'), 'utf8') : ''
+    ok(rg3.status === 0 && /id="BL-1"[\s\S]{0,600}?depchip dep-clear/.test(h3),
+      '同一条 after,gen 渲染成「前置已清」—— CLI 放过去的 gen 也放得过去', rg3.stderr.slice(0, 160))
+    ok(/id="T2"[\s\S]{0,900}?depchip dep-unlock/.test(h3), '进度卡也长反向芯片(BL-2 在等 T2)')
+    ok(count(h3, 'depchip dep-unlock') === 1 && /dep-unlock" title="[^"]*BL-2/.test(h3),
+      '全板只有 T2 那一枚反向芯片 —— 已终态的 T1 被 BL-1 指着也不出', String(count(h3, 'depchip dep-unlock')))
+    ok(runCli(kb3, ['card', 'show', 'BL-1']).stdout.includes('前置: ✓ T1 已收'), 'card show 也解析得出进度卡的状态')
+    ok(runCli(kb3, ['card', 'after', 'BL-1', '--rm', 'T1']).status === 0, '写得进去也删得掉(整条 after 会被重校验一遍)')
+    ok(runCli(kb3, ['card', 'after', 'BL-1', 'T404']).status === 1, '真不存在的号照旧拒写')
+
+    // instance.ghRepo 的取法一处定:manifest.json 优先,空了才退另两份
+    const C = { instance: { ghRepo: 'm/main' } }, B = { instance: { ghRepo: 'b/back' } }
+    ok(boardRepo(C, B) === 'm/main' && boardRepo({}, B) === 'b/back' && boardRepo({}, {}) === '' && boardRepo(null) === '',
+      'boardRepo:manifest.json 优先、空了退下一份、都空是空串')
+    ok(boardRepo({ instance: { ghRepo: ' o/r ' } }) === 'o/r', '顺手去掉首尾空白')
+    const ddSrc = readFileSync(join(NEW_SCRIPTS, 'ddd.mjs'), 'utf8')
+    ok(ddSrc.includes('if (DEP_CTX) return DEP_CTX'), 'CLI 的 depCtx 建一次存下来 —— warnWip 在 ready 卡的 filter 里逐张调它')
+    ok(!/for \(const x of allCards\(\)\) cardById\.set/.test(ddSrc) && ddSrc.includes('depCtxFrom('),
+      '三处都走 deps.mjs 的 depCtxFrom,不再各拼一遍 cardById / relPr / relTag')
   }
 
   { // ---- ⑧ 拆分等价门认得前置芯片里的日期(卡号前置的清除日 = 那张卡的最后改动日,拆分后才有)----

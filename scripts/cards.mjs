@@ -24,6 +24,18 @@ export const CARD_KINDS = [
 ]
 
 /**
+ * instance.ghRepo 的取法(一处定):manifest.json 优先,空了才退 backlog / decisions。
+ * 三份 manifest 各存一份是现状(gen 已有「不一致就提醒」那条),但取法只能有一条 —— gen 只读
+ * manifest.json、守卫按三份取第一个非空、CLI 从 backlog 起头,三套顺序会让 `owner/repo#12`
+ * 这种合法写法在 gen 里判「跨仓、算没清」、在守卫与 CLI 里判「本仓、已清」。
+ * @param heads 三份 manifest 的内容,按 manifest.json → backlog → decisions 传
+ */
+export const boardRepo = (...heads) => {
+  for (const h of heads) { const v = String(((h && h.instance) || {}).ghRepo || '').trim(); if (v) return v }
+  return ''
+}
+
+/**
  * 卡目录名必须是看板目录下的一个纯目录名 —— 与 gen 对 docs[].out 同一条规矩。
  * 带路径分隔符或 .. 的值会把整个卡库搬到看板目录外面:gen / CLI / 守卫都跟着走,一切看着正常,
  * 而 `git add app/kanban` 提交出去的板一张卡都没有,别人克隆下来就是空的。
