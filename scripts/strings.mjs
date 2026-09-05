@@ -43,8 +43,10 @@ const zh = {
     `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账(挑着收加 --only 卡号)。\n  这一轮不该收的卡(PR 只落了一半),在卡上写 "settleHold": "理由" —— 它从此不进清单、不出芯片,守卫这条也不再点它。`,
   respReopen: (ids, total) =>
     `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
+  // days 是最久那张的天数(hook 按天数降序取的 old[0]),ids 是前五张 —— 措辞得说清这个数是谁的,
+  // 否则「已 41 天:BL-1 BL-2 BL-3」把最久那张的天数安在了三张卡头上,人会先去动其实没那么急的那两张。
   respHoldOld: (ids, days, total) =>
-    `暂不收账已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
+    `暂不收账最久已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
   boardBranchGuard: (h, main, dirty = []) =>
     `⚠ 看板守卫:当前分支 ${h.ref} 带着看板改动(相对 ${main}:数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})—— 看板只在 ${main} 上改。\n` +
     h.hazard.map((z) => `  ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条):这块板已是一卡一文件,合回 ${main} 会让 gen 当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。\n`).join('') +
@@ -232,7 +234,7 @@ const zh = {
     afterNotThere: (id, ref, cur) => `ddd card after --rm:${id} 的前置里没有「${ref}」,一个字节都没写。现在写着的是:${cur.length ? cur.join(' · ') : '(空)'}`,
     afterDone: (id, list, file) => `ddd card after:${id} 的前置 = ${list.join(' · ') || '(空)'} → ${file}`,
     afterRmDone: (id, ref, list) => `ddd card after --rm:${id} 去掉了「${ref}」,剩下 ${list.join(' · ') || '(空)'}`,
-    afterShow: (rows) => `  前置: ${rows.join(' · ')}`,
+    afterShow: (rows) => `  after(前置): ${rows.join(' · ')}`,
     showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
     showHead: (id, kind, file) => `${id}  (${kind === 'backlog' ? 'backlog' : '决策'}卡 · ${file})`,
     listEmpty: () => 'ddd card list:这组筛选下一张卡都没有。',
@@ -416,7 +418,7 @@ const en = {
   respReopen: (ids, total) =>
     `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
   respHoldOld: (ids, days, total) =>
-    `On settle hold for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
+    `On settle hold, the oldest for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
   boardBranchGuard: (h, main, dirty = []) =>
     `⚠ Kanban guard: the current branch ${h.ref} carries board changes (against ${main}: ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) — the board is only edited on ${main}.\n` +
     h.hazard.map((z) => `  ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries): this board is one file per card, so merging it back into ${main} makes gen fail hard — and that array is a snapshot from the fork point, which would overwrite cards that have moved on since.\n`).join('') +
@@ -610,7 +612,8 @@ kanban.config.json). This command never commits — git add the card files yours
     afterNotThere: (id, ref, cur) => `ddd card after --rm: ${id} has no prerequisite "${ref}"; nothing was written. It currently has: ${cur.length ? cur.join(' · ') : '(none)'}`,
     afterDone: (id, list, file) => `ddd card after: prerequisites of ${id} = ${list.join(' · ') || '(none)'} → ${file}`,
     afterRmDone: (id, ref, list) => `ddd card after --rm: dropped "${ref}" from ${id}; left with ${list.join(' · ') || '(none)'}`,
-    afterShow: (rows) => `  after: ${rows.join(' · ')}`,
+    // 标签不与上一行那个原样打印的字段名撞:同名两行、值还不一样,读起来像脚本打重了
+    afterShow: (rows) => `  after (state): ${rows.join(' · ')}`,
     showUsage: () => 'ddd card show: card show <id> [--json].',
     showHead: (id, kind, file) => `${id}  (${kind} card · ${file})`,
     listEmpty: () => 'ddd card list: no card matches those filters.',

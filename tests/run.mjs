@@ -4422,7 +4422,7 @@ console.log('T67 settleHold 14 天到期提醒')
     ok(!/暂不收账已/.test(g13.stdout), '13 天:守卫一个字都不说', g13.stdout.slice(0, 200))
     const bl14 = rd(blP); bl14.items[0].settleHoldAt = dayAgo(14); wr(blP, bl14)
     const g14 = runStop(NEW_SCRIPTS, fx.root)
-    ok(/暂不收账已 14 天/.test(g14.stdout) && /BL-H/.test(g14.stdout), '满 14 天:一行,写清天数与卡号', (g14.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 160))
+    ok(/暂不收账最久已 14 天/.test(g14.stdout) && /BL-H/.test(g14.stdout), '满 14 天:一行,写清天数与卡号(天数说明白是最久那张的 —— 一句话安在几张卡头上就是假的)', (g14.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 160))
     ok(/重设|settleHold/.test(g14.stdout), '这一行顺带说清「续」与「收」各怎么做')
     ok(!/"decision":\s*"block"/.test(g14.stdout), '到期提醒永不阻断')
     // 提醒不解除静音:这张卡照旧不进待收账那条,也照旧不出「PR 已合 · 待收账」芯片
@@ -4434,7 +4434,12 @@ console.log('T67 settleHold 14 天到期提醒')
     for (let i = 2; i <= 6; i++) many.items.push({ ...many.items[0], id: `BL-H${i}`, settleHoldAt: dayAgo(20 + i) })
     wr(blP, many)
     const gN = runStop(NEW_SCRIPTS, fx.root)
-    ok(/…等 6 张/.test(gN.stdout) && (gN.stdout.match(/BL-H\d/g) || []).length === 5, '最多点名 5 张 + 总数(最久的排前面)', (gN.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 200))
+    ok(/…等 6 张/.test(gN.stdout) && (gN.stdout.match(/BL-H\d/g) || []).length === 5, '最多点名 5 张 + 总数(最久的排前面)', (gN.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 200))
+    // 几张卡挂了不同的天数:句子里只有一个数(最久那张的),措辞得说清是谁的 —— 否则「已 41 天:
+    // BL-H BL-H2 …」把最久那张的天数安在了每张卡头上,人会先去动其实没那么急的那几张。
+    const lineN = (gN.stdout.match(/暂不收账[^"\\]*/) || [''])[0]
+    ok(/最久已 26 天/.test(lineN) && /BL-H6/.test(lineN) && /BL-H2/.test(lineN),
+      '一句话里只有一个天数:说明白它是最久那张的(BL-H6 挂了 26 天,同一行里的 BL-H2 只有 22 天)', lineN.slice(0, 200))
   }
 
   { // ---- 老卡(0.15.14 之前挂上的,没有 settleHoldAt):退到卡文件最后提交日 ----
@@ -4461,7 +4466,7 @@ console.log('T67 settleHold 14 天到期提醒')
       '没有 settleHoldAt 的老卡:起算日退到卡文件最后提交日(与 .udate 同源)', (readFileSync(join(kb, 'index.html'), 'utf8').match(/data-hold="[^"]*"/) || [''])[0])
     touch(join(kb, 'index.html'))
     const gs = runStop(NEW_SCRIPTS, root)
-    ok(/暂不收账已 30 天/.test(gs.stdout) && /BL-OLD/.test(gs.stdout), '守卫读同一份卡文件日期,老卡照样催得动', (gs.stdout.match(/暂不收账已[^"\\]*/) || [''])[0].slice(0, 160))
+    ok(/暂不收账最久已 30 天/.test(gs.stdout) && /BL-OLD/.test(gs.stdout), '守卫读同一份卡文件日期,老卡照样催得动', (gs.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 160))
     ok(!readFileSync(join(kb, 'cards', 'backlog', 'BL-OLD.json'), 'utf8').includes('settleHoldAt'),
       '守卫不往卡上补写起算日(收工时改板会跟并行会话抢写)')
   }
@@ -4568,6 +4573,9 @@ console.log('T69 前置依赖 after')
     ok(k('') === 'null' && k('  ') === 'null' && k('BL C74') === 'null' && k('a/b') === 'null' && k('#0') === 'null',
       '空 / 带空白 / 带路径分隔符 / 0 号都不是合法 ref')
     ok(D.afterOf({ after: ['BL-1', 'BL-1', ' BL-2 ', '', null] }).join(',') === 'BL-1,BL-2', 'afterOf 去重去空、保留书写顺序')
+    ok(D.afterOf({ after: ['266', '#266', 'v1.0', 'v1.0'] }).join(',') === '266,v1.0',
+      '去重按归一键:266 与 #266 是同一个 PR,按原文比会各占一项,芯片就会说「等 2 项」而其实只有一个')
+    ok(D.afterKey('266') === '#266' && D.afterKey('#266') === '#266' && D.afterKey('BL-1') === 'BL-1', '归一键就是 parseAfterRef 的 ref')
     ok(D.afterOf({ after: 'BL-1' }).length === 0 && D.afterOf({}).length === 0, '不是数组 = 没写(硬报错在 gen 那道门)')
   }
 
@@ -4874,6 +4882,12 @@ console.log('T69 前置依赖 after')
 
     const a1 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', '#230'])
     ok(a1.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230', 'card after 追加,顺序即书写顺序', a1.stderr)
+    // 同一个号的两种写法是同一项:按原文比会各占一项,卡头就会说「等 2 项」而其实只有一个 PR
+    const a1b = runCli(kb2, ['card', 'after', 'BL-1', '230'])
+    ok(a1b.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230', '换个写法追加同一个号:一个字节都不加', afterOfCard('BL-1').join(','))
+    const a1c = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '230'])
+    ok(a1c.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2', '--rm 也按归一键找:写 230 删得掉 #230')
+    runCli(kb2, ['card', 'after', 'BL-1', '#230'])
     const a2 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', 'v0.0.1'])
     ok(a2.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230,v0.0.1', '再追加:已有的去重,新的落到末尾')
     ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('source,after,problem'),
@@ -4901,9 +4915,14 @@ console.log('T69 前置依赖 after')
     ok(a11.status === 1, '--rm 后面再跟 ref:拒(一次只移除一项)')
     runCli(kb2, ['card', 'set', 'BL-1', 'after', '--json', '["BL-2","#230","v0.0.1"]'])
     const show = runCli(kb2, ['card', 'show', 'BL-1'])
-    ok(show.status === 0 && /前置: ✓ BL-2 已收 · #230 开着 · ✓ v0\.0\.1 已发/.test(show.stdout),
-      'card show 多一行「前置」,逐项带当前状态(与 gen 同一份函数)', (show.stdout.match(/前置.*/) || [''])[0])
-    ok(runCli(kb2, ['card', 'show', 'BL-3']).stdout.includes('前置: BL-1 未收'), '指向还没收的卡:说「未收」')
+    ok(show.status === 0 && /after\(前置\): ✓ BL-2 已收 · #230 开着 · ✓ v0\.0\.1 已发/.test(show.stdout),
+      'card show 多一行「after(前置)」,逐项带当前状态(与 gen 同一份函数)', (show.stdout.match(/after\(前置\).*/) || [''])[0])
+    { // 这一行紧跟在 after 字段本身后面:中间隔着长正文的话,「关联的放一起」就断了
+      const lines = show.stdout.split('\n')
+      const at = lines.findIndex((l) => /^  after: /.test(l))
+      ok(at > 0 && /^  after\(前置\): /.test(lines[at + 1] || ''), '解析行紧贴着字段本身那一行', lines.slice(at, at + 2).join(' | '))
+    }
+    ok(runCli(kb2, ['card', 'show', 'BL-3']).stdout.includes('after(前置): BL-1 未收'), '指向还没收的卡:说「未收」')
     ok(!/不认识的字段|unknown field/.test(runCli(kb2, ['card', 'set', 'BL-2', 'after', '--json', '[]']).stderr), 'after 是已知字段')
     ok(/card after/.test(runCli(kb2, ['--help']).stdout), '--help 里有它')
   }
@@ -4939,7 +4958,7 @@ console.log('T69 前置依赖 after')
     ok(/id="T2"[\s\S]{0,900}?depchip dep-unlock/.test(h3), '进度卡也长反向芯片(BL-2 在等 T2)')
     ok(count(h3, 'depchip dep-unlock') === 1 && /dep-unlock" title="[^"]*BL-2/.test(h3),
       '全板只有 T2 那一枚反向芯片 —— 已终态的 T1 被 BL-1 指着也不出', String(count(h3, 'depchip dep-unlock')))
-    ok(runCli(kb3, ['card', 'show', 'BL-1']).stdout.includes('前置: ✓ T1 已收'), 'card show 也解析得出进度卡的状态')
+    ok(runCli(kb3, ['card', 'show', 'BL-1']).stdout.includes('after(前置): ✓ T1 已收'), 'card show 也解析得出进度卡的状态')
     ok(runCli(kb3, ['card', 'after', 'BL-1', '--rm', 'T1']).status === 0, '写得进去也删得掉(整条 after 会被重校验一遍)')
     ok(runCli(kb3, ['card', 'after', 'BL-1', 'T404']).status === 1, '真不存在的号照旧拒写')
 

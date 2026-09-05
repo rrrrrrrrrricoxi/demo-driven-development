@@ -10,6 +10,7 @@
 //
 // 判定只认「本仓 + release-manifest 里有记录」的 PR:跨仓 PR 的状态不在这份 manifest 里,
 // 没同步过的号也一样 —— 不知道就不判,别拿缺数据当「还开着」去催人。
+import { prUrlRe } from './prlink.mjs'
 
 /** 三种卡的终态并集(pr-sync 建议 status 时按卡种各取一个,见 KIND_TERMINAL) */
 export const TERMINAL = new Set(['done', 'live', 'closed'])
@@ -49,8 +50,6 @@ export function settleOf(card, prRefs, relPr, mainRepo) {
 // links[].title 里手写的状态词。长的排前面:「已合并」得先于「已合」命中,否则剩一个「并」字在外面。
 const WORD_RE = /开而不合|待合|已合并|已合|已发/
 const WORD_OPEN = new Set(['开而不合', '待合'])
-// 本仓 /pull/N —— 与 prlink.mjs 的 links 兼容同一条口径(仓不同的不认:板上有旧仓链接,号会撞)
-const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * 一条 link 的手写状态词是否已过时。
@@ -61,9 +60,8 @@ const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  */
 export function staleLink(link, relPr, repo) {
   const href = String((link && link.href) || '')
-  const re = repo
-    ? new RegExp(`^https?://(?:www\\.)?github\\.com/${reEsc(repo)}/pull/(\\d+)(?:[/?#]|$)`, 'i')
-    : /^https?:\/\/(?:www\.)?github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)(?:[/?#]|$)/i
+  // 本仓 /pull/N —— 与 prlink.mjs 的 links 兼容同一条正则(仓不同的不认:板上有旧仓链接,号会撞)
+  const re = repo ? prUrlRe(repo) : /^https?:\/\/(?:www\.)?github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)(?:[/?#]|$)/i
   const hit = href.match(re)
   if (!hit) return null
   const num = Number(hit[1])

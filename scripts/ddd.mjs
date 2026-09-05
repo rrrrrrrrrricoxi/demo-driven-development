@@ -31,7 +31,7 @@ import { loadStrings, pickStrings } from './strings.mjs'
 import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
-import { afterOf, afterStates, auditAfter, depCtxFrom, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
+import { afterKey, afterOf, afterStates, auditAfter, depCtxFrom, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ARGV = process.argv.slice(2)
@@ -518,16 +518,18 @@ function cmdAfter() {
   const { store, row } = findCard(id)
   const cur = afterOf(row.card)
   let next, removed = ''
+  // 追加与移除都按归一键比(afterOf 也是):266 与 #266 是同一个前置,按原文比会各占一项
   if (flags.rm !== undefined) {
     if (refs.length) die(S.afterRmAlone())
     const want = String(flags.rm).trim()
-    if (!cur.includes(want)) die(S.afterNotThere(id, want, cur))
-    next = cur.filter((x) => x !== want)
-    removed = want
+    const hit = cur.find((x) => afterKey(x) === afterKey(want))
+    if (hit === undefined) die(S.afterNotThere(id, want, cur))
+    next = cur.filter((x) => x !== hit)
+    removed = hit
   } else {
     if (!refs.length) die(S.afterUsage())
     next = [...cur]
-    for (const r of refs) { const v = String(r).trim(); if (v && !next.includes(v)) next.push(v) }
+    for (const r of refs) { const v = String(r).trim(); if (v && !next.some((x) => afterKey(x) === afterKey(v))) next.push(v) }
   }
   checkField(store, 'after', next, id)
   const card = writeCard(store, row, { ...row.card, after: next })
@@ -555,15 +557,16 @@ function cmdShow() {
   const { store, row } = findCard(id)
   if (flags.json) { console.log(JSON.stringify(row.card, null, 2)); return }
   console.log(S.showHead(String(row.card.id), KIND_NAME[store.k.key], row.where))
+  const dep = afterOf(row.card)
   for (const [key, value] of Object.entries(row.card)) {
     if (key === 'id') continue
     const text = typeof value === 'string' ? value : JSON.stringify(value)
     console.log(`  ${key}: ${String(text).replace(/\n/g, '\n    ')}`)
-  }
-  const dep = afterOf(row.card)
-  if (dep.length) {
-    const ctx = depCtx()
-    console.log(S.afterShow(dep.map((r) => depItemText(resolveAfter(r, ctx), S.depWords))))
+    // 解析结果紧跟在字段本身后面:两行贴着,后面的长正文再多也冲不散(「关联的放一起」)
+    if (key === 'after' && dep.length) {
+      const ctx = depCtx()
+      console.log(S.afterShow(dep.map((r) => depItemText(resolveAfter(r, ctx), S.depWords))))
+    }
   }
 }
 

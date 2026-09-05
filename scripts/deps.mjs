@@ -16,15 +16,13 @@
 //
 // 顶层无副作用,可直接 import。`blockedOn`(自由文本,给「等人 / 等外部」用)不动、不迁移。
 import { SETTLE_NOTE_TAG, TERMINAL } from './settle.mjs'
+import { PR_NUM_RE, PR_REF_RE } from './prlink.mjs'
 
 /** 守卫那行「前置已清」的新鲜窗口(天)。gen 不认这个数 —— 它不读时钟,窗口只在守卫里。 */
 export const DEPS_FRESH_DAYS = 7
 
 /** 反向 chip 面上最多列几个卡号,多的折成「+N」(全列在 title 里) */
 export const DEPS_UNLOCK_SHOW = 3
-
-const CROSS_RE = /^([\w.-]+\/[\w.-]+)#(\d+)$/
-const NUM_RE = /^#?(\d+)$/
 
 /**
  * 一条 ref 的形制判定。三种写法互不重叠,靠语法分,不靠「板上查得到就算卡号」——
@@ -37,9 +35,9 @@ const NUM_RE = /^#?(\d+)$/
 export function parseAfterRef(raw) {
   const s = String(raw ?? '').trim()
   if (!s) return null
-  const cross = s.match(CROSS_RE)
+  const cross = s.match(PR_REF_RE) // 「语法同 pr 字段」这句话由同一条正则兑现(prlink.mjs)
   if (cross) return { kind: 'pr', raw: s, ref: s, repo: cross[1], num: Number(cross[2]) }
-  const num = s.match(NUM_RE)
+  const num = s.match(PR_NUM_RE)
   if (num) {
     const n = Number(num[1])
     return n > 0 ? { kind: 'pr', raw: s, ref: `#${n}`, repo: '', num: n } : null
@@ -49,15 +47,27 @@ export function parseAfterRef(raw) {
   return { kind: 'card', raw: s, ref: s, id: s }
 }
 
-/** 卡上的 after:去重、去空、保留书写顺序(顺序即显示顺序);不是数组 = 没写 */
+/** 一条 ref 的归一键(去重用):266 与 #266 是同一个前置,书写不同而已。
+ *  显式写成 owner/repo#266 的仍另算一项 —— 那要拿本仓名才判得出来,而这一层没有 ctx;
+ *  真撞上时 resolveAfter 会给出同样的状态,只是芯片多数一项(ponytail:够用,要更严就把 repo 传进来)。 */
+export const afterKey = (raw) => {
+  const p = parseAfterRef(raw)
+  return p ? p.ref : String(raw ?? '').trim()
+}
+
+/** 卡上的 after:去重、去空、保留书写顺序(顺序即显示顺序);不是数组 = 没写。
+ *  去重按归一键,不按原文 —— 否则同一个 PR 的三种写法各占一项,芯片会说「等 3 项」而其实只有一个。
+ *  留的是原文:书写照旧显示,归一只用于比对(与指标名大小写同一条规矩)。 */
 export function afterOf(card) {
   const raw = card && card.after
   if (!Array.isArray(raw)) return []
   const out = [], seen = new Set()
   for (const v of raw) {
     const s = String(v ?? '').trim()
-    if (!s || seen.has(s)) continue
-    seen.add(s)
+    if (!s) continue
+    const k = afterKey(s)
+    if (seen.has(k)) continue
+    seen.add(k)
     out.push(s)
   }
   return out
