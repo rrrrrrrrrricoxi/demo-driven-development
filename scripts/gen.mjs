@@ -4101,7 +4101,7 @@ const RICH_CSS = !RICH ? '' : `
   .detail .dbody { padding: 2px 11px 11px; }`
 // clampScan 的让路:烤了预览/全文两份的字段,折叠已经由 400 字预览负责,再叠一层高度截断
 // 就成了「点开还是两行」。打上 data-cl 直接出局(幂等,与量过的字段同一个出口)。
-const RICH_CLAMP_SKIP = !RICH ? '' : `if (el.querySelector('.lfull')) { el.dataset.cl = '1'; return }
+const RICH_CLAMP_SKIP = !RICH ? '' : `if (el.querySelector('.lfull')) { todo.push([el, false]); return }
       `
 const RICH_JS = !RICH ? '' : `
   ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
@@ -4850,11 +4850,18 @@ ${PATH_CSS_B}
   // 真正量得到的时刻是「卡展开的那一下」,故 rhead 点击 / 深链自动展开 / 展开全部 三处都补一趟(见下)。
   function clampScan(pane) {
     if (!pane) return
+    // 两趟:先只读(offsetParent / lineHeight / scrollHeight),再只写(data-cl / .clamp)。混着来
+    // 每写一次就得为下一次读强制重排整块 pane(「展开全部」时那是几百个卡全开着的一整块)。
+    // 分两趟等价:折叠只改元素自己的高度,量不到别人的 scrollHeight。
+    const todo = []
     pane.querySelectorAll('dd.x, dd.decided, dd.demonote, ${NOTES_TAG}.notes${RICH ? ', dd.lsrc' : ''}').forEach(function (el) {
       if (el.dataset.cl || el.offsetParent === null) return
       ${RICH_CLAMP_SKIP}const lh = parseFloat(getComputedStyle(el).lineHeight) || 21
-      el.dataset.cl = '1'
-      if (el.scrollHeight > lh * 3.3) el.classList.add('clamp')
+      todo.push([el, el.scrollHeight > lh * 3.3])
+    })
+    todo.forEach(function (row) {
+      row[0].dataset.cl = '1'
+      if (row[1]) row[0].classList.add('clamp')
     })
   }
   const show = (name) => {
@@ -5039,7 +5046,7 @@ ${PATH_CSS_B}
   if (expandBtn) expandBtn.addEventListener('click', () => {
     allOpen = !allOpen
     const pane = document.querySelector('.pane-active')
-    if (pane) { pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); clampScan(pane) } // 展开全部之后补量一趟
+    if (pane) { pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); if (allOpen) clampScan(pane) } // 展开全部之后补量一趟(收起时全都 display:none,量不到也不必量)
     expandBtn.textContent = allOpen ? '收起全部' : '展开全部'
   })
 

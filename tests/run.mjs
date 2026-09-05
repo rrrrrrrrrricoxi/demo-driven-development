@@ -4422,26 +4422,32 @@ console.log('T68 行卡展开时补量折叠')
     '点 .rhead 展开的那一下补量一趟(收起时传 null,clampScan 自己走人)')
   ok(on.includes("if (el.classList.contains('rcard')) { el.classList.add('open'); clampScan(el) }"),
     '深链自动展开的卡也补量')
-  ok(on.includes("pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); clampScan(pane)"),
-    '「展开全部」之后补量一趟')
+  ok(on.includes("pane.querySelectorAll('.rcard').forEach((c) => c.classList.toggle('open', allOpen)); if (allOpen) clampScan(pane)"),
+    '「展开全部」之后补量一趟(「收起全部」不必量:全都 display:none)')
   ok(on.includes("pane.querySelectorAll('dd.x, dd.decided, dd.demonote, div.notes, dd.lsrc')"),
     'richText 开着时 source 徽章(dd.lsrc)也进扫描名单')
 
   // ---- 把生成物里那只 clampScan 抠出来真跑一遍(手搭最小 DOM:只实现它用到的那几面)----
   const src = (on.match(/ {2}function clampScan\(pane\) \{[\s\S]*?\n {2}\}/) || [''])[0]
   ok(src.includes('scrollHeight') && src.includes('offsetParent'), '抠得到 clampScan 本体', src.slice(0, 60))
+  // 顺带记下读/写的先后:量(offsetParent / lineHeight / scrollHeight)与写(data-cl / .clamp)
+  // 一旦交替,浏览器每写一次就得为下一次读强制同步重排一整块 pane —— 这是 0.15.18 埋下的那笔。
+  const io68 = []
   const mkEl = (sel, chars, o = {}) => ({
-    sel, dataset: {}, cls: new Set(),
-    offsetParent: o.hidden ? null : {},
+    sel, dataset: new Proxy({}, { set: (t, k, v) => { io68.push('write'); t[k] = v; return true } }), cls: new Set(),
+    get offsetParent() { io68.push('read'); return o.hidden ? null : {} },
     querySelector: (s) => (o.full && s === '.lfull' ? {} : null),
-    scrollHeight: Math.ceil(chars / 40) * 21, // 40 字/行 × 21px 行高
-    classList: { add(c) { this.own.cls.add(c) } },
+    get scrollHeight() { io68.push('read'); return Math.ceil(chars / 40) * 21 }, // 40 字/行 × 21px 行高
+    classList: { add(c) { io68.push('write'); this.own.cls.add(c) } },
   })
   const els = [mkEl('dd.x', 1200), mkEl('dd.decided', 40), mkEl('dd.lsrc', 223), mkEl('div.notes', 900, { full: true }), mkEl('dd.x', 1200, { hidden: true })]
   els.forEach((e) => { e.classList.own = e })
   const pane = { querySelectorAll: (sel) => els.filter((e) => sel.split(', ').includes(e.sel)) }
-  const scan = new Function('getComputedStyle', src + '\n; return clampScan')(() => ({ lineHeight: '21px' }))
+  const scan = new Function('getComputedStyle', src + '\n; return clampScan')((el) => { io68.push('read'); return { lineHeight: '21px' } })
   scan(pane)
+  ok(io68.includes('write') && io68.lastIndexOf('read') < io68.indexOf('write'),
+    '量完再写:一趟只读、一趟只写 —— 中间不夹写,浏览器就不必为每个元素强制重排一次整块 pane',
+    io68.join(','))
   ok(els[0].cls.has('clamp'), '1200 字的 question:量到超 3.3 行 → 打 .clamp(点开有「展开 ▾」)')
   ok(!els[1].cls.has('clamp') && els[1].dataset.cl === '1', '40 字的结论:量过了,不折')
   ok(els[2].cls.has('clamp'), '223 字的 source 徽章同样收得住')
