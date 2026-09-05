@@ -56,7 +56,7 @@ import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } from './settle.mjs'
-import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, localDate, scanCardDir } from './cards.mjs'
+import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, daysBetween, localDate, scanCardDir } from './cards.mjs'
 import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 
@@ -355,9 +355,9 @@ let RLM = null
         const upd = cardUpdAll()
         for (const h of held) if (!h.since) h.since = upd.get(h.id) || ''
       }
-      const today = Date.now()
+      const today = localDate()
       const old = held
-        .map((h) => ({ id: h.id, days: Math.floor((today - Date.parse(`${h.since}T00:00:00`)) / 86400000) }))
+        .map((h) => ({ id: h.id, days: daysBetween(h.since, today) }))
         .filter((h) => Number.isFinite(h.days) && h.days >= SETTLE_HOLD_DAYS)
         .sort((a, z) => z.days - a.days)
       if (old.length) notices.push(S.respHoldOld(old.slice(0, 5).map((h) => h.id), old[0].days, old.length))
@@ -374,7 +374,7 @@ let RLM = null
   for (const [f, k, sub] of CARD_SOURCES) for (const c of cardsOf(f, k, sub)) if (c && c.id) cards.push(c)
   if (cards.some((c) => afterOf(c).length)) {
     const ctx = depCtx()
-    const today = Date.parse(`${localDate()}T00:00:00`)
+    const today = localDate()
     const rows = []
     for (const c of cards) {
       if (String(c.status || '') !== 'ready') continue
@@ -382,7 +382,7 @@ let RLM = null
       if (!list.length || openCount(list)) continue
       const at = clearedAt(list)
       if (!at) continue // 取不到清除日(未拆卡的板上,卡号前置就是这样)—— 宁可不出声,也不拿假日期点名
-      const days = Math.floor((today - Date.parse(`${at}T00:00:00`)) / 86400000)
+      const days = daysBetween(at, today)
       if (!Number.isFinite(days) || days > DEPS_FRESH_DAYS) continue
       rows.push({ id: String(c.id), at, items: list })
     }

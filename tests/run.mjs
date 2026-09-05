@@ -1407,7 +1407,7 @@ console.log('T37 进度响应渲染')
   ok(cardOf('D2').includes('rsp-reopen'), '决策卡 live + PR 开着 → 反向提示')
   ok(cardOf('BL-D').includes('<span class="rspdorm" data-dorm="2026-01-02" hidden></span>'), '沉睡:gen 只烤日期,天数留给浏览器')
   ok(!cardOf('BL-N').includes('rspdorm'), '挂了 PR 的 ready 卡不算沉睡')
-  ok(on.includes("Date.parse(el.getAttribute('data-dorm')") && on.includes('沉睡 ') && on.includes('d <= 30'),
+  ok(on.includes("dayDiff(el.getAttribute('data-dorm'))") && on.includes('沉睡 ') && on.includes('d > 30'),
     '沉睡天数在浏览器算(阈值 30 天),gen 侧无 new Date()')
   ok(!/new Date\(\)/.test(on.split('<script>')[0]), 'gen 零时间:静态部分不含 new Date()')
   ok(cardOf('BL-L').includes('↗ PR#227 阶段二(<s class="stale">开而不合</s>)<span class="prst">已发 v0.0.1</span>'),
@@ -4345,6 +4345,16 @@ console.log('T67 settleHold 14 天到期提醒')
     ok(!/不认识的字段|unknown field/.test(runCli(fx.kb, ['card', 'set', 'BL-1', 'settleHoldAt', '2026-01-01']).stderr), 'settleHoldAt 是已知字段,手工回填不报「不认识」')
   }
 
+  { // ---- 天数是日历日:换个有夏令时的时区跑一遍(本机时区没有切换,不换就看不出这一格)----
+    const probe = join(WORK, 'daysbetween-probe.mjs')
+    writeFileSync(probe, `import { daysBetween } from ${JSON.stringify(join(NEW_SCRIPTS, 'cards.mjs'))}\n` +
+      `console.log(JSON.stringify([daysBetween('2026-03-01', '2026-03-15'), daysBetween('2026-10-25', '2026-11-08'), daysBetween('2026-09-01', '2026-09-01'), daysBetween('x', '2026-09-01')]))\n`)
+    const r = spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles' } })
+    ok(r.stdout.trim() === '[14,14,0,null]',
+      'daysBetween 跨春/秋两次切换都是 14 天,同日是 0,坏日期是 NaN —— 两端折成 UTC 那一天再减,不受时区摆布',
+      `${r.stdout.trim()}${r.stderr.slice(0, 200)}`)
+  }
+
   { // ---- 守卫:13 天不出声,满 14 天出一行;芯片把起算日烤进 data-hold ----
     const fx = mkFixture('fx67b', { 's.html': demoHtml('s') })
     const kb = fx.kb, idxP = join(kb, 'index.html')
@@ -4367,16 +4377,20 @@ console.log('T67 settleHold 14 天到期提醒')
       const holdCls = (on.match(/\.rsp-hold\.(\w+) \{/) || [])[1]
       const srcH = (on.match(/ {4}function respHold\(\) \{[\s\S]*?\n {4}\}/) || [''])[0]
       const srcD = (on.match(/ {4}function respDorm\(\) \{[\s\S]*?\n {4}\}/) || [''])[0]
-      ok(Boolean(holdCls) && srcH.includes('data-hold') && srcD.includes('data-dorm'),
-        '抠得到样式表里那个类名与两只函数本体', `${holdCls} ${srcH.length}/${srcD.length}`)
-      // 元素的日期与「现在」都从同一个本地午夜推出来,天数因此与时区无关(9 月全球都没有夏令时切换)
-      const DAY = '2026-09-01', T0 = Date.parse(`${DAY}T00:00:00`)
+      const srcDD = (on.match(/ {4}function dayDiff\(s\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+      ok(Boolean(holdCls) && srcH.includes('data-hold') && srcD.includes('data-dorm') && srcDD.includes('Date.UTC'),
+        '抠得到样式表里那个类名与三只函数本体', `${holdCls} ${srcH.length}/${srcD.length}/${srcDD.length}`)
+      const DAY = '2026-09-01'
       const mkEl = () => { const e = { textContent: '暂不收账', hidden: true, cls: [], getAttribute: () => DAY }; e.classList = { add: (c) => e.cls.push(c) }; return e }
+      // 「现在」按本地日历推出来:与 DAY 之间正好差 days 个日历日,跟机器在哪个时区无关
       const run = (src, fn, sel, days) => {
         const el = mkEl()
         const doc = { querySelectorAll: (s) => (s.includes(sel) ? [el] : []) }
-        const D = { now: () => T0 + days * 86400000 + 3600000, parse: (x) => Date.parse(x) }
-        new Function('document', 'Date', `${src}\n; return ${fn}`)(doc, D)()
+        const RealDate = Date
+        const at = new RealDate(2026, 8, 1 + days, 3, 0, 0).getTime()
+        const D = function () { return new RealDate(at) }
+        D.UTC = RealDate.UTC; D.parse = RealDate.parse; D.now = () => at
+        new Function('document', 'Date', `${srcDD}\n${src}\n; return ${fn}`)(doc, D)()
         return el
       }
       const h13 = run(srcH, 'respHold', 'rsp-hold', 13)
@@ -4389,6 +4403,19 @@ console.log('T67 settleHold 14 天到期提醒')
       ok(d30.hidden === true && d30.textContent === '暂不收账', '沉睡 30 天:还在窗口内,徽章不出(hidden 不动)')
       const d31 = run(srcD, 'respDorm', 'rspdorm', 31)
       ok(d31.hidden === false && d31.textContent === '沉睡 31 天', '超 30 天:显示出来并写清天数', `${d31.hidden} ${d31.textContent}`)
+
+      // 跨夏令时:天数是日历日,不是 24h 的商。2026-03-08 那次春季切换让 03-01 → 03-15 只有
+      // 14×24h − 1h,旧写法(本地午夜 + floor)在那一格给 13 —— 满 14 天的卡整整晚一天才转琥珀。
+      const probe = join(WORK, 'dst-probe.mjs')
+      writeFileSync(probe, `${srcDD}\n${srcH}\n` +
+        `const el = { textContent: '暂不收账', cls: [], getAttribute: () => '2026-03-01', classList: { add(c) { el.cls.push(c) } } }\n` +
+        `globalThis.document = { querySelectorAll: () => [el] }\n` +
+        `const RealDate = Date\nconst at = new RealDate(2026, 2, 15, 0, 30).getTime()\n` +
+        `const D = function () { return new RealDate(at) }\nD.UTC = RealDate.UTC; D.parse = RealDate.parse; D.now = () => at\n` +
+        `globalThis.Date = D\nrespHold()\nconsole.log(el.textContent)\n`)
+      const dst = spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles' } })
+      ok(dst.stdout.trim() === '暂不收账 · 已 14 天',
+        '跨夏令时那一格照旧是 14 天(TZ=America/Los_Angeles,03-01 → 03-15)', `${dst.stdout.trim()}${dst.stderr.slice(0, 200)}`)
     }
     touch(idxP)
     const g13 = runStop(NEW_SCRIPTS, fx.root)

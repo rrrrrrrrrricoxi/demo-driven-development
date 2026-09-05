@@ -60,6 +60,21 @@ export function localDate(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+/**
+ * 两个日历日之间差几天(v0.16.1)。两边都折成 UTC 的那一天再相减 —— UTC 没有夏令时,所以
+ * 「差 14 天」永远是日历上的 14 天。原来的写法是 (Date.now() - Date.parse(日 + 'T00:00:00')) / 86400000
+ * 取整:两端都是本地午夜,窗口跨过一次切换就整整差一小时,那一格给出的天数少一天(挂账满 14 天
+ * 的卡在春季切换后的两周里报 13,守卫因此晚一天出声;秋季反过来多一天)。
+ * @returns 整数;任一端不是 YYYY-MM-DD 时 NaN(调用方本就在用 Number.isFinite 兜)
+ */
+export function daysBetween(from, to) {
+  const day = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''))
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN
+  }
+  return Math.round((day(to) - day(from)) / 86400000)
+}
+
 /** config.cardsDir 归一:非空字符串才算开,首尾斜杠去掉;其它一切(缺席/false/空串)= 关。
  *  值逃出看板目录时抛 —— 悄悄当「没配」会让 gen 拿不到卡却也不报错,那更难查。 */
 export function cardsDirOf(cfg) {

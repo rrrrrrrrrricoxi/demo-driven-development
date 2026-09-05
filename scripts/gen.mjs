@@ -4161,13 +4161,18 @@ const RESP_CSS = !RESP ? '' : `
 // 懒加载的 pane 是后到的,注入完要再扫一次(幂等:两者都从 data-* 现算,重跑不叠加)。
 const RESP_JS = !RESP ? '' : `
   ;(function () {  // 前置分号:本码库无分号风格(ASI),紧跟在上一句后会被解析成调用,必须挡开
+    // 天数是日历日,不是 24h 的商:两端各折成 UTC 的那一天再相减(UTC 没有夏令时,窗口跨过一次
+    // 切换也不会差一天)。与 cards.mjs 的 daysBetween 同一条口径 —— 那边脚本侧用,这边浏览器侧用。
+    function dayDiff(s) {
+      var p = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(s || '')
+      if (!p) return NaN
+      var n = new Date()
+      return Math.round((Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - Date.UTC(+p[1], +p[2] - 1, +p[3])) / 86400000)
+    }
     function respDorm() {
-      var now = Date.now()
       document.querySelectorAll('.rspdorm[data-dorm]').forEach(function (el) {
-        var t = Date.parse(el.getAttribute('data-dorm') + 'T00:00:00')
-        if (!isFinite(t)) return
-        var d = Math.floor((now - t) / 86400000)
-        if (d <= ${RESP_DORM}) return
+        var d = dayDiff(el.getAttribute('data-dorm'))
+        if (!(d > ${RESP_DORM})) return
         el.textContent = '沉睡 ' + d + ' 天'
         el.hidden = false
       })
@@ -4175,12 +4180,9 @@ const RESP_JS = !RESP ? '' : `
     window.respDorm = respDorm
     respDorm()${!HOLD_ANY ? '' : `
     function respHold() {
-      var now = Date.now()
       document.querySelectorAll('.rsp-hold[data-hold]').forEach(function (el) {
-        var t = Date.parse(el.getAttribute('data-hold') + 'T00:00:00')
-        if (!isFinite(t)) return
-        var d = Math.floor((now - t) / 86400000)
-        if (d < ${SETTLE_HOLD_DAYS}) return  // 满 14 天就说(与守卫同一个边界;沉睡那条是「超 30 天」)
+        var d = dayDiff(el.getAttribute('data-hold'))
+        if (!(d >= ${SETTLE_HOLD_DAYS})) return  // 满 14 天就说(与守卫同一个边界;沉睡那条是「超 30 天」)
         el.textContent = '暂不收账 · 已 ' + d + ' 天'
         el.classList.add('holdold')
       })
