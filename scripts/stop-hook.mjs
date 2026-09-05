@@ -400,7 +400,8 @@ let RLM = null
 // git 不可用 / 找不到主线 / 就在主线上 → 一个字都不说,也不多花一次 spawn。
 {
   const r = boardBranchCheck(KANBAN, S)
-  if (!r.skip) for (const h of r.hits) notices.push(S.boardBranchGuard(h, r.main))
+  // dirty = 工作区里没提交的看板改动:补救那条 checkout 会连它们一起盖掉,清单不说就是安静地丢内容
+  if (!r.skip) for (const h of r.hits) notices.push(S.boardBranchGuard(h, r.main, r.dirty))
 }
 
 // ---- ⑥ 积压审计(v0.13.0,只在 config.wip 配了对象时跑):ready 超 hard 就说一声 ----

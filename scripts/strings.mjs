@@ -45,15 +45,21 @@ const zh = {
     `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
   respHoldOld: (ids, days, total) =>
     `暂不收账已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
-  boardBranchGuard: (h, main) =>
+  boardBranchGuard: (h, main, dirty = []) =>
     `⚠ 看板守卫:当前分支 ${h.ref} 带着看板改动(相对 ${main}:数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})—— 看板只在 ${main} 上改。\n` +
     h.hazard.map((z) => `  ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条):这块板已是一卡一文件,合回 ${main} 会让 gen 当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。\n`).join('') +
-    `  合并前把分支侧的看板改动丢掉(git checkout ${main} -- <看板目录>),真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。全表:\`node <plugin>/scripts/board-branch-check.mjs\`。`,
+    `  合并前把分支侧的看板改动丢掉(git checkout ${main} -- <看板目录>),真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。全表:\`node <plugin>/scripts/board-branch-check.mjs\`。` +
+    (dirty.length ? `\n  ⚠ 工作区里还有 ${dirty.length} 处没提交的看板改动,上面那条 checkout 会连它们一起盖掉(上面的清单只列已提交的):${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` …等 ${dirty.length} 个` : ''} —— 要留就先提交或 git stash。` : ''),
   boardBranch: {
     noGit: () => 'board-branch-check:这块板不在 git 仓里(或 git 跑不起来),没有分支可比 —— 本次不做判断。',
     noMain: (main) => `board-branch-check:找不到主线分支 ${main}(本地与 origin/${main} 都没有),没有基准可比 —— 本次不做判断。主线名取三份 manifest 的 instance.branch,没写就按 main。`,
     clean: (n, main) => `board-branch-check:比过 ${n} 条分支,相对 ${main} 都没有看板改动 —— 干净。`,
     onMain: (main) => `board-branch-check:没有要比的分支(当前就在 ${main} 上)—— 看板改动本来就该落在这里。`,
+    detached: (sha, main) => `board-branch-check:HEAD 是游离的(不在任何分支上),按当前提交 ${sha} 与 ${main} 比 —— 结论照常给,只是没有分支名可报。`,
+    dirty: (files, main, prefix) =>
+      `  ⚠ 工作区里还有 ${files.length} 处没提交的看板改动 —— 上面那条 git checkout ${main} -- ${prefix} 是无条件覆盖,会连它们一起盖掉,而它们没提交过、盖了就找不回来(上面那张清单只列已提交的):\n` +
+      files.slice(0, 5).map((f) => `    ${f}`).join('\n') + (files.length > 5 ? `\n    …等 ${files.length} 个` : '') +
+      `\n  要留就先提交(或 git stash),再执行上面那条。`,
     head: (n, main) => `⚠ 看板改动落在了非主线分支上(基准 ${main}),${n} 条:`,
     row: (h) => {
       const key = [...h.data, ...h.gen]
@@ -411,15 +417,21 @@ const en = {
     `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
   respHoldOld: (ids, days, total) =>
     `On settle hold for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
-  boardBranchGuard: (h, main) =>
+  boardBranchGuard: (h, main, dirty = []) =>
     `⚠ Kanban guard: the current branch ${h.ref} carries board changes (against ${main}: ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) — the board is only edited on ${main}.\n` +
     h.hazard.map((z) => `  ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries): this board is one file per card, so merging it back into ${main} makes gen fail hard — and that array is a snapshot from the fork point, which would overwrite cards that have moved on since.\n`).join('') +
-    `  Before merging, drop the branch-side board changes (git checkout ${main} -- <kanban dir>) and replay what genuinely belongs there (a new demo, a refs doc) on ${main}. Full table: \`node <plugin>/scripts/board-branch-check.mjs\`.`,
+    `  Before merging, drop the branch-side board changes (git checkout ${main} -- <kanban dir>) and replay what genuinely belongs there (a new demo, a refs doc) on ${main}. Full table: \`node <plugin>/scripts/board-branch-check.mjs\`.` +
+    (dirty.length ? `\n  ⚠ ${dirty.length} uncommitted board change(s) are in the working tree; that checkout overwrites them too (the list above only covers committed ones): ${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` … ${dirty.length} in total` : ''} — commit or git stash them first.` : ''),
   boardBranch: {
     noGit: () => 'board-branch-check: this board is not inside a git repository (or git could not run), so there are no branches to compare — no judgement this time.',
     noMain: (main) => `board-branch-check: cannot find the mainline branch ${main} (neither locally nor as origin/${main}), so there is no baseline to compare against — no judgement this time. The mainline name comes from instance.branch in the three manifests, defaulting to main.`,
     clean: (n, main) => `board-branch-check: compared ${n} branch(es); none of them carries board changes against ${main} — clean.`,
     onMain: (main) => `board-branch-check: nothing to compare (you are on ${main}) — board changes belong here in the first place.`,
+    detached: (sha, main) => `board-branch-check: HEAD is detached (not on any branch), so the comparison is commit ${sha} against ${main} — the verdict still stands, there is just no branch name to report.`,
+    dirty: (files, main, prefix) =>
+      `  ⚠ ${files.length} uncommitted board change(s) are in the working tree — the git checkout ${main} -- ${prefix} above overwrites unconditionally, so it takes those with it, and they were never committed (the list above only covers committed changes):\n` +
+      files.slice(0, 5).map((f) => `    ${f}`).join('\n') + (files.length > 5 ? `\n    … ${files.length} in total` : '') +
+      `\n  Commit them (or git stash) before running that command.`,
     head: (n, main) => `⚠ Board changes are sitting on non-mainline branches (baseline ${main}), ${n} of them:`,
     row: (h) => {
       const key = [...h.data, ...h.gen]

@@ -4092,7 +4092,77 @@ console.log('T65 看板改动落在哪条分支上 board-branch-check')
     ok(/干净/.test(named.stdout), '--branch 可以点名比别的分支', named.stdout)
     const all = runChk(kb, ['--all'])
     ok(/feat\/dirty/.test(all.stdout) && !/feat\/clean/.test(all.stdout), '--all 扫全部分支,只列真命中的那条', all.stdout.slice(0, 300))
+
+    // 三个桶都装上东西:只提交一个数据文件时 gen[]/other[] 恒空,分类那一行等于没测过
+    mkdirSync(join(kb, 'refs'), { recursive: true })
+    writeFileSync(join(kb, 'index.html'), '<!doctype html>\n<!-- ddd-gen v0.0.0 -->\n')
+    writeFileSync(join(kb, 'refs', 'x.html'), '<p>x</p>\n')
+    writeFileSync(join(kb, 'demos', 'later.html'), demoHtml('later'))
+    const cfg65 = rd(join(kb, 'kanban.config.json')); cfg65.port = 8123; wr(join(kb, 'kanban.config.json'), cfg65)
+    // 只提交这四个:gen 会改写 demo 与 index(注入返回块 / 重生成),-A 会把它们一并带进来,桶数就不定了
+    g('add', 'app/kanban/index.html', 'app/kanban/refs/x.html', 'app/kanban/kanban.config.json', 'app/kanban/demos/later.html')
+    g('commit', '-qm', 'gen + config + demo on the branch')
+    const buckets = runChk(kb)
+    ok(/数据 2 · 产物 2 · 其它 1/.test(buckets.stdout), '三个桶各按各的正则分:kanban.config.json 算数据,index.html 与 refs/ 算产物,demo 算其它',
+      (buckets.stdout.match(/数据 \d+[^\n]*/) || [''])[0])
+    const jb = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(jb.hits[0].gen.some((f) => /refs\//.test(f)) && jb.hits[0].gen.some((f) => /index\.html$/.test(f)), 'refs/ 与 index.html 都进「产物」桶', JSON.stringify(jb.hits[0].gen))
+    ok(jb.hits[0].data.some((f) => /kanban\.config\.json$/.test(f)), 'kanban.config.json 进「数据」桶 —— 开关 tab、改 wip 阈值正是最该拦的那一类', JSON.stringify(jb.hits[0].data))
+    ok(jb.hits[0].other.some((f) => /demos\//.test(f)), 'demo 进「其它」桶', JSON.stringify(jb.hits[0].other))
+
+    // 未提交的看板改动:补救那条 checkout 会连它们一起盖掉,清单不说就是安静地丢内容(SEC-2)
+    const blDirty = rd(blP); blDirty.items[0].title = '甲(改了还没提交)'; wr(blP, blDirty)
+    const withDirty = runChk(kb)
+    ok(/没提交的看板改动/.test(withDirty.stdout) && /backlog-manifest\.json/.test(withDirty.stdout.split('没提交的看板改动')[1] || ''),
+      '工作区里没提交的看板改动单列一段,点名到文件 —— 那条 checkout 会连它们一起盖掉', withDirty.stdout.slice(-400))
+    const dirtyJson = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(dirtyJson.dirty.some((f) => /backlog-manifest\.json$/.test(f)), '--json 里也给 dirty', JSON.stringify(dirtyJson.dirty))
+    const dirtyStop = runStop(NEW_SCRIPTS, root)
+    ok(/没提交的看板改动/.test(dirtyStop.stdout), '守卫那条也带上这句警告(它给的正是同一条命令)', dirtyStop.stdout.slice(0, 600))
+    g('checkout', '-q', '--', '.')
+    ok(JSON.parse(runChk(kb, ['--json']).stdout).dirty.length === 0, '工作区干净时 dirty 为空 —— 文案与 0.15.x 一字不差')
+
+    // 游离 HEAD(rebase / bisect / CI 的 actions/checkout):同一棵树、同一份改动,不许改口
+    g('checkout', '-q', '--detach', 'HEAD')
+    const det = runChk(kb)
+    ok(/⚠/.test(det.stdout) && /数据 2/.test(det.stdout), '游离 HEAD 上照样点名(0.15.14 在这里会说「当前就在 main 上」)', det.stdout.slice(0, 300))
+    ok(/游离/.test(det.stdout) && !/当前就在 main 上/.test(det.stdout), '并且说清按什么比的 —— 不冒充「你在主线上」', (det.stdout.match(/[^\n]*游离[^\n]*/) || [''])[0])
+    ok(runChk(kb, ['--strict']).status === 1, '--strict 在游离 HEAD 上照样是门(CI 的 checkout 默认就是游离的)')
+    const detJson = JSON.parse(runChk(kb, ['--json']).stdout)
+    ok(detJson.scanned === 1 && detJson.hits.length === 1 && detJson.detached === true, '--json:游离位置当一条 ref 扫,不是 scanned 0', JSON.stringify({ s: detJson.scanned, d: detJson.detached }))
+    const detStop = runStop(NEW_SCRIPTS, root)
+    ok(/带着看板改动/.test(detStop.stdout), '守卫在游离 HEAD 上也出声', detStop.stdout.slice(0, 200))
+    ok(/当前就在 main 上/.test(runChk(kb, ['--branch', 'main']).stdout), '显式点名主线仍是「没有要比的分支」')
     g('checkout', '-q', 'main') // 收摊:别把这块板留在分支上影响后面的用例
+
+    // 本地没有主线分支(worktree / 只 fetch 过远端的 CI 克隆)→ 退到 origin/<main>,不是整体变哑
+    const mainSha = (g('rev-parse', 'main').stdout || '').trim()
+    g('update-ref', 'refs/remotes/origin/main', mainSha)
+    g('checkout', '-q', '-B', 'tmp-work', mainSha)
+    g('update-ref', '-d', 'refs/heads/main')
+    const fb = JSON.parse(runChk(kb, ['--branch', 'feat/dirty', '--json']).stdout)
+    ok(fb.main === 'origin/main' && (fb.hits || []).length === 1, '本地没 main 时基准退到 origin/main,照常比得出来 —— 少了这条回退,worktree 与只 fetch 过远端的 CI 克隆整体变哑', JSON.stringify(fb))
+    g('update-ref', 'refs/heads/main', mainSha)
+    g('checkout', '-q', 'main')
+  }
+
+  { // ---- 两条 skip:不在 git 仓里 / 找不到主线 —— 都是「本次不做判断」,不是「干净」 ----
+    const fx = mkFixture('fx65c', { 's.html': demoHtml('s') })
+    rmSync(join(fx.root, '.git'), { recursive: true, force: true })
+    const noGit = runChk(fx.kb)
+    ok(noGit.status === 0 && /不在 git 仓里/.test(noGit.stdout) && !/干净/.test(noGit.stdout),
+      '板不在 git 仓里:说明白「本次不做判断」,不冒充干净', noGit.stdout)
+
+    const fx2 = mkFixture('fx65d', { 's.html': demoHtml('s') })
+    const g2 = (...a) => spawnSync('git', a, { cwd: fx2.root, encoding: 'utf8' })
+    g2('config', 'user.email', 't@example.com'); g2('config', 'user.name', 'T')
+    g2('checkout', '-q', '-B', 'trunk')
+    const bl2P = join(fx2.kb, 'backlog-manifest.json')
+    const bl2 = rd(bl2P); bl2.instance.branch = 'no-such-branch'; wr(bl2P, bl2)
+    g2('add', '-A'); g2('commit', '-qm', 'init')
+    const noMain = runChk(fx2.kb)
+    ok(noMain.status === 0 && /找不到主线分支 no-such-branch/.test(noMain.stdout) && !/干净/.test(noMain.stdout),
+      '找不到主线分支:同样是「本次不做判断」', noMain.stdout)
   }
 
   { // ---- 拆过卡的板:分支把 items 数组带回头文件 = gen 会硬报错的那一类,合并前就点出来 ----
