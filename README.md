@@ -334,12 +334,19 @@ a person, on something outside"), and the two can sit on the same card.
 
 While a card is waiting its header carries a grey **「等 N 项」** chip whose
 title lists each item and its state (`✓ BL-C74 已收 09-04 · #266 开着 ·
-v0.0.5 未发`). Once everything clears, and while the card is still `ready`, that
-becomes **「前置已清 · MM-DD」**, dated with the latest of the clear dates; the
-chip stops rendering once the card leaves `ready`. A card that others wait on,
-and that is not itself terminal, carries the reverse — **「解锁 BL-C132 ·
-BL-C134」**, three ids on the face at most with the rest folded into `+N`, each
-one a link to that card.
+v0.0.5 未发`). Once everything clears that becomes **「前置已清 · MM-DD」**,
+dated with the latest of the clear dates. Both chips stop once the card reaches
+a terminal status: a card that is done saying it is "waiting on 2 things" reads
+as a bug, and "prerequisites cleared" on it says nothing. Until then the chips
+stay — `deferred` and `blocked` are not verdicts on the prerequisites.
+
+A card that others wait on, and that is not itself terminal, carries the
+reverse — **「被 BL-C132 · BL-C134 等着」**, three ids on the face at most with
+the rest folded into `+N`, each one a link to that card. It names who lists this
+card as a prerequisite; it does not promise that clearing this card unblocks
+them, because they are usually waiting on other things too. Cards that have
+already reached a terminal status drop off that list — nothing finished is
+still waiting.
 
 The guard adds one non-blocking line at stop time — `前置已清:BL-C132(#266
 已合)…` — for cards whose prerequisites cleared within the last 7 days and that

@@ -781,22 +781,31 @@ const depOpen = (entry) => openCount(depOf(entry)) > 0
 const depChips = (entry) => {
   if (!AFTER_ANY) return ''
   let out = ''
+  const terminal = TERMINAL.has(String(entry.status || ''))
   const list = depOf(entry)
-  if (list.length) {
+  // 终态之后两枚都不说话:一张 done 的卡挂着「等 2 项」读起来像出错了,「前置已清」则是句废话。
+  // 门是「终态」不是「ready」—— 决策卡的 status 里根本没有 ready,按 ready 判它永远出不来这枚芯片,
+  // 而清掉的那一刻芯片直接消失,与「有人把 after 删了」分不出来。
+  if (list.length && !terminal) {
     const title = esc(list.map((r) => depItemText(r)).join(' · '))
     const open = openCount(list)
     if (open) out += `<span class="depchip dep-wait" title="${title}">等 ${open} 项</span>`
-    // 全清那枚只在卡还 ready 时说话:done / deferred 之后「前置已清」是句废话
-    else if (String(entry.status || '') === 'ready') {
+    else {
       const at = clearedAt(list)
       out += `<span class="depchip dep-clear" title="${title}">前置已清${at ? ` · ${esc(at.slice(5))}` : ''}</span>`
     }
   }
-  const rev = DEP_REV.get(String(entry.id ?? ''))
-  if (rev && rev.length && !TERMINAL.has(String(entry.status || ''))) {
+  // 反向:陈述「谁的前置里有它」,不承诺「清掉它就解锁谁」—— 那句话常常不成立(对方还等着别的),
+  // 而这块板的规矩是陈述事实、不下结论。已经终态的卡不进这张名单:做完的东西没人还在等它。
+  // (class 名 dep-unlock 是 0.16.0 留下的,只是个选择器,不改以免动所有开了 after 的板的样式表。)
+  const rev = (DEP_REV.get(String(entry.id ?? '')) || []).filter((id) => {
+    const c = DEP_CTX.cardById.get(id)
+    return c && !TERMINAL.has(String(c.status || ''))
+  })
+  if (rev.length && !terminal) {
     const show = rev.slice(0, DEPS_UNLOCK_SHOW).map((id) => `<a href="#${esc(id)}">${esc(id)}</a>`).join(' · ')
     const more = rev.length > DEPS_UNLOCK_SHOW ? `<i class="depmore">+${rev.length - DEPS_UNLOCK_SHOW}</i>` : ''
-    out += `<span class="depchip dep-unlock" title="${esc(`清掉这张卡就解锁:${rev.join(' · ')}`)}">解锁 ${show}${more}</span>`
+    out += `<span class="depchip dep-unlock" title="${esc(`这些卡的前置里有它:${rev.join(' · ')}`)}">被 ${show}${more} 等着</span>`
   }
   return out
 }

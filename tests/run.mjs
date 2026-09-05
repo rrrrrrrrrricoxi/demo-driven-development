@@ -4581,8 +4581,9 @@ console.log('T69 前置依赖 after')
     '未全清:灰芯片「等 N 项」数的是还没清的,逐项状态挂 title')
   ok(on.includes('<span class="depchip dep-clear" title="✓ BL-5 已收 · ✓ #227 已合 08-19 · ✓ v0.0.1 已发 08-20">前置已清 · 08-20</span>'),
     '全清:安静芯片「前置已清 · MM-DD」,日期取各项清除日的最大值')
-  ok(on.includes('<span class="depchip dep-unlock" title="清掉这张卡就解锁:BL-6 · BL-7 · BL-8 · BL-9">解锁 <a href="#BL-6">BL-6</a> · <a href="#BL-7">BL-7</a> · <a href="#BL-8">BL-8</a><i class="depmore">+1</i></span>'),
-    '反向芯片:面上最多 3 个 + 折一枚 +N,title 列全,每个号点得动')
+  ok(on.includes('<span class="depchip dep-unlock" title="这些卡的前置里有它:BL-6 · BL-7 · BL-8 · BL-9">被 <a href="#BL-6">BL-6</a> · <a href="#BL-7">BL-7</a> · <a href="#BL-8">BL-8</a><i class="depmore">+1</i> 等着</span>'),
+    '反向芯片:陈述「谁的前置里有它」,面上最多 3 个 + 折一枚 +N,title 列全,每个号点得动')
+  ok(!/解锁/.test(on), '不说「清掉这张卡就解锁 X」—— 对方往往还等着别的,那是句常常不成立的承诺')
   ok(count(on, 'class="depchip dep-unlock"') === 1, '被指的 BL-5 已 done(终态)—— 终态卡不出反向芯片')
   ok(count(on, 'data-after-open="1"') === 5, '烤入 data-after-open 的正是那 5 张还等着前置的 ready 卡', String(count(on, 'data-after-open="1"')))
   ok(!/id="BL-2"[^>]*data-after-open/.test(on), '全清的卡不带 data-after-open(它今天动得了手)')
@@ -4608,16 +4609,62 @@ console.log('T69 前置依赖 after')
     ok(run(8, 0) === '可立即做 8(全板 3) · 已超 2', '当前筛选下没有等前置的卡:括号里不提它', run(8, 0))
   }
 
-  { // 卡离开 ready 之后「前置已清」不再渲染(那时它是句废话);「等 N 项」照旧说话
+  { // 门是「终态」不是「ready」:deferred 只是搁置,前置清没清仍是它身上的事实;done 之后两枚都收声
     const x = rd(blP)
     x.items.find((i) => i.id === 'BL-2').status = 'deferred'
+    x.items.find((i) => i.id === 'BL-1').status = 'deferred'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const hDef = readFileSync(idxP, 'utf8')
+    ok(hDef.includes('class="depchip dep-clear"') && hDef.includes('等 2 项'),
+      'deferred(非终态):两枚芯片照旧 —— 它们说的是事实,不是催促')
+
+    x.items.find((i) => i.id === 'BL-2').status = 'done'
+    x.items.find((i) => i.id === 'BL-1').status = 'done'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const hDone = readFileSync(idxP, 'utf8')
+    ok(!hDone.includes('class="depchip dep-clear"'), '收到终态:「前置已清」是句废话,不再渲染')
+    ok(!hDone.includes('等 2 项'), '收到终态:「等 N 项」读起来像出错了,同样不再渲染')
+
+    x.items.find((i) => i.id === 'BL-2').status = 'ready'
+    x.items.find((i) => i.id === 'BL-1').status = 'ready'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // 反向名单只列还没终态的那几张:做完的卡不该出现在「谁在等它」里
+    const x = rd(blP)
+    for (const id of ['BL-6', 'BL-7']) x.items.find((i) => i.id === id).status = 'done'
     wr(blP, x)
     runGen(NEW_SCRIPTS, kb)
     const h = readFileSync(idxP, 'utf8')
-    ok(!h.includes('class="depchip dep-clear"'), '卡从 ready 挪走:全清那枚芯片不再渲染')
-    ok(h.includes('等 2 项'), '还没清完的那枚不受状态影响 —— 它说的是事实,不是催促')
-    x.items.find((i) => i.id === 'BL-2').status = 'ready'
+    ok(/dep-unlock" title="这些卡的前置里有它:BL-8 · BL-9">被 <a href="#BL-8">BL-8<\/a> · <a href="#BL-9">BL-9<\/a> 等着/.test(h),
+      '两张依赖卡收掉之后:名单只剩没终态的两张,面上正好列得下,不长 +N', (h.match(/dep-unlock[^<]*<[^>]*>[^<]*/) || [''])[0])
+    for (const id of ['BL-6', 'BL-7', 'BL-8'] ) x.items.find((i) => i.id === id).status = 'done'
     wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const h2 = readFileSync(idxP, 'utf8')
+    ok(/dep-unlock" title="这些卡的前置里有它:BL-9">被 <a href="#BL-9">BL-9<\/a> 等着/.test(h2) && !/<i class="depmore"/.test(h2),
+      '只剩一张:面上就一个号')
+    for (const id of ['BL-6', 'BL-7', 'BL-8', 'BL-9']) x.items.find((i) => i.id === id).status = 'done'
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    ok(!readFileSync(idxP, 'utf8').includes('class="depchip dep-unlock"'),
+      '等它的卡全收完了:整枚芯片不出 —— 而不是留一枚「被(已经做完的那几张)等着」')
+    wr(blP, withAfter)
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  { // 正好 DEPS_UNLOCK_SHOW 张:三个号全列在面上,不长一枚写着 +0 的折叠标
+    const x = rd(blP)
+    x.items = x.items.filter((i) => i.id !== 'BL-9')
+    wr(blP, x)
+    runGen(NEW_SCRIPTS, kb)
+    const h = readFileSync(idxP, 'utf8')
+    ok(/被 <a href="#BL-6">BL-6<\/a> · <a href="#BL-7">BL-7<\/a> · <a href="#BL-8">BL-8<\/a> 等着/.test(h) && !/<i class="depmore"/.test(h),
+      '正好 3 张:全列在面上,不长 +N(> 写成 >= 就会出「+0」)')
+    wr(blP, withAfter)
     runGen(NEW_SCRIPTS, kb)
   }
 
