@@ -132,8 +132,7 @@ function depCtx() {
     for (const c of cardsOf(f, k, sub)) if (c && c.id) cards.push(c)
     try { heads.push(JSON.parse(readFileSync(join(KANBAN, f), 'utf8'))) } catch { heads.push(null) }
   }
-  const upd = cardUpdAll()
-  DEP_CTX = depCtxFrom({ cards, repo: boardRepo(...heads), rlm: RLM, cardUpd: (id) => upd.get(id) || '' })
+  DEP_CTX = depCtxFrom({ cards, repo: boardRepo(...heads), rlm: RLM })
   return DEP_CTX
 }
 

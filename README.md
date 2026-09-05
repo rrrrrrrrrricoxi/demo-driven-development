@@ -321,9 +321,15 @@ status (`done` for backlog cards, `live` or `closed` for decisions); a pull
 request — written the same way as the `pr` field — is cleared when
 `release-manifest.json` has it as `merged`; a release tag is cleared when that
 tag appears in the manifest's `releases[]`. Every one of those is a fact already
-committed somewhere, so `gen` reads no clock: the clear date of a card is its
-file's last change date, of a pull request its `mergedAt`, of a release its
-`at`.
+committed somewhere, so `gen` reads no clock. The clear date of a pull request
+is its `mergedAt` and of a release its `at`; for a card it is the day that card
+reached a terminal status — the last timeline line saying so (`【2026-09-03】
+status → done`, written by `ddd card status`, or `【2026-09-03 收账】…`, written
+by `pr-sync --settle`), failing that the card's own `date`, and failing that
+nothing at all, in which case the chip carries no date and the guard stays
+quiet. It is deliberately not the card file's last change date: that date moves
+every time the finished card is touched again, which would re-date the clearance
+and make the guard repeat a notice it already gave.
 
 A pull request or a tag that is not in the release manifest yet is not cleared,
 and that is not an error — it has simply not happened. A card id that matches

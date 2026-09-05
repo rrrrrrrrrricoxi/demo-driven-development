@@ -764,7 +764,7 @@ const respLinkParts = (l) => {
 for (const c of ALL_CARDS) if (c && c.after !== undefined && !Array.isArray(c.after)) throw new Error(GS.afterNotArray(String(c.id ?? '?')))
 const AFTER_ANY = ALL_CARDS.some((c) => afterOf(c).length)
 // 上下文的组装也在 deps.mjs 里(v0.16.1):三处各拼一遍,拼出来的「板上有哪些卡」就会不一样
-const DEP_CTX = depCtxFrom({ cards: ALL_CARDS, repo: PR_REPO, rlm, relPr, cardUpd })
+const DEP_CTX = depCtxFrom({ cards: ALL_CARDS, repo: PR_REPO, rlm, relPr })
 const DEP_REV = AFTER_ANY ? reverseAfter(ALL_CARDS) : new Map()
 if (AFTER_ANY) {
   // 未知卡号与环是硬报错(与「文件名≠id」同级):静默断链的教训见 refines,不再学一遍。

@@ -4498,10 +4498,10 @@ console.log('T69 前置依赖 after')
     const ctx = {
       repo: 'o/r',
       cardById: new Map([
-        ['BL-1', { id: 'BL-1', status: 'done' }], ['BL-2', { id: 'BL-2', status: 'ready' }],
-        ['D1', { id: 'D1', status: 'live' }], ['D2', { id: 'D2', status: 'closed' }], ['D3', { id: 'D3', status: 'draft' }],
+        ['BL-1', { id: 'BL-1', status: 'done', date: '2026-08-01', note: '【2026-08-05】开工\n\n【2026-09-02】status → done' }],
+        ['BL-2', { id: 'BL-2', status: 'ready' }],
+        ['D1', { id: 'D1', status: 'live' }], ['D2', { id: 'D2', status: 'closed', date: '2026-07-07' }], ['D3', { id: 'D3', status: 'draft' }],
       ]),
-      cardUpd: (id) => (id === 'BL-1' ? '2026-09-02' : ''),
       relPr: new Map([
         [227, { number: 227, state: 'merged', mergedAt: '2026-08-19T01:00:00Z' }],
         [230, { number: 230, state: 'open', mergedAt: null }],
@@ -4510,7 +4510,9 @@ console.log('T69 前置依赖 after')
       relTag: new Map([['v0.0.1', '2026-08-20T09:00:00Z']]),
     }
     const r = (s) => D.resolveAfter(s, ctx)
-    ok(r('BL-1').cleared && r('BL-1').at === '2026-09-02', 'backlog 卡 done = 已清,清除日 = 卡文件最后改动日')
+    ok(r('BL-1').cleared && r('BL-1').at === '2026-09-02', 'backlog 卡 done = 已清,清除日 = 时间线里那条终态转移的日期')
+    ok(r('D2').at === '2026-07-07', '没有时间线的卡(决策卡就没有这个字段)退到卡上的 date')
+    ok(r('D1').at === '', 'date 也没有 → 空串:不知道就不说,不硬编一个假日期')
     ok(!r('BL-2').cleared, 'backlog 卡 ready = 没清')
     ok(r('D1').cleared && r('D2').cleared && !r('D3').cleared, '决策卡 live / closed = 已清,其余没清(TERMINAL 一个并集就够)')
     ok(r('#227').cleared && r('#227').at === '2026-08-19', 'PR 合了 = 已清,清除日 = mergedAt')
@@ -4520,13 +4522,26 @@ console.log('T69 前置依赖 after')
     ok(!r('#999').cleared && !r('#999').unknown, '没同步过的 PR 号同上 —— 它本来就是「还没发生」')
     ok(!r('other/repo#5').cleared, '跨仓 PR 的状态不在本仓 manifest 里,保守算没清(能不能开工这件事,缺数据要保守)')
     ok(r('BL-404').unknown === true, '板上没有的卡号:标出来给上层硬报错')
-    ok(D.depItemText(r('BL-1')) === '✓ BL-1 已收 09-02' && D.depItemText(r('#230')) === '#230 开着'
+    ok(D.depItemText(r('BL-1')) === '✓ BL-1 已收 09-02' && D.depItemText(r('#230')) === '#230 开着'  // 09-02 = 那条终态转移
       && D.depItemText(r('v9.9.9')) === 'v9.9.9 未发', '逐项长形照定稿 §2.1 那三个样子')
     ok(D.depItemShort(r('#227')) === '#227 已合', '守卫那行的短形不带勾也不带日期')
     const mixed = [r('BL-1'), r('#227'), r('v0.0.1')]
     ok(D.openCount(mixed) === 0 && D.clearedAt(mixed) === '2026-09-02', '全清:清除日取各项里最大的那个')
     ok(D.clearedAt([r('BL-2'), r('#227')]) === '2026-08-19' && D.openCount([r('BL-2'), r('#227')]) === 1, '部分清:只数没清的')
     ok(D.clearedAt([r('D1')]) === '', '取不到日期时是空串,不硬编一个假日期')
+    // 收到终态那天:三条取值链 + 「最后一条为准」
+    const tAt = D.terminalAt
+    ok(tAt({ status: 'done', note: '【2026-09-01】status → wip\n\n【2026-09-03】status → done' }) === '2026-09-03',
+      '认 ddd card status 写的那行')
+    ok(tAt({ notes: '【2026-09-04 收账】PR#266 已合(自动)' }) === '2026-09-04', '也认 pr-sync --settle 写的那行')
+    ok(tAt({ note: '【2026-09-01】status → done\n\n【2026-09-02】status → ready\n\n【2026-09-05】status → done' }) === '2026-09-05',
+      '重开又收的卡按最近那次算(取最后一条,不是第一条)')
+    ok(tAt({ note: '【2026-09-01】status → ready', date: '2026-08-08' }) === '2026-08-08',
+      '时间线里只有非终态的转移 → 退到 date(不拿一个「变成 ready 那天」冒充清除日)')
+    ok(tAt({ note: '随手记了两句,没有时间戳', date: '2026-08-08' }) === '2026-08-08', '没有时间线格式的正文不误判')
+    ok(tAt({ date: 'yesterday' }) === '' && tAt({}) === '', 'date 不是日期形制 / 什么都没有 → 空串')
+    ok(tAt({ status: 'done', note: '【2026-09-03】status → done' }) === tAt({ status: 'done', note: '【2026-09-03】status → done' }),
+      '同一张卡拆不拆都是同一个值 —— 清除日不再随「卡文件最后改动日」跑')
   }
 
   { // ---- ③ 未知卡号 / 自指 / 环(纯函数;gen 与 CLI 共用这一份)----
@@ -4577,9 +4592,9 @@ console.log('T69 前置依赖 after')
   const rGen = runGen(NEW_SCRIPTS, kb)
   const on = readFileSync(idxP, 'utf8')
   ok(rGen.status === 0, 'gen 跑得过', rGen.stderr.slice(0, 200))
-  ok(on.includes('<span class="depchip dep-wait" title="✓ BL-5 已收 · #230 开着 · v9.9.9 未发">等 2 项</span>'),
+  ok(on.includes('<span class="depchip dep-wait" title="✓ BL-5 已收 08-01 · #230 开着 · v9.9.9 未发">等 2 项</span>'),
     '未全清:灰芯片「等 N 项」数的是还没清的,逐项状态挂 title')
-  ok(on.includes('<span class="depchip dep-clear" title="✓ BL-5 已收 · ✓ #227 已合 08-19 · ✓ v0.0.1 已发 08-20">前置已清 · 08-20</span>'),
+  ok(on.includes('<span class="depchip dep-clear" title="✓ BL-5 已收 08-01 · ✓ #227 已合 08-19 · ✓ v0.0.1 已发 08-20">前置已清 · 08-20</span>'),
     '全清:安静芯片「前置已清 · MM-DD」,日期取各项清除日的最大值')
   ok(on.includes('<span class="depchip dep-unlock" title="这些卡的前置里有它:BL-6 · BL-7 · BL-8 · BL-9">被 <a href="#BL-6">BL-6</a> · <a href="#BL-7">BL-7</a> · <a href="#BL-8">BL-8</a><i class="depmore">+1</i> 等着</span>'),
     '反向芯片:陈述「谁的前置里有它」,面上最多 3 个 + 折一枚 +N,title 列全,每个号点得动')
@@ -4836,15 +4851,15 @@ console.log('T69 前置依赖 after')
       '三处都走 deps.mjs 的 depCtxFrom,不再各拼一遍 cardById / relPr / relTag')
   }
 
-  { // ---- ⑧ 拆分等价门认得前置芯片里的日期(卡号前置的清除日 = 那张卡的最后改动日,拆分后才有)----
+  { // ---- ⑧ 拆分等价门:前置芯片整枚原样比(0.16.1 起清除日与拆不拆无关,不必再归一)----
     const a = '<span class="depchip dep-clear" title="✓ BL-5 已收 09-02">前置已清 · 09-02</span>'
-    const z = '<span class="depchip dep-clear" title="✓ BL-5 已收">前置已清</span>'
-    ok(stripCardUpdated(a) === stripCardUpdated(z), 'cards-split / cards-join 的逐字节等价门把它归一(否则一拆就判「搬坏了」)')
+    ok(stripCardUpdated(a) === a, '前置芯片原样进等价门 —— 清除日取自卡里的时间线 / date,拆不拆都一样')
     const w1 = '<span class="depchip dep-wait" title="✓ BL-5 已收 09-02 · #230 开着">等 1 项</span>'
-    const w2 = '<span class="depchip dep-wait" title="✓ BL-5 已收 · #230 开着">等 1 项</span>'
-    ok(stripCardUpdated(w1) === stripCardUpdated(w2), '「等 N 项」的 title 同样归一')
+    ok(stripCardUpdated(w1) !== stripCardUpdated(w1.replace('等 1 项', '等 2 项')),
+      '项数变了判得出来 —— 0.16.0 那条规则把整枚芯片抹平,这类真差异会被这道门放过去')
+    ok(stripCardUpdated(w1) !== stripCardUpdated(w1.replace('#230', '#231')), 'title 里换个 ref 同样判得出来')
     const u = '<span class="depchip dep-unlock" title="x"><a href="#BL-6">BL-6</a></span>'
-    ok(stripCardUpdated(u) === u, '反向芯片不含日期,原样不动')
+    ok(stripCardUpdated(u) === u, '反向芯片原样不动')
   }
 }
 

@@ -38,7 +38,7 @@ import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings } from './strings.mjs'
 import { prsOfCard } from './prlink.mjs'
 import { cmpAt } from './relstage.mjs'
-import { KIND_TERMINAL, settleHold, settleOf } from './settle.mjs'
+import { KIND_TERMINAL, settleHold, settleNoteLine, settleOf } from './settle.mjs'
 import { cardsDirOf, NOTE_FIELD, scanCardDir, sortCards } from './cards.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -295,7 +295,7 @@ for (const f of [...new Set(rows.map((r) => r.f))]) {
     card.status = r.to
     const nf = NOTE_FIELD[r.kind]
     if (nf) {
-      const line = `【${today} 收账】PR#${r.nums.join(' #')} 已合(自动)`
+      const line = settleNoteLine(today, r.nums)
       const cur = String(card[nf] || '')
       card[nf] = cur ? `${cur}\n\n${line}` : line
     }

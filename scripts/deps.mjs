@@ -7,7 +7,7 @@
 //
 // 四种 ref 与它们的清除判据(全部取自已提交的事实,不读时钟 —— gen 零时间是硬纪律):
 //
-//   卡(进度 / backlog / 决策)  status ∈ TERMINAL(done / live / closed,沿用 settle.mjs)  清除日见下
+//   卡(进度 / backlog / 决策)  status ∈ TERMINAL(done / live / closed,沿用 settle.mjs)  清除日 = 收到终态那天(见 terminalAt)
 //   PR(#N / owner/repo#N) release-manifest 的 prs[] 里该号 state === 'merged'        清除日 = mergedAt
 //   版本 tag(v 开头)      release-manifest 的 releases[] 里有这个 tag                清除日 = at
 //
@@ -15,7 +15,7 @@
 // 未知卡号是错(与「文件名≠id」同级),自指与环也是错 —— CLI 拒写、gen 硬报错。
 //
 // 顶层无副作用,可直接 import。`blockedOn`(自由文本,给「等人 / 等外部」用)不动、不迁移。
-import { TERMINAL } from './settle.mjs'
+import { SETTLE_NOTE_TAG, TERMINAL } from './settle.mjs'
 
 /** 守卫那行「前置已清」的新鲜窗口(天)。gen 不认这个数 —— 它不读时钟,窗口只在守卫里。 */
 export const DEPS_FRESH_DAYS = 7
@@ -65,7 +65,7 @@ export function afterOf(card) {
 
 /**
  * 一条 ref 的当前状态。
- * @param ctx { repo, cardById: Map<id, card>, cardUpd: (id) => 'YYYY-MM-DD'|'', relPr: Map<num, prRecord>, relTag: Map<tag, at> }
+ * @param ctx { repo, cardById: Map<id, card>, relPr: Map<num, prRecord>, relTag: Map<tag, at> }
  * @returns { kind, raw, ref, cleared, at, unknown? } —— at = 清除日('' = 没清 / 不知道)
  */
 export function resolveAfter(raw, ctx = {}) {
@@ -75,7 +75,7 @@ export function resolveAfter(raw, ctx = {}) {
     const c = ctx.cardById && ctx.cardById.get(p.id)
     if (!c) return { ...p, cleared: false, at: '', unknown: true }
     const cleared = TERMINAL.has(String(c.status || ''))
-    return { ...p, cleared, at: cleared && ctx.cardUpd ? String(ctx.cardUpd(p.id) || '') : '' }
+    return { ...p, cleared, at: cleared ? terminalAt(c) : '' }
   }
   if (p.kind === 'pr') {
     // 跨仓 PR 的状态不在这份 manifest 里 —— 不知道就算「还没清」(与 settleOf 的「不知道就不判」
@@ -90,18 +90,39 @@ export function resolveAfter(raw, ctx = {}) {
 }
 
 /**
+ * 卡收到终态是哪一天(v0.16.1)。0.16.0 用的是「卡文件最后改动日」,那是个会往前跑的日期:
+ * 卡收了之后随便改个错字,清除日就跟着跳到今天,守卫 7 天窗口会把早就说过的那句「前置已清」
+ * 重新说一遍;未拆卡的板则一个日期都取不到。取值链(全是卡里已经写着的事实,不读时钟、不问 git):
+ *   ① 时间线(note / notes)里最后一条终态转移 —— 「【日期】status → done|live|closed」(ddd card
+ *      status 写的)或「【日期 收账】…」(pr-sync --settle 写的);重开又收的卡按最近那次算。
+ *   ② 卡上的 date。
+ *   ③ 都没有 → ''(不知道就不说,芯片不带日期、守卫那行不点它)。
+ */
+const NOTE_RE = /【(\d{4}-\d{2}-\d{2})([^】]*)】[ \t]*(?:status[ \t]*→[ \t]*([A-Za-z_-]+))?/g
+export function terminalAt(card) {
+  const text = ['note', 'notes'].map((f) => (card && typeof card[f] === 'string' ? card[f] : '')).join('\n')
+  let at = ''
+  for (const m of text.matchAll(NOTE_RE)) {
+    if (m[2].includes(SETTLE_NOTE_TAG) || (m[3] && TERMINAL.has(m[3]))) at = m[1]
+  }
+  if (at) return at
+  const d = String((card && card.date) || '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : ''
+}
+
+/**
  * 推导上下文的组装(v0.16.1)。以前 gen / 守卫 / CLI 各拼一遍,于是「板上有哪些卡」拼出了三份:
  * CLI 少算进度卡,写不进 gen 照渲的前置。判据共用一份而上下文各拼各的,等于还是三套账。
  * @param cards 全板卡 —— 三种都算(进度 tasks / backlog items / 决策 entries),与 auditAfter 同一个集合
  * @param repo  本仓 owner/repo(取法见 cards.mjs 的 boardRepo:三份 manifest 里第一个非空)
  * @param rlm   release-manifest 的内容(没有就传 null);已经建好 relPr / relTag 的调用方可直接传进来
  */
-export function depCtxFrom({ cards = [], repo = '', rlm = null, relPr = null, relTag = null, cardUpd = () => '' }) {
+export function depCtxFrom({ cards = [], repo = '', rlm = null, relPr = null, relTag = null }) {
   const cardById = new Map()
   for (const c of cards) if (c && c.id != null) cardById.set(String(c.id), c)
   if (!relPr) { relPr = new Map(); for (const p of (rlm && rlm.prs) || []) if (p && p.number != null) relPr.set(Number(p.number), p) }
   if (!relTag) { relTag = new Map(); for (const r of (rlm && rlm.releases) || []) if (r && r.tag) relTag.set(String(r.tag), String(r.at || '')) }
-  return { repo, cardById, relPr, relTag, cardUpd }
+  return { repo, cardById, relPr, relTag }
 }
 
 /** 一张卡的全部前置(顺序即书写顺序) */

@@ -154,12 +154,11 @@ export function cardUpdatedMap(kanbanDir, cardsDir, srcOf) {
  *   2. LAZY_BYTES(parts 的未压缩长度,多几枚 span 就多几个字节;parts 本身另比,漏不掉真差异);
  *   3. data-dorm 的取值(沉睡天数改从卡文件最后改动日起算,这是 cardsDir 的既定行为);
  *   4. data-hold 的取值(v0.15.14:没写 settleHoldAt 的老卡,挂账天数同样从卡文件最后改动日起算)。
- *   5. 前置芯片里的日期(v0.16.0:after 指向的卡,清除日 = 那张卡的最后改动日 —— 拆分前根本
- *      没有这个事实,拆分后才有;清没清是 status 说了算,与拆分无关,只有日期会差)。
+ * (v0.16.1 起前置芯片不在此列:清除日改成「卡收到终态那天」,取自卡里已经写着的时间线 / date,
+ *  拆不拆都是同一个值 —— 这道门因此又能逐字节看住那枚芯片的全部内容,包括项数与逐项 ref。)
  */
 export function stripCardUpdated(html) {
   return String(html)
-    .replace(/<span class="depchip dep-(wait|clear)"[^>]*>[^<]*<\/span>/g, '<span class="depchip dep-$1"></span>')
     .replace(/<span class="udate"[^>]*>[^<]*<\/span>/g, '')
     .replace(/\n +\/\* =+ 每卡更新日期[^\n]*\n +\.udate \{[^\n]*/g, '')
     .replace(/const LAZY_BYTES = \{[^}]*\}/g, 'const LAZY_BYTES = {}')

@@ -17,6 +17,10 @@ export const TERMINAL = new Set(['done', 'live', 'closed'])
 /** 卡种 → 收账时该落的 status(pr-sync --settle 的建议值) */
 export const KIND_TERMINAL = { tasks: 'done', items: 'done', entries: 'live' }
 
+/** pr-sync --settle 往时间线里追的那一行(标记词一处定:deps.mjs 靠它认出「卡是哪天收的」) */
+export const SETTLE_NOTE_TAG = '收账'
+export const settleNoteLine = (date, nums) => `【${date} ${SETTLE_NOTE_TAG}】PR#${nums.join(' #')} 已合(自动)`
+
 /**
  * 卡 × PR 集合 → 不一致判定。
  * @param card    卡对象(只读 status)
