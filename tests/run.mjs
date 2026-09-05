@@ -2680,6 +2680,7 @@ esac
 // ============ T50 写操作 CLI(建卡独占预留 / 校验 / 时间线 / 链接写 pr / export 同形 / 原子写)============
 console.log('T50 写操作 CLI ddd.mjs')
 {
+  const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs')) // 「今天」与 CLI 同一个源(本地日历)
   const runCli = (kb, args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', kb], { encoding: 'utf8' })
   const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
   const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
@@ -2904,13 +2905,34 @@ console.log('T50 写操作 CLI ddd.mjs')
   { // ---- wip 联动:建卡之后照守卫的口径数一遍 ready ----
     const fx = mkFixture('fx50c', { 'c1.html': demoHtml('c1') })
     const kb = fx.kb
-    const { cfgP } = seed(kb)
+    const { blP, cfgP } = seed(kb)
     const cfg = rd(cfgP)
     cfg.wip = { soft: 0, hard: 0 }
     wr(cfgP, cfg)
     const r = runCli(kb, ['card', 'new', 'backlog', '--title', '又一张'])
     ok(r.status === 0 && /config\.wip\.hard = 0/.test(r.stderr), 'card new 之后 ready 超 hard:stderr 上一句与守卫同款的提醒')
     ok(!/config\.wip\.hard/.test(r.stdout), '提醒走 stderr,不脏 --json 的管道')
+    // v0.16.0 的口径(等前置的不占额度)在横幅与守卫都有用例,CLI 这句原来没有 —— 种子里一条
+    // after 都没有,waiting 结构上恒 0,把 `ready.length - waiting + own` 改回 `ready.length + own`
+    // 全套仍绿,而 CLI 会用一个和横幅、守卫都对不上的数喊「超过 hard」。
+    const blW = rd(blP); blW.items.find((i) => i.id === 'BL-1').after = ['#230']; wr(blP, blW)
+    writeFileSync(join(kb, 'release-manifest.json'), JSON.stringify(REL_MANIFEST, null, 2) + '\n')
+    const r2 = runCli(kb, ['card', 'new', 'backlog', '--title', '再一张'])
+    ok(/另有 1 张 ready 还等着前置/.test(r2.stderr), 'CLI 与横幅、守卫同一口径:等前置的另计', (r2.stderr.match(/可立即做[^,]*,[^,]*/) || [''])[0])
+    ok(/可立即做\(ready 且前置已清\)的卡有 3 张/.test(r2.stderr), '并且额度只按扣掉它之后的数算(板上 3 张 ready + 刚建的 1 张 − 1 张等前置)', r2.stderr.slice(0, 200))
+  }
+
+  { // ---- --from 带进来的 settleHold 同样记起算日(card set 那条路早有用例,建卡这条路没有)----
+    const fx = mkFixture('fx50e', { 'c1.html': demoHtml('c1') })
+    const kb = fx.kb
+    seed(kb)
+    const fromP = join(kb, 'from.json')
+    writeFileSync(fromP, JSON.stringify({ title: '从模板建的', status: 'ready', tier: '1', priority: 'med', problem: 'p', approach: 'a', settleHold: '只落了一半' }, null, 2))
+    const r = runCli(kb, ['card', 'new', 'backlog', '--from', fromP, '--json'])
+    const made = JSON.parse(r.stdout)
+    ok(r.status === 0 && made.card.settleHoldAt === localDate(), '--from 带进来一个 settleHold:起算日照记(不然那 14 天的钟从卡文件最后改动日起算,甚至根本不起算)',
+      `${r.status} ${made.card && made.card.settleHoldAt}`)
+    rmSync(fromP)
   }
 
   { // ---- pr-sync 别名:原样转调,连退出码 ----
@@ -4340,6 +4362,34 @@ console.log('T67 settleHold 14 天到期提醒')
     const on = readFileSync(idxP, 'utf8')
     ok(on.includes(`data-hold="${dayAgo(13)}"`), '芯片把起算日烤进 data-hold(天数照旧在浏览器算,gen 零时间)', (on.match(/data-hold="[^"]*"/) || [''])[0])
     ok(on.includes('.rsp-hold.holdold {') && on.includes('function respHold()'), '有挂账卡时才注入那段琥珀 CSS 与算天数的 JS')
+    { // ---- 把这两只运行期函数抠出来真跑一遍(只断言「在场」的话:类名改一个字母、少一行 hidden、
+      //      floor 换 ceil,四个变异一个都不会红 —— 而它们是这两枚徽章的全部实现)----
+      const holdCls = (on.match(/\.rsp-hold\.(\w+) \{/) || [])[1]
+      const srcH = (on.match(/ {4}function respHold\(\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+      const srcD = (on.match(/ {4}function respDorm\(\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+      ok(Boolean(holdCls) && srcH.includes('data-hold') && srcD.includes('data-dorm'),
+        '抠得到样式表里那个类名与两只函数本体', `${holdCls} ${srcH.length}/${srcD.length}`)
+      // 元素的日期与「现在」都从同一个本地午夜推出来,天数因此与时区无关(9 月全球都没有夏令时切换)
+      const DAY = '2026-09-01', T0 = Date.parse(`${DAY}T00:00:00`)
+      const mkEl = () => { const e = { textContent: '暂不收账', hidden: true, cls: [], getAttribute: () => DAY }; e.classList = { add: (c) => e.cls.push(c) }; return e }
+      const run = (src, fn, sel, days) => {
+        const el = mkEl()
+        const doc = { querySelectorAll: (s) => (s.includes(sel) ? [el] : []) }
+        const D = { now: () => T0 + days * 86400000 + 3600000, parse: (x) => Date.parse(x) }
+        new Function('document', 'Date', `${src}\n; return ${fn}`)(doc, D)()
+        return el
+      }
+      const h13 = run(srcH, 'respHold', 'rsp-hold', 13)
+      ok(h13.textContent === '暂不收账' && h13.cls.length === 0, '挂满 13 天:字面不动、也不转琥珀', `${h13.textContent} ${h13.cls}`)
+      const h14 = run(srcH, 'respHold', 'rsp-hold', 14)
+      ok(h14.textContent === '暂不收账 · 已 14 天', '满 14 天:改字面,天数是整天数(floor,不四舍五入)', h14.textContent)
+      ok(h14.cls.join(',') === holdCls, '加的类名与样式表里那条 .rsp-hold.X 是同一个 —— 改一处漏一处就是一条死规则', `${h14.cls} vs ${holdCls}`)
+      ok(run(srcH, 'respHold', 'rsp-hold', 41).textContent === '暂不收账 · 已 41 天', '天数照实报')
+      const d30 = run(srcD, 'respDorm', 'rspdorm', 30)
+      ok(d30.hidden === true && d30.textContent === '暂不收账', '沉睡 30 天:还在窗口内,徽章不出(hidden 不动)')
+      const d31 = run(srcD, 'respDorm', 'rspdorm', 31)
+      ok(d31.hidden === false && d31.textContent === '沉睡 31 天', '超 30 天:显示出来并写清天数', `${d31.hidden} ${d31.textContent}`)
+    }
     touch(idxP)
     const g13 = runStop(NEW_SCRIPTS, fx.root)
     ok(!/暂不收账已/.test(g13.stdout), '13 天:守卫一个字都不说', g13.stdout.slice(0, 200))
@@ -4520,7 +4570,10 @@ console.log('T69 前置依赖 after')
     ok(r('v0.0.1').cleared && r('v0.0.1').at === '2026-08-20', '版本 tag 在 releases[] 里 = 已发,清除日 = 打 tag 时刻')
     ok(!r('v9.9.9').cleared && !r('v9.9.9').unknown, '还没发的版本是「没清」,不是错')
     ok(!r('#999').cleared && !r('#999').unknown, '没同步过的 PR 号同上 —— 它本来就是「还没发生」')
-    ok(!r('other/repo#5').cleared, '跨仓 PR 的状态不在本仓 manifest 里,保守算没清(能不能开工这件事,缺数据要保守)')
+    // 号要用 fixture 里真有的那个,判据才压在「仓」上:拿一个板上根本没有的号,走不走跨仓分支都是没清
+    ok(r('#227').cleared && !r('other/repo#227').cleared,
+      '同一个号:本仓的算清了,跨仓的保守算没清 —— 判据是仓不是号(号在两仓之间撞车很常见)')
+    ok(r('o/r#227').cleared, '显式写本仓 owner/repo#N 与 #N 等价')
     ok(r('BL-404').unknown === true, '板上没有的卡号:标出来给上层硬报错')
     ok(D.depItemText(r('BL-1')) === '✓ BL-1 已收 09-02' && D.depItemText(r('#230')) === '#230 开着'  // 09-02 = 那条终态转移
       && D.depItemText(r('v9.9.9')) === 'v9.9.9 未发', '逐项长形照定稿 §2.1 那三个样子')
@@ -4737,6 +4790,10 @@ console.log('T69 前置依赖 after')
     x.items.push({ id: 'BL-C', status: 'ready', date: '2026-09-01', title: '30 天前发的版', ...base, after: ['v0.0.1'] })
     x.items.push({ id: 'BL-D', status: 'done', date: '2026-09-01', title: '清了但卡已收', ...base, after: ['#226'] })
     x.items.push({ id: 'BL-E', status: 'ready', date: '2026-09-01', title: '还等着', ...base, after: ['#230'] })
+    rel.prs.find((p) => p.number === 232).state = 'merged'
+    rel.prs.find((p) => p.number === 232).mergedAt = mergedOn(8) // 天数写死:跟着 DEPS_FRESH_DAYS 算的话,改常数会把用例一起搬走
+    wr(join(kb, 'release-manifest.json'), rel)
+    x.items.push({ id: 'BL-F', status: 'ready', date: '2026-09-01', title: '刚过窗口一天', ...base, after: ['#232'] })
     wr(blP, x)
     runGen(NEW_SCRIPTS, kb)
     touch(idxP)
@@ -4746,6 +4803,7 @@ console.log('T69 前置依赖 after')
     ok(/BL-B/.test(line) && /BL-A/.test(line), '7 天内清掉的卡都点到(边界那天算在内)', line)
     ok(line.indexOf('BL-B') < line.indexOf('BL-A'), '最近清的排前面')
     ok(!/BL-C/.test(line), '30 天前清的:过了 7 天窗口,不再说')
+    ok(!/BL-F/.test(line), '刚过窗口一天(8 天)就不说了 —— 这条线两侧都钉住,不然窗口悄悄放宽没人知道', line)
     ok(!/BL-D/.test(line), '卡已经收了(不再 ready)的不点 —— 它不需要「可以开工了」')
     ok(!/BL-E/.test(line), '还等着前置的当然不点')
     ok(/BL-B\(#226 已合\)/.test(line), '括号里逐项列清掉的是什么', line)
@@ -4879,6 +4937,65 @@ console.log('T69 前置依赖 after')
     const u = '<span class="depchip dep-unlock" title="x"><a href="#BL-6">BL-6</a></span>'
     ok(stripCardUpdated(u) === u, '反向芯片原样不动')
   }
+}
+
+// ============ T70 英文串表(loadStrings 不做逐键回落:少一个键 = 守卫在收工那一刻 TypeError)============
+// 整套测试里只有 T18 用过 lang:'en',而它测的是 gen 的另一张硬报错表 —— 守卫那几十个键一个都没被
+// 调用过。strings.mjs 的 loadStrings 直接返回 tables[lang],不与 zh 合并;stop-hook 又没有顶层
+// try/catch,所以 en 表少一个键 = 守卫以非零码崩在收工那一刻,而全套测试仍是绿的。
+console.log('T70 英文串表')
+{
+  const { pickStrings } = await import(join(NEW_SCRIPTS, 'strings.mjs'))
+  const zhT = pickStrings('zh'), enT = pickStrings('en')
+  const miss = [], typ = [], ari = []
+  const walk = (a, b, path) => {
+    for (const k of Object.keys(a)) {
+      const at = path ? `${path}.${k}` : k
+      if (!(k in b)) { miss.push(at); continue }
+      if (typeof a[k] !== typeof b[k]) { typ.push(`${at}:${typeof a[k]}≠${typeof b[k]}`); continue }
+      if (typeof a[k] === 'function') { if (a[k].length !== b[k].length) ari.push(`${at}(${a[k].length}≠${b[k].length})`); continue }
+      if (a[k] && typeof a[k] === 'object' && !Array.isArray(a[k])) walk(a[k], b[k], at)
+    }
+  }
+  walk(zhT, enT, '')
+  ok(miss.length === 0, 'en 表一个键都不缺(缺了就是 S.<key>(…) 打在 undefined 上)', miss.join(' '))
+  ok(typ.length === 0 && ari.length === 0, '同名键的类型与函数入参个数也对得上', [...typ, ...ari].join(' '))
+
+  // 真跑一趟 en 板的守卫:上面比的是键名,这里是把这一批新键实际调用一遍
+  const fx = mkFixture('fx70', { 's.html': demoHtml('s') })
+  const kb = fx.kb
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const dayAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+  for (const f of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) {
+    const x = rd(join(kb, f)); x.instance.ghRepo = 'o/r'; x.instance.branch = 'main'; wr(join(kb, f), x)
+  }
+  const rel = JSON.parse(JSON.stringify(REL_MANIFEST))
+  rel.prs.find((p) => p.number === 227).mergedAt = `${dayAgo(1)}T01:00:00Z`
+  wr(join(kb, 'release-manifest.json'), rel)
+  const bl = rd(join(kb, 'backlog-manifest.json'))
+  bl.tiers = { 1: 'core' }
+  const b70 = { tier: '1', priority: 'high', area: 'x', source: 's', approach: 'a' }
+  bl.items = [
+    { id: 'BL-1', status: 'ready', title: 'long prose', ...b70, problem: 'x'.repeat(900) },       // richLongText
+    { id: 'BL-2', status: 'ready', title: 'unsettled', ...b70, problem: 'p', pr: 226 },            // respSettle
+    { id: 'BL-3', status: 'ready', title: 'held', ...b70, problem: 'p', pr: 227, settleHold: 'half landed', settleHoldAt: dayAgo(20) }, // respHoldOld
+    { id: 'BL-4', status: 'ready', title: 'just unblocked', ...b70, problem: 'p', after: ['#227'] }, // depsUnlocked
+  ]
+  wr(join(kb, 'backlog-manifest.json'), bl)
+  const cfg = rd(join(kb, 'kanban.config.json'))
+  cfg.lang = 'en'; cfg.releaseTab = true; cfg.richText = true; cfg.wip = { soft: 0, hard: 0 }
+  wr(join(kb, 'kanban.config.json'), cfg)
+  runGen(NEW_SCRIPTS, kb)
+  touch(join(kb, 'index.html'))
+  const g = runStop(NEW_SCRIPTS, fx.root)
+  ok(g.status === 0, 'lang:en 的板上,守卫跑得完(0.16.0 的 en 表少一个键就会在这里 TypeError)', g.stderr.slice(0, 300))
+  let msg = ''
+  try { msg = JSON.parse(g.stdout || '{}').systemMessage || '' } catch { msg = 'NOT-JSON: ' + g.stdout.slice(0, 200) }
+  ok(!msg.startsWith('NOT-JSON'), 'stdout 是合法 JSON', msg.slice(0, 200))
+  ok(/Kanban guard/.test(msg) && /Prerequisites cleared/.test(msg) && /On settle hold/.test(msg) && /prose field over 800/.test(msg),
+    '这一批 0.15.x/0.16.x 新键真被调用了一遍(前置已清 / 挂账到期 / 长正文 / 积压)', msg.slice(0, 400))
+  ok(!/[\u4e00-\u9fff]/.test(msg), 'en 板上的守卫通知里一个中文字都不该有', (msg.match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
