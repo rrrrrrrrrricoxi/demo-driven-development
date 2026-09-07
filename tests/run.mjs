@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。795 条断言:
+// 守卫/生成器对抗测试床(npm test 入口;零依赖,Node 18+)。1246 条断言:
 // 时光机(合成旧 gen 盖板 → 新守卫自愈)、拒降级、版本文法、backnav 剥离/回捞、retire 注册守卫、
 // byte-freeze 归一化、<pre> 误伤、全新项目首跑、lanes/报错语言、pr 字段/验收 tab/验收守卫、
 // 段判定穷举/发布进度 tab/芯片状态后缀/pr-sync(PATH 里放假 gh,不碰网络)、状态药丸 nowrap、
@@ -42,6 +42,12 @@
 // 卡片前置依赖 after(0.16.0:四种 ref 的清除判据穷举 / 未知卡号与环的硬报错 / 两枚芯片与 +N 折叠 /
 //   WIP 改口「可立即做 N(另 M 等前置)」并与 setLine 重算对齐 / 守卫 7 天窗口 / CLI 追加去重 --rm --json /
 //   撤掉 after 回冻结基线 / 拆分等价门认得芯片里的日期)、
+// 长正文审计分两档(0.16.2:已提交的老卡照旧一行提醒 / 没进 HEAD 或 date 是今天的新卡阻断 /
+//   git add 过也算新 / 终态与 detail 各自放行 / stop_hook_active 降级 / richText 关着不跑 /
+//   提交进去当场转成老卡 / 与孤儿 demo 同时命中合成一条 reason)、
+// 守卫转发到更新的安装(0.16.2:假 installed_plugins.json + 假 cache / stdin·env·cwd 原样交过去 /
+//   转发那行说清去了哪一版 / DDD_HOOK_FORWARDED 刹得住真递归 / 装的比产物旧·version 非数字·
+//   projectPath 不是这个项目·读不到安装表 各自退回今天的拒降级 / 产物不比我新时根本不查表)、
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -102,8 +108,14 @@ function mkFixture(name, demos) {
 }
 const runGen = (scriptsDir, kb, extra = []) =>
   spawnSync(process.execPath, [join(scriptsDir, 'gen.mjs'), '--dir', kb, ...extra], { encoding: 'utf8' })
-const runStop = (scriptsDir, root) =>
-  spawnSync(process.execPath, [join(scriptsDir, 'stop-hook.mjs')], { encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_PROJECT_DIR: root } })
+// 空的 CLAUDE_CONFIG_DIR 是默认档:0.16.2 起守卫会读 <config>/plugins/installed_plugins.json 找
+// 「本机装的更新版本」并转发过去 —— 不隔离的话,整套「拒降级」断言的成败要看跑测试这台机上装了
+// 哪一版 plugin。要测转发的那几条自己把 CLAUDE_CONFIG_DIR 指到假安装表(T72)。
+const NO_INSTALLS = join(WORK, 'no-installs')
+mkdirSync(NO_INSTALLS, { recursive: true })
+const runStop = (scriptsDir, root, { input = '{}', env = {} } = {}) =>
+  spawnSync(process.execPath, [join(scriptsDir, 'stop-hook.mjs')],
+    { encoding: 'utf8', input, env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: root, ...env } })
 const touch = (p) => { const t = new Date(Date.now() + 5); utimesSync(p, t, t) }
 const readDemo = (kb, f) => readFileSync(join(kb, 'demos', f), 'utf8')
 
@@ -5018,6 +5030,201 @@ console.log('T69 前置依赖 after')
     const u = '<span class="depchip dep-unlock" title="x"><a href="#BL-6">BL-6</a></span>'
     ok(stripCardUpdated(u) === u, '反向芯片原样不动')
   }
+}
+
+// ============ T71 长正文审计分两档(v0.16.2):刚立的卡阻断,已提交的老卡照旧一行提醒 ============
+// 分档的依据是时机:新卡的正文刚写出来还在手边,当场拆最省事;老卡是历史,拦下来只会逼人去改一份
+// 别人也在读的卡。判据 = 卡文件进没进 HEAD(未拆卡的板问不出,退卡上的 date == 今天)。
+console.log('T71 长正文:新卡阻断 / 老卡提醒')
+const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
+{
+  const fx71 = mkFixture('fx71', { 'c1.html': demoHtml('c1') })
+  const kb = fx71.kb, root = fx71.root
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+  const git = (...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: root, stdio: 'ignore' })
+  const item = (id, extra = {}) => ({ id, status: 'ready', priority: 'high', tier: '1', date: '2020-01-01', title: id, problem: 'p', approach: 'a', area: 'x', source: 's', ...extra })
+  const bl = rd(blP)
+  bl.tiers = { 1: '核心' }
+  bl.items = [item('BL-1'), item('BL-2')]
+  wr(blP, bl)
+  const cfg = rd(cfgP)
+  cfg.richText = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  runScript('cards-split.mjs', kb)
+  git('add', '-A')
+  git('commit', '-q', '-m', 'board')
+
+  const cardP = (id) => join(kb, 'cards', 'backlog', `${id}.json`)
+  const out = (r) => { try { return JSON.parse(r.stdout || '{}') } catch { return { BAD: r.stdout } } }
+
+  // ---- 老卡(已经在 HEAD 里):正文改长也只出那一行提醒,形制一字不动 ----
+  const c1 = rd(cardP('BL-1'))
+  c1.approach = '正'.repeat(900)
+  wr(cardP('BL-1'), c1)
+  const g1 = out(runStop(NEW_SCRIPTS, root))
+  ok(!g1.decision && /1 张卡的正文字段超过 800 字/.test(g1.systemMessage || '') && /最长:BL-1 的 approach/.test(g1.systemMessage || ''),
+    '已提交的老卡:改长也只出一行非阻断提醒(0.15.7 的形制不动)', JSON.stringify(g1).slice(0, 300))
+
+  // ---- 新卡(卡文件还没进 HEAD):同样的长度 → 阻断 ----
+  wr(cardP('BL-9'), item('BL-9', { problem: '证'.repeat(900) }))
+  const g2 = out(runStop(NEW_SCRIPTS, root))
+  ok(g2.decision === 'block', '没提交过的卡文件 = 新卡:长正文当场阻断', JSON.stringify(g2).slice(0, 300))
+  ok((g2.reason || '').includes('BL-9 的 problem(900 字)'), '阻断消息点名卡号 + 字段 + 字数', (g2.reason || '').slice(0, 200))
+  ok(/ddd\.mjs card set <卡号> detail/.test(g2.reason || '') && /≤2 句/.test(g2.reason || '') &&
+     /结论先行/.test(g2.reason || '') && /时间线/.test(g2.reason || ''),
+    '给的是确切补救:card set <id> detail,外加 question ≤2 句 / approach 结论先行 / note 时间线', (g2.reason || '').slice(0, 400))
+  ok(!/BL-9/.test(g2.systemMessage || '') && /1 张卡的正文字段超过 800 字/.test(g2.systemMessage || ''),
+    '两档不混:新卡进 reason,老卡那一行仍只数老卡', JSON.stringify(g2).slice(0, 300))
+
+  // ---- git add 过但还没 commit:判据是「进没进 HEAD」,不是「工作区干不干净」----
+  git('add', 'app/kanban/cards/backlog/BL-9.json')
+  ok(out(runStop(NEW_SCRIPTS, root)).decision === 'block', 'git add 过、还没提交 → 照样算新卡')
+
+  // ---- 终态的新卡不点名(与 0.15.6 的老卡口径同一份 TERMINAL)----
+  wr(cardP('BL-9'), item('BL-9', { status: 'done', problem: '证'.repeat(900) }))
+  const g4 = out(runStop(NEW_SCRIPTS, root))
+  ok(!g4.decision && !/BL-9/.test(JSON.stringify(g4)), '终态(done)的新卡:既不拦也不点名', JSON.stringify(g4).slice(0, 300))
+
+  // ---- 写了 detail 就放行(阻断的是「长而无处安放」,不是「长」)----
+  wr(cardP('BL-9'), item('BL-9', { problem: '证'.repeat(900), detail: '证据都在这儿' }))
+  ok(!out(runStop(NEW_SCRIPTS, root)).decision, '新卡写了 detail 就放行')
+
+  // ---- 防死循环:同一次收工已拦过 → 降级成一行警告放行 ----
+  wr(cardP('BL-9'), item('BL-9', { problem: '证'.repeat(900) }))
+  const g6 = out(runStop(NEW_SCRIPTS, root, { input: '{"stop_hook_active":true}' }))
+  ok(!g6.decision && (g6.systemMessage || '').includes('本次放行') && (g6.systemMessage || '').includes('BL-9 的 problem(900 字)'),
+    'stop_hook_active:不二次阻断,降级成一行警告(与孤儿 demo 同一套)', JSON.stringify(g6).slice(0, 300))
+
+  // ---- richText 关着:这一档整个不跑(detail 本就不渲染,拦了也没处放)----
+  const cfgOff = rd(cfgP)
+  cfgOff.richText = false
+  wr(cfgP, cfgOff)
+  const g7 = out(runStop(NEW_SCRIPTS, root))
+  ok(!g7.decision && !/800/.test(JSON.stringify(g7)), 'richText 关着:不阻断也不提醒')
+  cfgOff.richText = true
+  wr(cfgP, cfgOff)
+
+  // ---- 提交进去,同一张卡当场转成老卡 ----
+  git('add', '-A')
+  git('commit', '-q', '-m', 'BL-9')
+  const g8 = out(runStop(NEW_SCRIPTS, root))
+  ok(!g8.decision && /2 张卡的正文字段超过 800 字/.test(g8.systemMessage || ''),
+    '提交进 HEAD 之后不再拦,只并进老卡那一行的张数', JSON.stringify(g8).slice(0, 300))
+
+  // ---- 两条阻断规则同时命中:合成一条 reason,孤儿 demo 在前 ----
+  wr(cardP('BL-8'), item('BL-8', { problem: '证'.repeat(900) }))
+  rmSync(join(kb, 'demos', '.no-card-ok'))
+  const g9 = out(runStop(NEW_SCRIPTS, root))
+  ok(g9.decision === 'block' && /未挂任何看板卡/.test(g9.reason || '') && /BL-8 的 problem/.test(g9.reason || '') &&
+     g9.reason.indexOf('未挂任何看板卡') < g9.reason.indexOf('BL-8'),
+    '孤儿 demo 与新卡长正文同时命中 → 一条 reason 报全(孤儿在前),不再一次只报得出一个', (g9.reason || '').slice(0, 160))
+}
+{ // ---- 未拆卡的板:git 问不出「提交了没」,退卡上的 date == 今天 ----
+  const fx71b = mkFixture('fx71b', { 'c1.html': demoHtml('c1') })
+  const kb = fx71b.kb, root = fx71b.root
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const blP = join(kb, 'backlog-manifest.json'), cfgP = join(kb, 'kanban.config.json')
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return localDate(d) })()
+  const bl = rd(blP)
+  bl.tiers = { 1: '核心' }
+  bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', date: localDate(), title: '今天立的', problem: '证'.repeat(900), approach: 'a', area: 'x', source: 's' }]
+  wr(blP, bl)
+  const cfg = rd(cfgP)
+  cfg.richText = true
+  wr(cfgP, cfg)
+  const out = (r) => { try { return JSON.parse(r.stdout || '{}') } catch { return { BAD: r.stdout } } }
+  const a = out(runStop(NEW_SCRIPTS, root))
+  ok(a.decision === 'block' && (a.reason || '').includes('BL-1 的 problem(900 字)'),
+    '未拆卡的板:date == 今天即算新卡,照样阻断', JSON.stringify(a).slice(0, 300))
+  bl.items[0].date = yesterday
+  wr(blP, bl)
+  const b = out(runStop(NEW_SCRIPTS, root))
+  ok(!b.decision && /1 张卡的正文字段超过 800 字/.test(b.systemMessage || ''),
+    '同一张卡日期改成昨天 → 退回一行提醒(判据只有日期这一条,没有别的暗门)', JSON.stringify(b).slice(0, 300))
+}
+
+// ============ T72 版本转发(v0.16.2):产物比我新、本机装着不比产物旧的版本 → 整个 hook 交给它 ============
+// 背景:hook 进程绑在起 session 那一版上;升级 plugin 后不重启 session,守卫一直是旧的,而旧 gen 不
+// 许盖新板 —— 看板在这个 session 里彻底停更,只能靠人重启。装了新版的机器上没必要停。
+console.log('T72 守卫转发到更新的安装')
+{
+  const fx72 = mkFixture('fx72', { 'c1.html': demoHtml('c1') })
+  const kb = fx72.kb, root = fx72.root
+  const idxP = join(kb, 'index.html')
+  runGen(NEW_SCRIPTS, kb)
+  const stampTo = (v) => writeFileSync(idxP, readFileSync(idxP, 'utf8').replace(/<!-- ddd-gen v[0-9.]+ -->/, `<!-- ddd-gen v${v} -->`))
+  stampTo('99.9.9') // 本 session 的守卫从此比产物旧
+
+  const cfgHome = join(WORK, 'fake-home-72')
+  const mkInstall = (dir, body) => {
+    mkdirSync(join(dir, 'scripts'), { recursive: true })
+    writeFileSync(join(dir, 'scripts', 'stop-hook.mjs'), body)
+    return dir
+  }
+  const writeDb = (entries) => {
+    mkdirSync(join(cfgHome, 'plugins'), { recursive: true })
+    writeFileSync(join(cfgHome, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ version: 2, plugins: { 'demo-driven-development@demo-driven-development': entries } }, null, 2))
+  }
+  const fwd = (env) => runStop(NEW_SCRIPTS, root, { env: { CLAUDE_CONFIG_DIR: cfgHome, ...env } })
+  const REFUSE = /由更新的 ddd-gen v99\.9\.9 生成/ // 今天的行为:拒降级 + 重启提示
+
+  const MARK = mkInstall(join(WORK, 'cache-72', '99.9.9'),
+    "import { readFileSync } from 'node:fs'\nlet raw = ''\ntry { raw = readFileSync(0, 'utf8') } catch {}\n" +
+    "console.log(JSON.stringify({ systemMessage: 'MARKER-99 fwd=' + process.env.DDD_HOOK_FORWARDED + ' stdin=' + raw + ' cwd=' + process.cwd() }))\n")
+  writeDb([{ scope: 'project', projectPath: root, installPath: MARK, version: '99.9.9' }])
+  const r1 = fwd()
+  const m1 = (() => { try { return JSON.parse(r1.stdout || '{}').systemMessage || '' } catch { return 'NOT-JSON:' + r1.stdout } })()
+  ok(r1.status === 0 && /MARKER-99/.test(m1), '产物 99.9.9 + 本机装着 99.9.9 → 整个 hook 转发过去,新版的 stdout 原样带回',
+    `${r1.status} ${(r1.stdout || '').slice(0, 300)}`)
+  ok(m1.startsWith('看板守卫已转发到已安装的 v99.9.9'), '输出里说了一行「已转发到已安装的 v99.9.9」——不说,人只会以为守卫串了味', m1.slice(0, 120))
+  ok(/fwd=99\.9\.9/.test(m1), '子进程拿到 DDD_HOOK_FORWARDED(它再遇到同样的局面就不会二次转发)', m1.slice(0, 200))
+  ok(/stdin=\{\}/.test(m1), 'stdin 原样交过去(不重新序列化,免得丢掉本版不认识的字段)', m1.slice(0, 200))
+  ok(m1.includes(`cwd=${process.cwd()}`), 'cwd 也照原样(转发的是整个 hook,不是只把 gen 换个版本跑)', m1.slice(0, 200))
+  ok(!REFUSE.test(r1.stdout), '转发成功那一轮不再出「拒降级 + 请重启」')
+  ok(readFileSync(idxP, 'utf8').includes('<!-- ddd-gen v99.9.9 -->'), '本版一个字节也没盖板(gen 自己那条拒绝没被绕过)')
+
+  // 循环护栏:环境里已经带着 DDD_HOOK_FORWARDED → 不再往外转
+  const r2 = fwd({ DDD_HOOK_FORWARDED: '99.9.9' })
+  ok(!/MARKER-99/.test(r2.stdout) && REFUSE.test(r2.stdout), '已是转发来的那一轮:不再往外转,退回拒降级', (r2.stdout || '').slice(0, 200))
+
+  // 真递归:被转到的那一版又把 hook 交回本版 —— 护栏得刹得住,而不是靠巧合
+  const LOOP = mkInstall(join(WORK, 'cache-72', 'loop'),
+    "import { spawnSync } from 'node:child_process'\nimport { readFileSync } from 'node:fs'\nlet raw = ''\ntry { raw = readFileSync(0, 'utf8') } catch {}\n" +
+    `const r = spawnSync(process.execPath, [${JSON.stringify(join(NEW_SCRIPTS, 'stop-hook.mjs'))}], { input: raw, encoding: 'utf8', env: process.env })\n` +
+    "console.log(JSON.stringify({ systemMessage: 'NESTED ' + (r.stdout || '').slice(0, 400) }))\n")
+  writeDb([{ scope: 'project', projectPath: root, installPath: LOOP, version: '99.9.9' }])
+  const r3 = fwd()
+  ok(/NESTED/.test(r3.stdout) && !/NESTED[\s\S]*NESTED/.test(r3.stdout) && REFUSE.test(r3.stdout),
+    '转发只发生一次:被转到的那版再调回本版,本版看见环境变量就停手并退回拒降级', (r3.stdout || '').slice(0, 300))
+
+  // 装着的比我新、却比产物旧 → 不转发(它照样盖不了这块板)
+  writeDb([{ scope: 'project', projectPath: root, installPath: MARK, version: '1.0.0' }])
+  ok(!/MARKER-99/.test(fwd().stdout) && REFUSE.test(fwd().stdout), '装的那版比产物旧 → 不转发,退回拒降级')
+
+  // 版本不是纯数字点分("unknown")→ cmpVer 全程 NaN,自然出局
+  writeDb([{ scope: 'project', projectPath: root, installPath: MARK, version: 'unknown' }])
+  ok(REFUSE.test(fwd().stdout), 'version 是 "unknown" 的安装项不参与比较(cmpVer 给 NaN,比较恒 false)')
+
+  // 安装项属于别的项目 → 不认;user 档(没写 projectPath)才对所有项目生效
+  writeDb([{ scope: 'project', projectPath: join(WORK, 'someone-else'), installPath: MARK, version: '99.9.9' }])
+  ok(REFUSE.test(fwd().stdout), 'projectPath 指着别的项目 → 不是这块板的安装,不认')
+  writeDb([{ scope: 'user', installPath: MARK, version: '99.9.9' }])
+  ok(/MARKER-99/.test(fwd().stdout), 'user 档安装(没有 projectPath)对所有项目生效,同样转发得出去')
+
+  // 读不到安装表(没接市场 / 文件不在)→ 什么都不做
+  rmSync(join(cfgHome, 'plugins', 'installed_plugins.json'))
+  ok(REFUSE.test(fwd().stdout), '读不到 installed_plugins.json → 退回今天的行为,不猜')
+
+  // 常态路径:产物不比我新时根本不查安装表
+  writeDb([{ scope: 'project', projectPath: root, installPath: MARK, version: '99.9.9' }])
+  stampTo(MY_VER) // 戳回到本版(不能靠重跑 gen —— gen 自己也拒绝盖更新的产物,那条正是本条要绕开的)
+  const r9 = fwd()
+  ok(!/MARKER-99/.test(r9.stdout) && r9.status === 0, '产物不比我新 → 根本不转发:这是版本冲突的补救,不是常态路径', (r9.stdout || '').slice(0, 200))
 }
 
 // ============ T70 英文串表(loadStrings 不做逐键回落:少一个键 = 守卫在收工那一刻 TypeError)============

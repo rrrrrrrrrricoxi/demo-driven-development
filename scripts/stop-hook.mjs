@@ -21,6 +21,10 @@
 //      v0.15.6 起跳过终态卡(TERMINAL,与 settle.mjs 同一份口径):已 done / live / closed 的卡
 //      不会再改写,点名它们只会让这条通知永远缩不掉。
 //      v0.15.7 起这条通知只一行:张数 + 最长的那张(卡号 + 字段),不铺逐卡清单、不报字数。
+//      v0.16.2 起分两档:**新卡阻断**、老卡照旧一行提醒。新卡 = 卡文件还没提交进 HEAD(未拆卡的板
+//      问不出这个,退卡上的 date == 今天)。理由是时机:正文刚写出来还在手边,当场拆最省事;等它
+//      进了历史再回头拆,改的就是别人也在读的卡了。阻断走孤儿 demo 那一套(decision: block +
+//      stop_hook_active 降级放行),点名卡号 / 字段 / 字数,并给出 detail 的那条命令。
 //   5. 进度响应审计(v0.13.0,只在 release-manifest.json 在场时):关联 PR 全合了却没收账的卡、
 //      已收账却还有 PR 开着的卡,各出一条非阻断 notice(各最多点名 5 张 + 总数)。收账动作在
 //      pr-sync.mjs --settle,守卫只提示 —— 静默改 manifest 会跟并行会话抢写。
@@ -42,6 +46,12 @@
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
 //   - 看板目录有 .init-lock(kanban-init --apply 进行中)→ 放行本轮。
 //   - 消息文案走 strings.mjs(zh/en,按 config.lang 选)。
+//   - 版本转发(v0.16.2):hook 进程绑在起 session 那一版上,升级 plugin 后不重启 session,守卫
+//     就一直是旧的 —— 而旧 gen 不许盖新板(上面的戳一票否决),看板在这个 session 里彻底停更。
+//     本机已经装了不比产物旧的版本时没必要停:把整个 hook(stdin / env / cwd 原样)交给那一版的
+//     stop-hook.mjs,它的 stdout 与退出码原样带回来,顺带在输出里说一行「已转发到 vX」。
+//     只转发一次(DDD_HOOK_FORWARDED);读不到安装表 / 没有更新的安装 → 什么都不做,退回旧行为。
+//     gen.mjs 自己那条拒绝不动:人手跑一个旧路径的 gen,照旧该被拒。
 //
 // 手测:echo '{}' | node scripts/stop-hook.mjs
 // 接线:hooks/hooks.json → Stop
@@ -49,7 +59,8 @@
 // 纯文档改动导致的 refs/ 过期仍需人跑 gen——要堵再解析 REF_DOCS。
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
@@ -66,11 +77,81 @@ if (existsSync(join(KANBAN, '.init-lock'))) process.exit(0)
 
 const S = loadStrings(KANBAN)
 const DEMOS = join(KANBAN, 'demos')
-const GEN = join(dirname(fileURLToPath(import.meta.url)), 'gen.mjs')
+const SELF_DIR = dirname(fileURLToPath(import.meta.url))
+const GEN = join(SELF_DIR, 'gen.mjs')
 
-let hook = {}
+// stdin 原文留着:转发时要把同一份字节交给新版 hook(重新序列化会丢掉本版不认识的字段)
+let hookRaw = ''
 if (!process.stdin.isTTY) {
-  try { hook = JSON.parse(readFileSync(0, 'utf8')) } catch {}
+  try { hookRaw = readFileSync(0, 'utf8') } catch {}
+}
+let hook = {}
+try { hook = JSON.parse(hookRaw) } catch {}
+
+// 版本三件套一处取(下面的转发与①的戳判定共读同一份;readStamp 只读 index 头 1KB,读两遍也是浪费)
+const INDEX = join(KANBAN, 'index.html')
+const MY_VER = readPluginVersion() // null = 安装异常(plugin.json 缺失/损坏/非纯数字版本)
+const STAMP = readStamp(INDEX) // 版本串 | null(有产物无戳=旧 gen 产物)| undefined(无产物,首跑)
+
+/**
+ * 本机装着的、不比产物戳旧的那一版本 plugin(v0.16.2 版本转发用)。
+ * 只认同名 plugin 的安装项:先取 projectPath 命中本项目的(scope project / local),一条都没有
+ * 才退到没写 projectPath 的(user 档,对所有项目生效)。version 不是纯数字点分("unknown")时
+ * cmpVer 全程 NaN、比较恒 false —— 自然出局,不必另判。
+ * @returns {{version: string, path: string} | null}
+ */
+function newerInstall(minVer, selfVer) {
+  const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+  let db = null, name = ''
+  try { db = JSON.parse(readFileSync(join(cfgDir, 'plugins', 'installed_plugins.json'), 'utf8')) } catch { return null }
+  try { name = JSON.parse(readFileSync(join(SELF_DIR, '..', '.claude-plugin', 'plugin.json'), 'utf8')).name } catch { return null }
+  const rows = []
+  for (const [key, list] of Object.entries((db && db.plugins) || {})) {
+    if (key.split('@')[0] !== name || !Array.isArray(list)) continue
+    for (const e of list) if (e && typeof e.installPath === 'string') rows.push(e)
+  }
+  const here = resolve(KANBAN, '..', '..') // 看板在 <项目根>/app/kanban,倒推两级就是 detect 认定的那个项目根
+  const mine = rows.filter((e) => e.projectPath && resolve(String(e.projectPath)) === here)
+  const selfRoot = resolve(SELF_DIR, '..')
+  let best = null
+  for (const e of (mine.length ? mine : rows.filter((e) => !e.projectPath))) {
+    const v = String(e.version || '')
+    if (!(cmpVer(v, minVer) >= 0) || cmpVer(v, selfVer) === 0) continue
+    if (resolve(e.installPath) === selfRoot) continue // 就是我自己:版本号撞了也别自己转给自己
+    if (!existsSync(join(e.installPath, 'scripts', 'stop-hook.mjs'))) continue
+    if (!best || cmpVer(v, best.version) > 0) best = { version: v, path: e.installPath }
+  }
+  return best
+}
+
+// ---- 版本转发(v0.16.2):产物比我新,而本机已装不比产物旧的版本 → 整个 hook 交给它跑 ----
+{
+  const stale = !process.env.DDD_HOOK_FORWARDED && MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0
+  const to = stale ? newerInstall(STAMP, MY_VER) : null
+  if (to) {
+    const r = spawnSync(process.execPath, [join(to.path, 'scripts', 'stop-hook.mjs')], {
+      cwd: process.cwd(),
+      input: hookRaw,
+      encoding: 'utf8',
+      env: { ...process.env, DDD_HOOK_FORWARDED: to.version },
+    })
+    if (!r.error) { // 起不来(node 没了 / 权限)才当没转发过,退回下面的旧行为
+      const note = S.hookForwarded(to.version, MY_VER, STAMP)
+      const code = r.status ?? 0
+      if (r.stderr) process.stderr.write(r.stderr)
+      let payload = null
+      // 退出码非零那一档,CC 只读 stderr、stdout 被忽略 —— 那种时候转发这行只能走 stderr
+      if (code === 0) { try { payload = JSON.parse((r.stdout || '').trim() || '{}') } catch {} }
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        payload.systemMessage = payload.systemMessage ? `${note}\n${payload.systemMessage}` : note
+        process.stdout.write(JSON.stringify(payload))
+      } else {
+        if (r.stdout) process.stdout.write(r.stdout) // 认不出的 stdout 原样透传,不吞
+        process.stderr.write(`${note}\n`)
+      }
+      process.exit(code)
+    }
+  }
 }
 
 const mtime = (p) => { try { return statSync(p).mtimeMs } catch { return 0 } }
@@ -80,6 +161,9 @@ try { demos = readdirSync(DEMOS).filter((f) => f.endsWith('.html')) } catch {}
 
 // 非阻断通知(戳警告 / 安装异常 / 自愈提示),最终与审计结果合并成单条 JSON 输出
 const notices = []
+// 阻断项(孤儿 demo / 新卡长正文):每项两副面孔 —— block 是拦下来时说的,warn 是同一次收工已经
+// 拦过一次时(stop_hook_active)降级放行说的。多项合成一条 reason,免得一次只报得出一个。
+const blocks = []
 
 // ---- 一卡一文件(v0.14.0,config.cardsDir):扫一遍卡目录,新鲜度/孤儿语料/下面几段审计共用 ----
 // 未配 cardsDir = 全为空,一切照旧。
@@ -105,6 +189,34 @@ const cardsOf = (file, key, sub) => {
   try { return JSON.parse(readFileSync(join(KANBAN, file), 'utf8'))[key] || [] } catch { return [] }
 }
 const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifest.json', 'items', 'backlog'], ['decisions-manifest.json', 'entries', 'decisions']]
+
+/**
+ * 卡目录里已经进了 HEAD 的卡文件,键取路径末两段(`<sub>/<id>.json`)—— git 报的路径相对仓根还是
+ * 相对 cwd 随命令而变,末两段两种都对得上。按需算一次(一条 git ls-tree)。
+ * 返回 null = 这块板问不出「提交了没」(没配 cardsDir / 没有 git / 还没有 HEAD)——那种时候
+ * 「新卡」只由卡上的 date 判定:宁可不拦,也不拿不确定当阻断的依据。
+ */
+let COMMITTED
+function committedCards() {
+  if (COMMITTED !== undefined) return COMMITTED
+  COMMITTED = null
+  if (CARDS_DIR) {
+    const r = spawnSync('git', ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', CARDS_DIR],
+      { cwd: KANBAN, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    if (!r.error && r.status === 0) {
+      COMMITTED = new Set(r.stdout.split('\0').filter(Boolean).map((p) => p.split('/').slice(-2).join('/')))
+    }
+  }
+  return COMMITTED
+}
+
+/** 「刚立的卡」(v0.16.2):卡文件还没提交进 HEAD,或卡上的 date 就是今天。 */
+const TODAY = localDate() // 一处取:同一次收工里「今天」不该在逐卡循环中间翻页
+const isFreshCard = (c, sub) => {
+  if (String(c.date || '') === TODAY) return true
+  const done = sub ? committedCards() : null // manifest.json 的 tasks 不拆卡,只走 date 那一档
+  return Boolean(done && !done.has(`${sub}/${String(c.id ?? '')}.json`))
+}
 
 /** 每卡最后改动日,按需算一次(一条 git log)。未拆卡 = 空表 —— 那种板取不到「这张卡什么时候动的」。 */
 let CARD_UPD = null
@@ -156,8 +268,7 @@ function depCtx() {
 
 // ---- ① 新鲜度 → 自动重跑 gen(gen.mjs 未随 plugin 落地时跳过) ----
 if (existsSync(GEN)) {
-  const indexPath = join(KANBAN, 'index.html')
-  const indexAt = mtime(indexPath)
+  const indexAt = mtime(INDEX)
   const newest = Math.max(
     mtime(GEN),
     mtime(join(KANBAN, 'theme.css')), // v0.4.0 换装:theme 是 gen 输入;缺席时 mtime=0,零影响
@@ -176,13 +287,12 @@ if (existsSync(GEN)) {
       ...(c.acceptanceTab === true ? ['acceptance.html'] : []), ...(c.releaseTab === true ? ['release.html'] : [])]
     lazyBroken = c.lazyTabs === true && !parts.every((f) => existsSync(join(KANBAN, 'parts', f)))
   } catch {}
-  const myVer = readPluginVersion() // null = 安装异常(plugin.json 缺失/损坏/非纯数字版本)
-  const stamp = readStamp(indexPath) // 版本串 | null(有产物无戳=旧 gen 产物)| undefined(无产物,首跑)
-  const stampNewer = Boolean(myVer && stamp && cmpVer(stamp, myVer) > 0)
-  const stampStale = Boolean(myVer && stamp !== undefined && (stamp === null || cmpVer(stamp, myVer) < 0))
+  // MY_VER / STAMP 在文件头取过一份(版本转发与这里同一份口径);走到这儿说明没转发出去。
+  const stampNewer = Boolean(MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0)
+  const stampStale = Boolean(MY_VER && STAMP !== undefined && (STAMP === null || cmpVer(STAMP, MY_VER) < 0))
   if (stampNewer) {
-    notices.push(S.stampNewer(stamp, myVer)) // 只否决重生成;审计(只读)在下面照做
-  } else if (!myVer) {
+    notices.push(S.stampNewer(STAMP, MY_VER)) // 只否决重生成;审计(只读)在下面照做
+  } else if (!MY_VER) {
     // gen 读不到自身版本必硬失败——别 spawn 一个注定 exit 2 的 gen 造不可自修的阻断循环
     if (newest > indexAt) notices.push(S.noSelfVersion())
   } else if (newest > indexAt || stampStale || lazyBroken) {
@@ -201,7 +311,7 @@ if (existsSync(GEN)) {
     // gen 成功但带警告(themeColors 未知色组/键、sessionTags 灰章、空 theme.css、指南过大、md 退化…)→ 原样透传,别吞
     if (err.trim()) process.stderr.write(err)
     // 自愈自「无戳产物」= 刚被旧 gen 盖过板(或 0.6.0 前存量)的签名 → 现场指向断火源解药
-    if (stampStale && stamp === null) notices.push(S.healedUnstamped())
+    if (stampStale && STAMP === null) notices.push(S.healedUnstamped())
   }
 }
 
@@ -279,15 +389,18 @@ const orphans = demos.filter((f) => !covered.has(f))
   }
 }
 
-// ---- ④ 正文长度审计(v0.13.0,只在 config.richText 开时跑):超长字段而无 detail 的卡记数 ----
-// detail 字段本身受 richText 门控,没开的板催也白催。全部非阻断 —— 正文长短是写法问题,不是错误。
-// 通知只一行(v0.15.7):张数 + 最长的那张,逐卡清单与字数在终端里是噪音,写法规矩在 skills 里。
+// ---- ④ 正文长度审计(v0.13.0,只在 config.richText 开时跑):超长字段而无 detail 的卡 ----
+// detail 字段本身受 richText 门控,没开的板催也白催。
+// 分两档(v0.16.2):**刚立的卡阻断**,已提交的老卡照旧一行非阻断提醒(张数 + 最长的那张)。
+// 分档的依据是时机不是严厉程度 —— 新卡的正文刚写出来还在手边,当场拆最省事、也只有此刻拆得动;
+// 老卡是历史,拦下来只会逼人去改一份别人也在读的卡,于是通知永远缩不掉(0.15.6 的终态豁免同理)。
 {
   let richOn = false
   try { richOn = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8')).richText === true } catch {}
   if (richOn) {
     const LONG = 800
-    let total = 0, worst = null // 一行通知只需要这两样:张数,与最长的那张(卡号 + 字段)
+    let total = 0, worst = null // 老卡那一行只需要这两样:张数,与最长的那张(卡号 + 字段)
+    const fresh = [] // 新卡逐张列:阻断消息要说清「改哪张的哪个字段、多长」
     for (const [f, k, sub, fields] of [
       ['manifest.json', 'tasks', null, ['problem', 'approach', 'notes']],
       ['backlog-manifest.json', 'items', 'backlog', ['problem', 'approach', 'note']],
@@ -302,11 +415,17 @@ const orphans = demos.filter((f) => !covered.has(f))
           if (n > LONG && (!hit || n > hit.n)) hit = { key, n }
         }
         if (!hit) continue
+        if (isFreshCard(c, sub)) { fresh.push({ id: String(c.id ?? '?'), key: hit.key, n: hit.n }); continue }
         total++
         if (!worst || hit.n > worst.n) worst = { id: String(c.id ?? '?'), key: hit.key, n: hit.n }
       }
     }
     if (total) notices.push(S.richLongText(worst, total))
+    if (fresh.length) {
+      fresh.sort((a, z) => z.n - a.n) // 最长的排前面 —— 点名封顶 5 张时,先说最该拆的那几张
+      const top = fresh.slice(0, 5)
+      blocks.push({ block: S.richLongNewBlock(top, fresh.length), warn: S.richLongNewWarn(top, fresh.length) })
+    }
   }
 }
 
@@ -421,18 +540,23 @@ let RLM = null
   }
 }
 
-if (orphans.length === 0) {
+// ---- 出口:阻断项合成一条(孤儿 demo 排最前 —— 它是最老、也最容易一步补掉的那条规矩)----
+if (orphans.length) {
+  const list = orphans.map((f) => `  - app/kanban/demos/${f}`).join('\n')
+  blocks.unshift({ block: S.orphanBlock(orphans.length, list), warn: S.orphanWarn(orphans.length, list) })
+}
+
+if (blocks.length === 0) {
   if (notices.length) console.log(JSON.stringify({ systemMessage: notices.join('\n') }))
   process.exit(0)
 }
 
-const list = orphans.map((f) => `  - app/kanban/demos/${f}`).join('\n')
-if (hook.stop_hook_active) {
-  console.log(JSON.stringify({ systemMessage: [S.orphanWarn(orphans.length, list), ...notices].join('\n') }))
+if (hook.stop_hook_active) { // 防死循环:同一次收工已拦过 → 全体降级成警告放行
+  console.log(JSON.stringify({ systemMessage: [...blocks.map((b) => b.warn), ...notices].join('\n') }))
   process.exit(0)
 }
 console.log(JSON.stringify({
   decision: 'block',
-  reason: S.orphanBlock(orphans.length, list),
+  reason: blocks.map((b) => b.block).join('\n\n'),
   ...(notices.length ? { systemMessage: notices.join('\n') } : {}),
 }))

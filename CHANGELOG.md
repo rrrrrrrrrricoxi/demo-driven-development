@@ -9,6 +9,49 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.16.2] - 2026-09-06
+
+Two guard changes, both about the moment a rule is worth enforcing. Generated
+output is byte-identical to 0.16.1 apart from the version stamp.
+
+### Changed
+- **The long-prose audit now blocks on freshly created cards.** Since 0.13.0 a
+  card whose prose field runs past 800 characters with no `detail` has drawn one
+  non-blocking line at Stop, and on a mature board that line never shrinks: the
+  cards it names are history, and rewriting them means editing a card other
+  people are already reading. The split is by timing, not severity. A card
+  counts as *new* when its card file is not yet in `HEAD` (untracked or added
+  but uncommitted under `cardsDir`; on a board that has not split its cards, the
+  fallback is `date` == today), and for those the audit blocks — same mechanism
+  as the orphan-demo block, including the `stop_hook_active` downgrade to a
+  warning so a stop can never loop. The message names the card, the field and
+  its length, and gives the exact remedy: `ddd.mjs card set <id> detail "…"`,
+  then `question`/`problem` in two sentences, `approach` conclusion-first, `note`
+  a dated timeline. Prose that has just been written is still in hand and costs
+  nothing to split; a week later it costs a re-read. Cards already in a terminal
+  status are skipped as before, older cards keep exactly the one-line notice they
+  had, and boards without `richText` never run the audit at all. When both this
+  and the orphan-demo rule fire, the two now arrive as one `reason` instead of
+  one per stop.
+
+### Added
+- **The Stop hook forwards to the newest installed version of itself.** A hook
+  process is bound to whatever plugin version the session started with. Upgrade
+  the plugin without restarting the session and that guard stays old forever —
+  and since an old `gen` refuses to overwrite newer output, the board simply
+  stops updating in that session until someone restarts it. On a machine that
+  already has a new enough version installed there is no reason to stop: when
+  the products' stamp is newer than this script, the hook resolves the project's
+  install from `~/.claude/plugins/installed_plugins.json` (honouring
+  `CLAUDE_CONFIG_DIR`) and, if that install is at least as new as the products
+  and is not this script, hands it the whole hook — same stdin, env and cwd —
+  and returns its stdout and exit code verbatim, with one line saying where the
+  output came from. `DDD_HOOK_FORWARDED` guards against forwarding twice. With
+  no readable install table, no newer install, or an install still older than
+  the products, the old behaviour stands: refuse to regenerate, and say so.
+  `gen.mjs`'s own refusal is untouched — running an old `gen` by hand should
+  still be refused.
+
 ## [0.16.1] - 2026-09-06
 
 A review round over everything since 0.15.5 — 34 confirmed findings fixed, one
