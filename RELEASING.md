@@ -46,7 +46,14 @@ Downstream projects pick up the release with:
 claude plugin update --scope project demo-driven-development@demo-driven-development
 ```
 
-and a session restart. On a machine that still has long-lived sessions pinned to
+Since 0.16.2 that no longer has to be followed by a session restart for the
+Stop hook's sake: a session still running the old hook sees that the board's
+output is stamped newer than itself, finds the new install in
+`installed_plugins.json`, and hands the whole hook over to it, saying so in one
+line of its output. Restart anyway when you want the session's *skills* on the
+new version — forwarding covers the guard, not the rest of the plugin.
+
+On a machine that still has long-lived sessions pinned to
 a superseded cache, run the retire script so those sessions get a restart notice
 instead of overwriting the board with stale output. `<plugin>` below is the
 installed plugin directory (under `~/.claude/plugins/`):

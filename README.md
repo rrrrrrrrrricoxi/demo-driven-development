@@ -54,6 +54,8 @@ python3 app/kanban/serve.py        # then open the printed port
 
 On every Stop, the guard compares mtimes: if any manifest, demo, theme file, or the generator itself is newer than `index.html`, it regenerates the board, so nobody has to remember to ask for an update. `gen` also writes a version stamp (`<!-- ddd-gen vX.Y.Z -->`) on line 2 of `index.html`. A session running an older plugin refuses to overwrite newer output and warns instead; a newer plugin heals older output automatically. Separately, every `demos/*.html` must be referenced by a manifest or listed in `demos/.no-card-ok`, otherwise the session is blocked until the demo gets a card.
 
+A hook process is bound to the plugin version its session started with, so upgrading the plugin mid-session used to leave that session's guard permanently old — and an old `gen` may not overwrite newer output, which froze the board until someone restarted. Since 0.16.2 the hook checks first: if the board's stamp is newer than itself, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and, when that install is at least as new as the board's output and is not itself, hands the whole hook over — same stdin, environment and working directory — returning that version's stdout and exit code unchanged, with one line in the output saying it forwarded and to which version. `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read, holds no newer install, or holds one that is still older than the board's output, the old behaviour stands: skip regeneration and say why. Running `gen.mjs` by hand from an old path is still refused — the forwarding is the guard's, not the generator's.
+
 ## Upgrading
 
 The plugin version on `main` only moves up. A downgrade would freeze every stamped board, so never merge a lower version.
@@ -254,11 +256,17 @@ first-paragraph preview and the full text, with a quiet *展开全文 · N 字*
 button between them, and the preview is clamped to the same height as every
 other field so a long field cannot stretch its card. The same switch enables an optional `detail`
 card field for the long trail of evidence, rendered after every other field as
-a collapsed block. A non-blocking guard notice counts, in one line, the cards
-whose prose runs past 800 characters with no `detail` to move it into, and
-points at the longest one — cards already in a terminal status (`done`, `live`,
-`closed`) are skipped, since they will not be rewritten. Left unset, output is byte-identical to a board without the
-feature.
+a collapsed block. The guard watches the 800-character line in two registers.
+On a card that has just been created it **blocks** the stop, naming the card,
+the field and its length, and giving the remedy verbatim (`ddd.mjs card set
+<id> detail "…"`); a card counts as new when its card file is not yet in `HEAD`
+— untracked, or added but uncommitted, under `cardsDir` — or, on a board that
+has not split its cards into files, when its `date` is today. That is the one
+moment the prose is still in hand and costs nothing to split. Older cards get
+what they always got: one non-blocking line counting them and pointing at the
+longest. Cards already in a terminal status (`done`, `live`, `closed`) are
+skipped either way, since they will not be rewritten. Left unset, output is
+byte-identical to a board without the feature.
 
 ## Archive tab (optional)
 
