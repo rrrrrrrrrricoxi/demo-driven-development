@@ -60,6 +60,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 3. **代码**:实现落地;卡改完(`ddd.mjs card …`)不必手动跑 gen,收工守卫会重生成看板。
 4. **验证**:定义成功标准并跑到验证(测试 / 构建 / 手工 smoke);"写完了"≠"验证过了"。
    **要人实测的,清单写进 `acceptance-manifest.json`,不再手搭 HTML 页**(v0.12.0,板上开了 `acceptanceTab` 时):一份清单挂一个或多个 PR,`current` 指向正在测的那个;条目写「做什么 / 预期 / 不对的样子 / 为什么」,数据块用 `rows` 二维数组。人在页面上勾,勾完点「复制勾选结果」,把那段 JSON 贴回清单的 `result` —— 勾选结果这才进 git,而不是留在某一台浏览器里。清单正文改了就把 `revision` 加一(旧勾选当场作废)。
+   **板上开了 `acceptanceFeedback` 时(v0.17.0),对方的勾 / 备注 / 截图在页上直接看得见**:每条验收行右端有一枚「反馈 ▸」,点开就能记 ✓/✕、写一行备注、贴图,几秒内两台浏览器互相看得到(真源是 `acceptance-feedback.jsonl`,随 git 走);本地勾选与「复制勾选结果」照旧不变 —— 收工前记得把那份 jsonl 一起提交。
 5. **PR**:开 PR 合入;PR 后推进相关卡状态(gh-pr 提醒 hook 会提示)。
    **开 PR 的同时把它挂上卡**:`ddd.mjs card link <卡号> "这个 PR 干了什么" <PR 链接>` —— 它挂链接的同时把号写进 `pr` 字段(`230` / `[227, 230]` / 跨仓 `"owner/repo#4"`),卡与实现它的那段工作从此是数据关系,不是散文。
    **开完 / 合完 PR 跑一次 `node <plugin>/scripts/pr-sync.mjs`**(板上开了 `releaseTab` 时):它调 `gh` 把 PR 状态与版本写进 `release-manifest.json`。gen 不联网也不读时钟,不跑这个脚本,发布进度就停在上次同步的那一刻。

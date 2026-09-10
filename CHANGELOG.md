@@ -9,6 +9,85 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.0] - 2026-09-10
+
+Shared acceptance feedback: opt-in, append-only, and still no database. A static
+board keeps every tick in the browser that made it — which is fine until two
+people are testing the same pull request and neither can see the other's ✕, note
+or screenshot. The sync path so far was a human relay: copy the result JSON,
+paste it into the manifest, regenerate. This release gives `serve.py` two
+append-only `POST` endpoints and the acceptance rows a quiet entry that reads
+what they wrote. Generated output and served responses are byte-identical to
+0.16.2 unless `acceptanceFeedback` is switched on.
+
+### Added
+- **`config.acceptanceFeedback: true`** (on top of `acceptanceTab`) puts a
+  **反馈 ▸** entry at the right edge of every checklist row. It opens inline —
+  no modal, nothing covering the item text: ✓ / ✕ (either, or neither), one line
+  of notes, 贴图 (listens for a paste) / 选图 (a file input, for phones), and
+  记下. Once a row has feedback the entry becomes its summary —
+  `✓ Rico · ✕ codev · 2 图` — and the open row lists every mark below it with
+  thumbnails. A tester names themselves once (`window.prompt`, 1–20 characters,
+  remembered as `<brand>_acc_who`); the tab header carries a `我是 … · 换人`
+  chip. Local ticks and 「复制勾选结果」 are untouched: those stay your own
+  progress, and the shared ledger is the jsonl.
+- **`app/kanban/acceptance-feedback.jsonl`** — one JSON object per line
+  (`ts`, `pr`, `item`, `who`, `rev`, and whichever of `verdict` / `note` /
+  `shot` were given), written by the server, versioned in git. Later lines win
+  over earlier ones for the same *(person, item)* verdict; notes and screenshots
+  accumulate; a malformed line is skipped and counted, never fatal. There is no
+  delete and no edit — a mistake is corrected by appending. The checklist's
+  `revision` is stamped by the server at write time, so once the list changes,
+  feedback from the previous revision is still shown but greyed with
+  「清单已改(rev N)」.
+- **Two write endpoints in `serve.py`** (stdlib only, still one file, still no
+  dependencies): `POST /api/acceptance/mark` and
+  `POST /api/acceptance/shot?pr=&item=&who=`. Everything is validated even
+  though the board sits on a trusted network — the pull request must exist in
+  the checklist, the item must belong to that checklist, `who` is 1–20
+  characters with no control characters, `verdict` is `ok` / `bad` or absent,
+  `note` caps at 2000 characters, an image must be JPEG or PNG by *both*
+  content type and magic number and stay under 2 MB, and a `shot` reference has
+  to be a name this server generated for that very item. **The filename is
+  composed server-side** (`acc-<pr>-<item>-<UTC timestamp>.jpg`; the item id is
+  slugged to `[A-Za-z0-9_.-]`), so a client-supplied name is never trusted.
+  Writes are one `O_APPEND` write plus `fsync`: two people clicking at the same
+  moment cannot interleave. The config is read per request, so flipping the key
+  does not need a restart, and with the key off both routes answer 404 while any
+  other POST path keeps today's 501.
+- **Polling instead of regeneration**: the page fetches the jsonl with
+  `cache: no-store` every 20 seconds while the acceptance tab is visible, when
+  the window regains focus, and when the tab is opened. Failures are silent and
+  retried — a toast saying "could not refresh" during acceptance is worse than a
+  line arriving 20 seconds late. `gen` still reads no clock and touches no
+  network: only the entry and the runtime are baked, all data arrives at runtime.
+- **Screenshots are compressed in the browser before upload** — canvas, long
+  edge ≤ 1280, JPEG quality 0.8 — so a 4 MB phone photo lands as a couple of
+  hundred kilobytes. They go to `shots/acc-*`, are **excluded from the
+  screenshot gallery**, and stay out of git by default: add
+  `app/kanban/shots/acc-*` to your `.gitignore`. `kanban-init` prints that line
+  as a reminder when the key is on and never edits your ignore file itself. To
+  keep one as evidence, rename it without the `acc-` prefix and put it in a
+  card's `shots` field.
+- **`scripts/acc-feedback-prune.mjs`** clears feedback screenshots whose pull
+  request merged more than 30 days ago (`--days N`, `--dry-run`), taking the
+  merge date from `release-manifest.json` rather than file timestamps. The jsonl
+  is never touched — the images go, the record of who said what stays.
+- **Two non-blocking guard lines**: the jsonl has uncommitted new lines
+  (`验收反馈:#277 新增 3 条未提交(Rico 2 · codev 1)`, from one `git diff`,
+  silent where there is no git), and ten or more screenshots are prunable. The
+  guard reports; it never commits and never deletes.
+
+### Changed
+- `serve.py` carries a `# ddd-serve v2` marker. It remains a seeded file that
+  the plugin never overwrites (yours may be edited), so `kanban-init --plan` and
+  `--apply` now print one line when the host copy is behind the template, with
+  what to do about it.
+- The screenshot gallery skips `acc-*` unconditionally, not only while the
+  feature is on: turning the key off does not delete the images, and having them
+  reappear in the gallery afterwards would be the surprising outcome. Boards
+  that never used the feature have no such files, so their output is unchanged.
+
 ## [0.16.2] - 2026-09-06
 
 Two guard changes, both about the moment a rule is worth enforcing. Generated
