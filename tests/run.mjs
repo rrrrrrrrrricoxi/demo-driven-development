@@ -5558,15 +5558,29 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
 
   // ---- 可清的反馈截图:守卫报数,prune 脚本才动手 ----
   {
-    const old = '2026-08-01T00:00:00Z' // 相对下面那个「今天」是 40 天前
-    const today = new Date().toISOString().slice(0, 10)
+    // 30 天那条硬边界用固定日期单验(spec §5 要的就是固定日期):今天与合并日都写死,
+    // 与本机时区、与跑测试的钟点都无关。下面摆盘那几张则离边界远远的 —— 守卫按本地日历日
+    // 算龄,fixture 若也拿「今天」贴着 30 天摆,UTC 与本地差一天的那几个钟头里整套测试就是红的。
+    const { prunable } = await import(join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'))
+    {
+      const rlm = { prs: [{ number: 277, state: 'merged', mergedAt: '2026-08-11T00:00:00Z' },
+        { number: 278, state: 'merged', mergedAt: '2026-08-12T00:00:00Z' },
+        { number: 279, state: 'open', mergedAt: null }] }
+      const files = ['acc-277-JJ3-20260910T120000.jpg', 'acc-278-JJ3-20260910T120000.jpg',
+        'acc-279-JJ3-20260910T120000.jpg', 'd1-keep.png']
+      const got = prunable(files, rlm, 30, '2026-09-10').map((r) => r.file)
+      ok(got.length === 1 && got[0] === 'acc-277-JJ3-20260910T120000.jpg',
+        '固定日期:合并满 30 天的可清,29 天的不可清,PR 还开着的不可清,非 acc- 的不入表', got.join(' '))
+      ok(prunable(files, rlm, 29, '2026-09-10').length === 2, '窗口收到 29 天:第二张也进表(边界是 >=)')
+    }
+    const today = localDate() // 与守卫、与 prune 脚本同一把尺(本地日历日,不是 UTC)
     const daysAgo = (n) => new Date(Date.parse(today + 'T12:00:00Z') - n * 86400000).toISOString()
     wr(relP, {
       stages: [{ id: 'dev', label: 'dev', hint: '' }, { id: 'prod', label: 'prod', hint: '' }],
       releases: [],
       prs: [
         { number: 277, state: 'merged', mergedAt: daysAgo(40), title: 'a' },
-        { number: 278, state: 'merged', mergedAt: daysAgo(29), title: 'b' },
+        { number: 278, state: 'merged', mergedAt: daysAgo(20), title: 'b' },
         { number: 279, state: 'open', mergedAt: null, title: 'c' },
       ],
       syncedAt: null,
@@ -5589,7 +5603,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const run = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'), '--dir', kb], { encoding: 'utf8' })
     ok(run.status === 0 && !existsSync(join(shotsDir, 'acc-277-JJ3-20260910T120000.jpg')),
       '不加 --dry-run 才真删(判据:PR 已合并满 30 天)', run.stdout.slice(0, 200))
-    ok(existsSync(join(shotsDir, 'acc-278-JJ3-20260910T120000.jpg')), '合并才 29 天的:留着(30 天是硬边界)')
+    ok(existsSync(join(shotsDir, 'acc-278-JJ3-20260910T120000.jpg')), '合并才 20 天的:留着(边界本身在上面用固定日期验)')
     ok(existsSync(join(shotsDir, 'acc-279-JJ3-20260910T120000.jpg')), 'PR 还开着的:留着')
     ok(existsSync(join(shotsDir, 'd1-keep.png')), '非 acc- 的截图一张不碰(那些是进 git 的证据)')
     ok(readFileSync(jsonlP, 'utf8') === jsonlBefore, 'jsonl 一行没删 —— 图没了,那几行「谁说了什么」照旧在')

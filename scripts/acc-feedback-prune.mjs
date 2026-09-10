@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { daysBetween } from './cards.mjs'
+import { daysBetween, localDate } from './cards.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 
 /** 默认窗口:PR 合并满这么多天的反馈截图算「可清」;守卫那条提示与本脚本同一把尺 */
@@ -83,7 +83,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   let files = []
   try { files = readdirSync(SHOTS).filter((f) => f.startsWith('acc-')) } catch {}
-  const today = new Date().toISOString().slice(0, 10)
+  // 「今天」取本地日历日 —— 守卫那头是 localDate(),两边差一天就会出现「守卫说 11 张、
+  // 这条命令删 10 张」(UTC+8 的每天 00:00–08:00 都撞得上)。同一把尺,就一把。
+  const today = localDate()
   const rows = prunable(files, rlm, DAYS, today)
   if (!rows.length) {
     console.log(`[acc-prune] 没有可清的反馈截图(shots/ 里 ${files.length} 张 acc-*,判据:PR 已合并满 ${DAYS} 天)`)
