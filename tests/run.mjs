@@ -5356,6 +5356,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   ok(on.includes('else if (fbPasteRow === row) fbPasteRow = null') && on.includes('if (!pbox || pbox.hidden) return'),
     '展开区一收起,贴图的指针就交回去;听到 ⌘V 也先看那个框还开着没有')
   ok(on.includes("var inBox = t.closest('.accfbx')"), '多个展开区同开:以最后碰过的那个为准')
+  ok(on.includes("Array.from(String(v)") && on.includes(".slice(0, 20).join('')"),
+    '署名按码点切,不按 UTF-16 格(第 20 格落在 emoji 中间时别切出半个字)')
   {
     const NUL = String.fromCharCode(0)
     const lines = [
@@ -5449,6 +5451,41 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     ok(true, '本机没有 python3,serve.py 那组跳过(CI 的 ubuntu 上有)')
   } else {
     cpSync(join(REPO, 'templates', 'serve.py'), join(kb, 'serve.py'))
+    // 短写:os.write 不保证一次写完(盘满时可以只写一部分而不抛,信号打断同理)。丢掉它的返回值
+    // = jsonl 落半行 / 截图落半张,而写口照样答 200,半行随后被读的人当坏行跳过 —— 人以为记下了。
+    // 这里把 os.write 换成「一次只写一个字节」的版本,直接验 write_fd 是写到写完才收工。
+    {
+      const probe = join(kb, 'probe-shortwrite.py')
+      writeFileSync(probe, [
+        'import importlib.util, os, sys, tempfile',
+        'serve_py = sys.argv[1]',
+        'sys.argv = [sys.argv[0]]  # serve.py 顶上拿 argv[1] 当端口号',
+        'spec = importlib.util.spec_from_file_location("srv", serve_py)',
+        'm = importlib.util.module_from_spec(spec)',
+        'spec.loader.exec_module(m)',
+        'fd, path = tempfile.mkstemp()  # 先摆好再打补丁:mkstemp 自己也写一笔试温',
+        'os.close(fd)',
+        'real, calls = os.write, []',
+        'def short(fd, data):',
+        '    n = real(fd, data[:1])',
+        '    calls.append(n)',
+        '    return n',
+        'os.write = short',
+        'try:',
+        '    m.append_line(path, b\'{"a":1}\\n\')',
+        'finally:',
+        '    os.write = real',
+        'with open(path, encoding="utf-8") as f:',
+        '    print(f.read() == \'{"a":1}\\n\', len(calls))',
+        'os.unlink(path)',
+        '',
+      ].join('\n'))
+      const r = spawnSync('python3', [probe, join(kb, 'serve.py')], { encoding: 'utf8' })
+      ok(r.status === 0 && r.stdout.trim() === 'True 8',
+        'os.write 每次只写一个字节时,write_fd 照样把整行写完(短写不截断)',
+        `${r.status} ${r.stdout.trim()} ${r.stderr.slice(0, 160)}`)
+      rmSync(probe)
+    }
     const c4 = rd(cfgP)
     c4.acceptanceFeedback = false // 先关着起服:开关是每请求现读的,不必重启
     wr(cfgP, c4)
@@ -5490,6 +5527,10 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         ['who 带控制字符', await mark({ pr: 277, item: 'JJ3', who: 'ab', verdict: 'ok' }), 'who'],
         ['verdict 不在枚举里', await mark({ pr: 277, item: 'JJ3', who: 'R', verdict: 'maybe' }), 'verdict'],
         ['note 超 2000 字', await mark({ pr: 277, item: 'JJ3', who: 'R', note: 'x'.repeat(2001) }), 'note'],
+        // 落单的代理对:JSON 里合法,UTF-8 里编不出来。页面那头 prompt 的名字曾按 UTF-16 格切,
+        // 第 20 格正好落在 emoji 中间就会切出这么一个 —— 原来会一路炸到掐连接,连 400 都收不到
+        ['who 里有落单的代理对', await mark({ pr: 277, item: 'JJ3', who: 'abcdefghijklmnopqrs\ud83d', verdict: 'ok' }), 'who'],
+        ['note 里有落单的代理对', await mark({ pr: 277, item: 'JJ3', who: 'R', note: '半个 emoji \ud83d' }), 'note'],
         ['三样都没有', await mark({ pr: 277, item: 'JJ3', who: 'R' }), 'verdict'],
         ['shot 文件名注入', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../../etc/passwd' }), NAMEGATE],
         ['shot 指向盘上真有的板内文件', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../index.html' }), NAMEGATE],
@@ -5528,6 +5569,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         const g = await req(srv.base, '/acceptance-feedback.jsonl')
         ok(g.status === 200 && String(g.headers.get('cache-control')).includes('no-store'),
           'jsonl 的 GET 带 no-store(轮询要新鲜)', String(g.headers.get('cache-control')))
+        ok(String(g.headers.get('content-encoding') || '').includes('gzip'),
+          'jsonl 也压(唯一每 20 秒重拉、又只增不删的那份文本,不该是唯一漏掉 gzip 的)',
+          String(g.headers.get('content-encoding')))
         const rows = g.text.trim().split('\n').map((l) => JSON.parse(l))
         ok(rows.length === 4 && rows[0].who === 'Rico' && rows[3].shot === up.json.shot,
           '追加式:先写的在前,后写的在后(含开关刚打开时那笔)', String(rows.length))

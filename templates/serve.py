@@ -38,7 +38,9 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8898
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # 按请求压缩的文本类扩展名(每请求整读整压,不缓存压缩体——no-store 语义下本就每次重传)
-COMPRESSIBLE = {".html", ".htm", ".css", ".js", ".json", ".svg", ".md", ".txt"}
+# .jsonl 在列:验收 tab 开着时每 20 秒重拉一遍整份账,而它只增不删 —— 唯一高频轮询的文本
+# 文件不压,gzip 当初为弱链路加的那一刀就正好绕开了它。
+COMPRESSIBLE = {".html", ".htm", ".css", ".js", ".json", ".jsonl", ".svg", ".md", ".txt"}
 
 # ---- 验收反馈共享(opt-in)----
 FEEDBACK_FILE = os.path.join(ROOT, "acceptance-feedback.jsonl")
@@ -107,9 +109,19 @@ def shot_name_ok(name, pr, item):
 
 
 def write_fd(fd, data):
-    """单次 write + fsync 再关 —— 两个写口共用:写完才算数,写不进去就让 OSError 冒上去。"""
+    """写完再 fsync 再关 —— 两个写口共用:写完才算数,写不进去就让 OSError 冒上去。
+
+    os.write 不保证一次写完(盘满时 write(2) 可以只写一部分而不抛 ENOSPC,信号打断同理)。
+    丢掉它的返回值 = jsonl 落半行、截图落半张,而两条写口照样答 200:半行随后被读的人当坏行
+    跳过,那条反馈在人眼里「已记下」,实际永久没了。所以写到写完为止。
+    """
     try:
-        os.write(fd, data)
+        n = 0
+        while n < len(data):
+            w = os.write(fd, data[n:])
+            if w <= 0:  # 写不动又不抛:别在这儿转圈,当写失败报上去
+                raise OSError("os.write 写了 0 字节(盘满?)")
+            n += w
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -122,6 +134,19 @@ def append_line(path, line):
 
 class Rejected(Exception):
     """校验失败 → 400 + 一句原因(不吞错,页面上直接显示这句)。"""
+
+
+def check_wellformed(s, label):
+    """人写的那两段字(who / note)编不编得成 UTF-8。
+
+    落单的代理对(\\ud83d 这种,JSON 里合法)要到 json.dumps(...).encode("utf-8") 那一步才炸,
+    而 UnicodeEncodeError 是 ValueError 不是 OSError —— 漏出 do_POST 就是掐连接:客户端连
+    那句 400 都收不到,页面上还会把它误报成「你的 serve.py 太旧」。在这儿就说清楚。
+    """
+    try:
+        s.encode("utf-8")
+    except UnicodeError:
+        raise Rejected("%s 含非法字符(落单的代理对)" % label)
 
 
 class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
@@ -170,7 +195,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             body = self.post_mark() if route == MARK_ROUTE else self.post_shot()
         except Rejected as e:
             return self.reply_json(400, {"error": str(e)})
-        except OSError as e:  # 落盘失败不吞:页面上要看得见
+        except (OSError, UnicodeError) as e:  # 落盘失败 / 编不出字节:都不吞,页面上要看得见
             return self.reply_json(500, {"error": "写入失败:%s" % e})
         self.reply_json(200, body)
 
@@ -233,6 +258,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             raise Rejected("who 需 1–%d 字" % WHO_MAX)
         if any(ord(c) < 32 or ord(c) == 127 for c in who):
             raise Rejected("who 含控制字符")
+        check_wellformed(who, "who")
         return pr, item, who, rev
 
     def post_mark(self):
@@ -260,6 +286,8 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             raise Rejected("note 不是字符串")
         if len(note) > NOTE_MAX:
             raise Rejected("note 超过 %d 字" % NOTE_MAX)
+        if note:
+            check_wellformed(note, "note")
         shot = data.get("shot") or ""
         if shot:
             if not isinstance(shot, str) or not shot_name_ok(shot, pr, item):

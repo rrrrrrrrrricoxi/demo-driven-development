@@ -3004,7 +3004,9 @@ const ACC_FB_JS = !AFB ? '' : `
     function fbAskWho() { // 第一次「记下」/「贴图」时问一次,之后记在这台浏览器里
       var v = window.prompt('我是(1–20 字,记进验收反馈里)', FB_WHO || '')
       if (v == null) return FB_WHO
-      v = String(v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim().slice(0, 20)
+      // 按码点切,不按 UTF-16 格:第 20 格正好落在一个 emoji 的代理对中间时,slice 会切出半个字,
+      // 服务端 json.dumps().encode('utf-8') 上炸掉,连接被掐,页面还误报成「你的 serve.py 太旧」
+      v = Array.from(String(v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')
       if (!v) return FB_WHO
       FB_WHO = v
       try { localStorage.setItem(FB_WHO_KEY, v) } catch (e) {}

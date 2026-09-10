@@ -65,7 +65,9 @@ what they wrote. Generated output and served responses are byte-identical to
   `cache: no-store` every 20 seconds while the acceptance tab is visible, when
   the window regains focus, and when the tab is opened. Failures are silent and
   retried — a toast saying "could not refresh" during acceptance is worse than a
-  line arriving 20 seconds late. `gen` still reads no clock and touches no
+  line arriving 20 seconds late. `.jsonl` joins the extensions `serve.py`
+  gzips: it is the one file on the board that is re-sent whole every 20 seconds
+  and only ever grows. `gen` still reads no clock and touches no
   network: only the entry and the runtime are baked, all data arrives at runtime.
 - **Screenshots are compressed in the browser before upload** — canvas, long
   edge ≤ 1280, JPEG quality 0.8 — so a 4 MB phone photo lands as a couple of
