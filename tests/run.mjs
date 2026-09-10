@@ -5359,6 +5359,18 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   ok(on.includes("Array.from(String(v)") && on.includes(".slice(0, 20).join('')"),
     '署名按码点切,不按 UTF-16 格(第 20 格落在 emoji 中间时别切出半个字)')
   {
+    // jsonl 只增不删、跨天跨周挂在同一页上:光一个 12:03 分不出「十分钟前」还是「上周三」
+    const t0 = new Date(2026, 8, 10, 12, 3) // 本地时间 2026-09-10 12:03
+    ok(F.accFbTime(t0.toISOString(), t0) === '12:03', '今天的:只报时分', F.accFbTime(t0.toISOString(), t0))
+    const t1 = new Date(2026, 8, 7, 9, 5)
+    ok(F.accFbTime(t1.toISOString(), t0) === '09-07 09:05', '不是今天的:把日子说出来', F.accFbTime(t1.toISOString(), t0))
+    const t2 = new Date(2025, 11, 31, 23, 59)
+    ok(F.accFbTime(t2.toISOString(), t0) === '12-31 23:59', '跨年也是同一句(不写年,月日够分辨)', F.accFbTime(t2.toISOString(), t0))
+    ok(F.accFbTime('这不是时间', t0) === '' && F.accFbTime(null, t0) === '', '认不出的时刻:一个字都不写')
+  }
+  ok(on.includes("'后来改成 ' + (latest[r.who] === 'ok' ? '✓' : '✕')"),
+    '同一人前后两个 verdict:被顶掉的那条自己说「后来改成 ✓ / ✕」(chip 与列表不再自相矛盾)')
+  {
     const NUL = String.fromCharCode(0)
     const lines = [
       '{"ts":"2026-09-10T12:03:41Z","pr":277,"item":"JJ3","who":"Rico","verdict":"bad","note":"空态那句没换"}',
@@ -5433,6 +5445,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   {
     writeFileSync(join(kb, 'shots', 'd1-normal.png'), 'x')
     writeFileSync(join(kb, 'shots', 'acc-277-JJ3-20260910T120341.png'), 'x')
+    // 卡的截图是人手命名的 <卡号>-<说明>.png:光按 acc- 前缀过滤,这张(在一块正好在做验收 tab
+    // 的板上,是个再自然不过的名字)会连人带「截图 · N」徽章一起消失,而且不看开关开没开
+    writeFileSync(join(kb, 'shots', 'acc-tab-empty.png'), 'x')
     const c3 = rd(cfgP)
     c3.acceptanceTab = true
     c3.acceptanceFeedback = true
@@ -5440,8 +5455,11 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     runGen(NEW_SCRIPTS, kb)
     const gal = readFileSync(join(kb, 'shots.html'), 'utf8')
     ok(gal.includes('d1-normal.png') && !gal.includes('acc-277-JJ3'),
-      '截图廊只收常规截图,acc-* 不进廊(它们按条目挂在验收 tab 里)')
+      '截图廊只收常规截图,反馈截图不进廊(它们按条目挂在验收 tab 里)')
+    ok(gal.includes('acc-tab-empty.png') && readFileSync(idxP, 'utf8').includes('截图 · 2'),
+      '手命名的 acc-tab-empty.png 是卡的证据,不是反馈图:照进廊、也照数进徽章')
     rmSync(join(kb, 'shots', 'acc-277-JJ3-20260910T120341.png'))
+    rmSync(join(kb, 'shots', 'acc-tab-empty.png'))
     rmSync(join(kb, 'shots', 'd1-normal.png'))
     runGen(NEW_SCRIPTS, kb)
   }

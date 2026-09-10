@@ -1381,8 +1381,11 @@ let SHOT_COUNT = 0 // 提级入口徽章用(tab 行「截图 · N ↗」)
   let shotFiles = []
   /* acc-* 是验收反馈的截图(v0.17.0):按条目挂在验收 tab 里,默认也不进 git —— 不进廊。
      无条件过滤,不看 acceptanceFeedback:关掉开关之后那些图还躺在 shots/ 里,廊里冒出来更怪。
-     没开过这个功能的板一张 acc-* 都没有,所以这条对存量板是零差异。 */
-  try { shotFiles = readdirSync(SHOTS_DIR).filter((f) => f.endsWith('.png') && !f.startsWith('acc-')).sort() } catch { /* 目录缺失=空态 */ }
+     认的是 serve.py 拼出来的那个全形(acc-<PR>-<条目>-<UTC 时刻>),不是光看前缀 —— 卡的截图
+     是人手命名的 <卡号>-<说明>.png,acc-tab-empty.png 这种名字碰巧撞上前缀就会连人带徽章一起
+     消失,而且没开过这个功能的板也会中招。 */
+  const accShot = /^acc-\d+-.+-\d{8}T\d{6}(?:-\d+)?\.png$/
+  try { shotFiles = readdirSync(SHOTS_DIR).filter((f) => f.endsWith('.png') && !accShot.test(f)).sort() } catch { /* 目录缺失=空态 */ }
   SHOT_COUNT = shotFiles.length
   const shotMeta = new Map(shotFiles.map((f) => [f, shotDate(f)]))
   const groups = new Map()
@@ -2954,10 +2957,16 @@ const ACC_FB_JS = !AFB ? '' : `
       if (v.old) parts.push('旧清单 ' + v.old) // 陈述事实:改版前的账,不冒充「这条通过了」
       return parts.join(' · ')
     }
-    function accFbTime(ts) { // jsonl 里记的是 UTC,读的人看自己的钟
+    function accFbTime(ts, now) { // jsonl 里记的是 UTC,读的人看自己的钟;不是今天就把日子说出来
       var d = new Date(String(ts == null ? '' : ts))
       if (isNaN(d.getTime())) return ''
-      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+      var p = function (n) { return String(n).padStart(2, '0') }
+      var hm = p(d.getHours()) + ':' + p(d.getMinutes())
+      // jsonl 只增不删、跨天跨周地摆在同一页上(排队中 / 已验收两组清单一直挂着),
+      // 光一个 12:03 分不出「十分钟前」还是「上周三」—— 而改错靠追加纠正,新旧全靠行序猜
+      var t = now || new Date()
+      var same = d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()
+      return same ? hm : p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + hm
     }
     function accFbPasteFile(cd, editable) { // 这一次 ⌘V 该不该由我们接住:接得住就给出那张图
       var items = (cd && cd.items) || [], types = (cd && cd.types) || []
@@ -3067,15 +3076,21 @@ const ACC_FB_JS = !AFB ? '' : `
       list.textContent = ''
       if (!rows.length) { list.appendChild(fbEl('p', 'accfbe', '还没有反馈')); return }
       var rev = Number(row.dataset.accrev || 0)
+      // 「先记 ✕、查清楚了再记 ✓」是设计内的正常动作(不提供删除,改错就再追加)。
+      // 两行长得一样时,读的人得先知道「后写覆盖先写」这条口径才敢判上面那条已经作废 ——
+      // 把作废那几条自己说出来,别让第三个人靠猜。
+      var latest = accFbLive(e, rev).verdicts
       rows.forEach(function (r) {
         var stale = accFbStale(r, rev)
-        var line = fbEl('div', 'accfbr' + (stale ? ' stale' : ''))
+        var beaten = !stale && (r.verdict === 'ok' || r.verdict === 'bad') && latest[r.who] && latest[r.who] !== r.verdict
+        var line = fbEl('div', 'accfbr' + (stale || beaten ? ' stale' : ''))
         line.appendChild(fbEl('b', '', String(r.who)))
         if (r.verdict === 'ok' || r.verdict === 'bad') line.appendChild(fbEl('span', 'accfbvd ' + r.verdict, r.verdict === 'ok' ? '✓' : '✕'))
         var t = accFbTime(r.ts)
         if (t) line.appendChild(fbEl('span', 'accfbts', t))
         if (r.note) line.appendChild(fbEl('span', 'accfbnt', String(r.note)))
         if (stale) line.appendChild(fbEl('i', 'accfbst', '清单已改(rev ' + r.rev + ')'))
+        else if (beaten) line.appendChild(fbEl('i', 'accfbst', '后来改成 ' + (latest[r.who] === 'ok' ? '✓' : '✕')))
         if (r.shot && accFbShotOk(r.shot, row.dataset.accpr, row.dataset.accid)) line.appendChild(fbImg(String(r.shot), 'accfbimg'))
         list.appendChild(line)
       })

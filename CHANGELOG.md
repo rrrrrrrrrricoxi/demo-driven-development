@@ -27,7 +27,9 @@ what they wrote. Generated output and served responses are byte-identical to
   of notes, 贴图 (listens for a paste) / 选图 (a file input, for phones), and
   记下. Once a row has feedback the entry becomes its summary —
   `✓ Rico · ✕ codev · 2 图` — and the open row lists every mark below it with
-  thumbnails. A tester names themselves once (`window.prompt`, 1–20 characters,
+  thumbnails, timestamped (the date appears once a mark is not from today) and
+  with a superseded verdict greyed and labelled `后来改成 ✓`, since correcting a
+  mistake here means appending, not editing. A tester names themselves once (`window.prompt`, 1–20 characters,
   remembered as `<brand>_acc_who`); the tab header carries a `我是 … · 换人`
   chip. Local ticks and 「复制勾选结果」 are untouched: those stay your own
   progress, and the shared ledger is the jsonl.
@@ -91,10 +93,14 @@ what they wrote. Generated output and served responses are byte-identical to
   the plugin never overwrites (yours may be edited), so `kanban-init --plan` and
   `--apply` now print one line when the host copy is behind the template, with
   what to do about it.
-- The screenshot gallery skips `acc-*` unconditionally, not only while the
-  feature is on: turning the key off does not delete the images, and having them
-  reappear in the gallery afterwards would be the surprising outcome. Boards
-  that never used the feature have no such files, so their output is unchanged.
+- The screenshot gallery skips feedback screenshots unconditionally, not only
+  while the feature is on: turning the key off does not delete the images, and
+  having them reappear in the gallery afterwards would be the surprising
+  outcome. What it skips is the exact shape the server writes
+  (`acc-<pr>-<item>-<UTC timestamp>.png`), not the `acc-` prefix, so a
+  hand-named card screenshot such as `acc-tab-empty.png` stays in the gallery
+  and in the `截图 · N` badge. Boards that never used the feature have no
+  matching files, so their output is unchanged.
 
 ## [0.16.2] - 2026-09-06
 
