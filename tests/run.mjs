@@ -5428,6 +5428,11 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         '开关拨到 true:不重启服务,下一个请求就认(每请求现读 config)')
 
       // 校验矩阵
+      // 名字门那三条要的是「名字不对」这句原话:光断言错误串里有 'shot',
+      // 「文件不在 shots/」那句兜底也含这两个字 —— 把服务端唯一那道名字门整段删掉,
+      // 断言照样绿。所以下面两笔都挑「文件真在盘上」的名字打:少了名字门,它们会被收下。
+      writeFileSync(join(kb, 'shots', 'acc-277-A_1-20260101T000000.jpg'), 'x') // 名字合法,但属于另一条目
+      const NAMEGATE = '不是本服务为这条目生成的文件名'
       const cases = [
         ['pr 不在清单里', await mark({ pr: 999, item: 'JJ3', who: 'R', verdict: 'ok' }), 'PR #999'],
         ['item 不属于这份清单', await mark({ pr: 277, item: 'NOPE', who: 'R', verdict: 'ok' }), 'NOPE'],
@@ -5437,7 +5442,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         ['verdict 不在枚举里', await mark({ pr: 277, item: 'JJ3', who: 'R', verdict: 'maybe' }), 'verdict'],
         ['note 超 2000 字', await mark({ pr: 277, item: 'JJ3', who: 'R', note: 'x'.repeat(2001) }), 'note'],
         ['三样都没有', await mark({ pr: 277, item: 'JJ3', who: 'R' }), 'verdict'],
-        ['shot 文件名注入', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../../etc/passwd' }), 'shot'],
+        ['shot 文件名注入', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../../etc/passwd' }), NAMEGATE],
+        ['shot 指向盘上真有的板内文件', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../index.html' }), NAMEGATE],
+        ['shot 是另一条目的图(文件真在)', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: 'acc-277-A_1-20260101T000000.jpg' }), NAMEGATE],
         ['shot 名字对但文件不在', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: 'acc-277-JJ3-20260910T120341.jpg' }), 'shots/'],
         ['请求体不是 JSON', await req(srv.base, '/api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' }), 'JSON'],
         // text/plain 是 CORS simple type(发它不走预检)—— 认死 application/json,跨站那条路才断得干净
