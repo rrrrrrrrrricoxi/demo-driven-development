@@ -471,10 +471,8 @@ let RLM = null
     }
     const byPr = new Map()
     for (const raw of added) {
-      const s = raw.trim()
-      if (!s) continue
       let o = null
-      try { o = JSON.parse(s) } catch { continue }
+      try { o = JSON.parse(raw) } catch { continue } // 空行与坏行都在这儿落地
       if (!o || o.pr == null || !o.who) continue
       const pr = Number(o.pr)
       if (!byPr.has(pr)) byPr.set(pr, new Map())
@@ -492,7 +490,7 @@ let RLM = null
       let files = []
       try { files = readdirSync(join(KANBAN, 'shots')).filter((f) => f.startsWith('acc-')) } catch {}
       if (files.length >= ACC_FB_PRUNE_MIN) {
-        const rows = prunable(files, RLM, ACC_FB_PRUNE_DAYS, localDate())
+        const rows = prunable(files, RLM, ACC_FB_PRUNE_DAYS, TODAY)
         if (rows.length >= ACC_FB_PRUNE_MIN) notices.push(S.accFbPrunable(rows.length, ACC_FB_PRUNE_DAYS))
       }
     }

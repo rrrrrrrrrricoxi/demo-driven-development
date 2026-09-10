@@ -622,15 +622,13 @@ async function buildPlan(root, st, gi, opt, det) {
   for (const f of ['serve.py', 'serve-kanban.sh']) if (!existsSync(join(st.kanban, f))) plan.creates.push(`app/kanban/${f}`)
   // serve.py 是种入件(writeOnce:已在场就不动)。新版脚本带的新能力(v0.17.0 的验收反馈写口)
   // 只在新版里 —— 宿主那份落后就说一行,换不换由人定(那份可能被改过,init 不该替人盖)。
-  {
-    const sp = join(st.kanban, 'serve.py')
-    if (existsSync(sp)) {
-      const ver = (s) => (/^# ddd-serve (v\d+)$/m.exec(s) || [])[1] || ''
-      const want = ver(readFileSync(join(TPL, 'serve.py'), 'utf8'))
-      let have = ''
-      try { have = ver(readFileSync(sp, 'utf8')) } catch {}
-      if (want && have !== want) plan.serveStale = { have, want }
-    }
+  const servePath = join(st.kanban, 'serve.py')
+  if (existsSync(servePath)) {
+    const serveVer = (s) => (/^# ddd-serve (v\d+)$/m.exec(s) || [])[1] || ''
+    const wantVer = serveVer(readFileSync(join(TPL, 'serve.py'), 'utf8'))
+    let haveVer = ''
+    try { haveVer = serveVer(readFileSync(servePath, 'utf8')) } catch {}
+    if (wantVer && haveVer !== wantVer) plan.serveStale = { have: haveVer, want: wantVer }
   }
 
   // settings:模拟合并,列出将新增的 deny 条目

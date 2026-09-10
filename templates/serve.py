@@ -104,14 +104,18 @@ def shot_name_ok(name, pr, item):
                              % (pr, re.escape(slug(item))), name))
 
 
-def append_line(path, line):
-    """O_APPEND + 单次 write:并发两笔各自成行,谁也插不进谁中间;fsync 才算写进去了。"""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+def write_fd(fd, data):
+    """单次 write + fsync 再关 —— 两个写口共用:写完才算数,写不进去就让 OSError 冒上去。"""
     try:
-        os.write(fd, line)
+        os.write(fd, data)
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def append_line(path, line):
+    """O_APPEND + 单次 write:并发两笔各自成行,谁也插不进谁中间。"""
+    write_fd(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644), line)
 
 
 class Rejected(Exception):
@@ -192,7 +196,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         return self.rfile.read(n)
 
     @staticmethod
-    def check_who(pr, item, who):
+    def check_target(pr, item, who):
         """三个必填字段的校验;返回规整后的 (pr, item, who, 清单 revision)。"""
         lists = acc_lists()
         try:
@@ -219,11 +223,11 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             raise Rejected("请求体不是合法 JSON")
         if not isinstance(data, dict):
             raise Rejected("请求体不是 JSON 对象")
-        pr, item, who, rev = self.check_who(data.get("pr"), data.get("item"), data.get("who"))
+        pr, item, who, rev = self.check_target(data.get("pr"), data.get("item"), data.get("who"))
         verdict = data.get("verdict")
-        if verdict is None or verdict == "":
+        if verdict is None:
             verdict = ""
-        elif verdict not in ("ok", "bad"):
+        if verdict not in ("", "ok", "bad"):
             raise Rejected("verdict 只能是 ok / bad(或省略)")
         note = data.get("note")
         note = "" if note is None else note
@@ -231,8 +235,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             raise Rejected("note 不是字符串")
         if len(note) > NOTE_MAX:
             raise Rejected("note 超过 %d 字" % NOTE_MAX)
-        shot = data.get("shot")
-        shot = "" if shot is None else shot
+        shot = data.get("shot") or ""
         if shot:
             if not isinstance(shot, str) or not shot_name_ok(shot, pr, item):
                 raise Rejected("shot 不是本服务为这条目生成的文件名")
@@ -255,7 +258,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     def post_shot(self):
         q = parse_qs(urlsplit(self.path).query)
         pick = lambda k: (q.get(k) or [None])[0]
-        pr, item, _who, _rev = self.check_who(pick("pr"), pick("item"), pick("who"))
+        pr, item, _who, _rev = self.check_target(pick("pr"), pick("item"), pick("who"))
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype not in IMAGE_TYPES:
             raise Rejected("Content-Type 只收 image/jpeg 与 image/png")
@@ -271,11 +274,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
                 fd = os.open(os.path.join(SHOTS_DIR, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
             except FileExistsError:
                 continue
-            try:
-                os.write(fd, raw)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+            write_fd(fd, raw)
             return {"shot": name}
         raise Rejected("同一秒里这条目的截图太多,过一秒再贴")
 

@@ -2922,8 +2922,8 @@ const ACC_FB_JS = !AFB ? '' : `
     }
     function accFbMerge(rows) { // 同一 (who, item):后写的 verdict 覆盖前一条;备注与图累积
       var by = {}
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i], k = r.pr + '\\u0000' + r.item
+      rows.forEach(function (r) {
+        var k = r.pr + '\\u0000' + r.item
         var e = by[k] || (by[k] = { verdicts: {}, order: [], notes: [], shots: [], rows: [] })
         if (r.verdict === 'ok' || r.verdict === 'bad') {
           if (!Object.prototype.hasOwnProperty.call(e.verdicts, r.who)) e.order.push(r.who)
@@ -2932,13 +2932,12 @@ const ACC_FB_JS = !AFB ? '' : `
         if (r.note) e.notes.push(r)
         if (r.shot) e.shots.push(r)
         e.rows.push(r)
-      }
+      })
       return by
     }
     function accFbChip(e) { // 入口摘要:「✓ Rico · ✕ codev · 2 图」;没有反馈 = 空串(入口保持原样)
       if (!e) return ''
-      var parts = []
-      for (var i = 0; i < e.order.length; i++) parts.push((e.verdicts[e.order[i]] === 'ok' ? '✓ ' : '✕ ') + e.order[i])
+      var parts = e.order.map(function (w) { return (e.verdicts[w] === 'ok' ? '✓ ' : '✕ ') + w })
       if (e.notes.length) parts.push(e.notes.length + ' 备注')
       if (e.shots.length) parts.push(e.shots.length + ' 图')
       return parts.join(' · ')
@@ -2961,6 +2960,7 @@ const ACC_FB_JS = !AFB ? '' : `
       return e
     }
     function fbMsg(box, t) { var m = box.querySelector('.accfbm'); if (m) m.textContent = t || '' }
+    function fbJson(t) { try { return JSON.parse(t) } catch (e) { return null } } // 两个写口的回应都这么读
     function fbWhoChip() {
       var chip = document.querySelector('[data-accme]')
       if (!chip) return
@@ -2988,15 +2988,18 @@ const ACC_FB_JS = !AFB ? '' : `
       var p = document.getElementById('pane-acceptance')
       if (p && p.classList.contains('pane-active') && document.visibilityState !== 'hidden') fbFetch()
     }
-    function fbThumb(box, name) { // 待提交的那张:换一张就顶掉前一张
-      var old = box.querySelector('.accfbtb')
-      if (old) old.parentElement.removeChild(old)
-      var a = fbEl('a', 'accfbimg accfbtb')
+    function fbImg(name, cls) { // 缩略图一处拼:名字过了 accFbShotOk(或刚由服务端给回)才敢进 src
+      var a = fbEl('a', cls)
       a.href = 'shots/' + name; a.target = '_blank'; a.rel = 'noopener'
       var im = document.createElement('img')
       im.src = 'shots/' + name; im.alt = name; im.loading = 'lazy'
       a.appendChild(im)
-      box.querySelector('.accfbf').appendChild(a)
+      return a
+    }
+    function fbThumb(box, name) { // 待提交的那张:换一张就顶掉前一张;不给名字 = 撤掉
+      var old = box.querySelector('.accfbtb')
+      if (old) old.remove()
+      if (name) box.querySelector('.accfbf').appendChild(fbImg(name, 'accfbimg accfbtb'))
     }
     function fbBox(row) { // 展开区现建(点开才有):一份清单上百条,烤一百套表单是白搭的字节
       var box = row.querySelector('.accfbx')
@@ -3013,11 +3016,8 @@ const ACC_FB_JS = !AFB ? '' : `
       var file = document.createElement('input')
       file.type = 'file'; file.accept = 'image/*'; file.className = 'accfbfile'; file.hidden = true
       var send = fbEl('button', 'accfbb send', '记下'); send.dataset.accfbsend = '1'
-      f.appendChild(ok); f.appendChild(bad); f.appendChild(note)
-      f.appendChild(paste); f.appendChild(pick); f.appendChild(file); f.appendChild(send)
-      box.appendChild(f)
-      box.appendChild(fbEl('p', 'accfbm', ''))
-      box.appendChild(fbEl('div', 'accfbl'))
+      f.append(ok, bad, note, paste, pick, file, send)
+      box.append(f, fbEl('p', 'accfbm', ''), fbEl('div', 'accfbl'))
       file.addEventListener('change', function () {
         if (file.files && file.files[0]) fbUpload(row, file.files[0])
         file.value = ''
@@ -3032,8 +3032,7 @@ const ACC_FB_JS = !AFB ? '' : `
       list.textContent = ''
       if (!rows.length) { list.appendChild(fbEl('p', 'accfbe', '还没有反馈')); return }
       var rev = Number(row.dataset.accrev || 0)
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i]
+      rows.forEach(function (r) {
         var stale = Boolean(rev && r.rev && Number(r.rev) !== rev)
         var line = fbEl('div', 'accfbr' + (stale ? ' stale' : ''))
         line.appendChild(fbEl('b', '', String(r.who)))
@@ -3042,34 +3041,25 @@ const ACC_FB_JS = !AFB ? '' : `
         if (t) line.appendChild(fbEl('span', 'accfbts', t))
         if (r.note) line.appendChild(fbEl('span', 'accfbnt', String(r.note)))
         if (stale) line.appendChild(fbEl('i', 'accfbst', '清单已改(rev ' + r.rev + ')'))
-        if (r.shot && accFbShotOk(r.shot, row.dataset.accpr, row.dataset.accid)) {
-          var a = fbEl('a', 'accfbimg')
-          a.href = 'shots/' + r.shot; a.target = '_blank'; a.rel = 'noopener'
-          var im = document.createElement('img')
-          im.src = 'shots/' + r.shot; im.alt = String(r.shot); im.loading = 'lazy'
-          a.appendChild(im)
-          line.appendChild(a)
-        }
+        if (r.shot && accFbShotOk(r.shot, row.dataset.accpr, row.dataset.accid)) line.appendChild(fbImg(String(r.shot), 'accfbimg'))
         list.appendChild(line)
-      }
+      })
       if (FB_BAD) list.appendChild(fbEl('p', 'accfbe', FB_BAD + ' 行读不懂,已跳过'))
     }
     function fbSync() { // 入口摘要 + 展开着的那几行;accSync 每次都顺手带上它
       var pane = document.getElementById('pane-acceptance')
       if (!pane) return
       fbWhoChip()
-      var rows = pane.querySelectorAll('.accitem')
-      for (var i = 0; i < rows.length; i++) {
-        var row = rows[i], e = FB[fbKey(row)]
+      pane.querySelectorAll('.accitem').forEach(function (row) {
         var t = row.querySelector('.accfbt')
         if (t) {
-          var txt = accFbChip(e)
+          var txt = accFbChip(FB[fbKey(row)])
           t.textContent = txt || '反馈 ▸'
           t.parentElement.classList.toggle('has', Boolean(txt))
         }
         var box = row.querySelector('.accfbx')
         if (box && !box.hidden) fbList(box, row)
-      }
+      })
     }
     function fbShrink(file) { // 上传前压:长边 ≤ 1280、JPEG 0.8 —— 手机直出那种 4MB 图也进得来
       return new Promise(function (res, rej) {
@@ -3090,7 +3080,7 @@ const ACC_FB_JS = !AFB ? '' : `
     }
     function fbUpload(row, file) {
       var box = fbBox(row)
-      var who = fbNeedWho()
+      var who = FB_WHO || fbAskWho()
       if (!who) { fbMsg(box, '先署个名(1–20 字)'); return }
       fbMsg(box, '压缩中…')
       fbShrink(file).then(function (blob) {
@@ -3100,8 +3090,7 @@ const ACC_FB_JS = !AFB ? '' : `
           { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
       }).then(function (r) {
         return r.text().then(function (t) {
-          var j = null
-          try { j = JSON.parse(t) } catch (e) {}
+          var j = fbJson(t)
           if (!r.ok || !j || !accFbShotOk(j.shot, row.dataset.accpr, row.dataset.accid)) throw new Error((j && j.error) || ('上传失败(' + r.status + ')'))
           return j.shot
         })
@@ -3111,10 +3100,9 @@ const ACC_FB_JS = !AFB ? '' : `
         fbMsg(box, '图已上传 —— 点「记下」才进账')
       }).catch(function (e) { fbMsg(box, String((e && e.message) || e)) })
     }
-    function fbNeedWho() { return FB_WHO || fbAskWho() }
     function fbSend(row) {
       var box = fbBox(row)
-      var who = fbNeedWho()
+      var who = FB_WHO || fbAskWho()
       if (!who) { fbMsg(box, '先署个名(1–20 字)'); return }
       var v = box.querySelector('.accfbv.on')
       var note = box.querySelector('.accfbn').value.trim()
@@ -3126,23 +3114,15 @@ const ACC_FB_JS = !AFB ? '' : `
       if (shot) body.shot = shot
       fbMsg(box, '记下中…')
       fetch('api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-        .then(function (r) { return r.text().then(function (t) { return { ok: r.ok, s: r.status, t: t } }) })
-        .then(function (x) {
-          if (!x.ok) {
-            var m = ''
-            try { m = (JSON.parse(x.t) || {}).error || '' } catch (e) {}
-            fbMsg(box, m || ('写入失败(' + x.s + ')'))
-            return
-          }
+        .then(function (r) { return r.text().then(function (t) {
+          if (!r.ok) { fbMsg(box, (fbJson(t) || {}).error || ('写入失败(' + r.status + ')')); return }
           delete FB_STAGE[fbKey(row)]
           box.querySelector('.accfbn').value = ''
-          var on = box.querySelectorAll('.accfbv.on')
-          for (var i = 0; i < on.length; i++) on[i].classList.remove('on')
-          var th = box.querySelector('.accfbtb')
-          if (th) th.parentElement.removeChild(th)
+          box.querySelectorAll('.accfbv.on').forEach(function (b) { b.classList.remove('on') })
+          fbThumb(box, '') // 待提交的那张已经进账,撤掉
           fbMsg(box, '已记下')
           fbFetch()
-        })
+        }) })
         .catch(function () { fbMsg(box, '写不进去 —— 看板要经 serve.py(v0.17.0 起的那版)打开才有写口') })
     }
     if (pane) {
@@ -3161,8 +3141,7 @@ const ACC_FB_JS = !AFB ? '' : `
         var v = t.closest('[data-accfbv]')
         if (v) { // 二选一,再点一下取消(只留备注或图也是合法的一条)
           var was = v.classList.contains('on')
-          var sib = v.parentElement.querySelectorAll('[data-accfbv]')
-          for (var i = 0; i < sib.length; i++) sib[i].classList.remove('on')
+          v.parentElement.querySelectorAll('[data-accfbv]').forEach(function (b) { b.classList.remove('on') })
           if (!was) v.classList.add('on')
           return
         }

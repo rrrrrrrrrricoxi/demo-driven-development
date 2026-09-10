@@ -24,8 +24,7 @@ export const ACC_FB_PRUNE_DAYS = 30
 export const ACC_FB_PRUNE_MIN = 10
 
 const argv = process.argv.slice(2)
-const has = (f) => argv.includes(f)
-const DRY = has('--dry-run')
+const DRY = argv.includes('--dry-run')
 const DAYS = (() => {
   const i = argv.indexOf('--days')
   if (i < 0) return ACC_FB_PRUNE_DAYS
@@ -38,13 +37,13 @@ const DAYS = (() => {
 })()
 
 /** shots/ 里的反馈截图 → PR 号(认不出 PR 的一律不碰) */
-export const accShotPr = (file) => {
+const accShotPr = (file) => {
   const m = /^acc-(\d+)-.+\.(?:jpg|png)$/.exec(file)
   return m ? Number(m[1]) : null
 }
 
-/** PR 号 → 合并日(YYYY-MM-DD);没合 / 没这条记录 = null */
-export const mergedDays = (rlm) => {
+/** PR 号 → 合并日(YYYY-MM-DD);没合 / 没这条记录 = 表里没有它 */
+const mergedDays = (rlm) => {
   const out = new Map()
   for (const p of (rlm && rlm.prs) || []) {
     if (!p || p.number == null || !p.mergedAt) continue
@@ -91,9 +90,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(0)
   }
   let bytes = 0
-  for (const r of rows) { try { bytes += statSync(join(SHOTS, r.file)).size } catch {} }
-  for (const r of rows) console.log(`  ${DRY ? '将删' : '已删'} shots/${r.file}(#${r.pr} 合于 ${r.at},${r.age} 天前)`)
-  if (!DRY) for (const r of rows) rmSync(join(SHOTS, r.file), { force: true })
+  for (const r of rows) { // 一趟走完:先记大小(删了就问不出来了)、报一行、再动盘
+    try { bytes += statSync(join(SHOTS, r.file)).size } catch {}
+    console.log(`  ${DRY ? '将删' : '已删'} shots/${r.file}(#${r.pr} 合于 ${r.at},${r.age} 天前)`)
+    if (!DRY) rmSync(join(SHOTS, r.file), { force: true })
+  }
   console.log(`[acc-prune] ${DRY ? '将删' : '已删'} ${rows.length} 张 · ${(bytes / 1024).toFixed(0)}KB` +
     `(判据:PR 已合并满 ${DAYS} 天,合并日取 release-manifest)${DRY ? ' —— dry-run,盘上一个字节没动' : ''}`)
   console.log('[acc-prune] acceptance-feedback.jsonl 一行未删 —— 图没了,那几行「谁说了什么」照旧在。')

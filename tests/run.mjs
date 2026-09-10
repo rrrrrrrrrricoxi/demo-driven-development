@@ -5325,11 +5325,11 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
   }
 
-  // ---- 纯函数:从产物里原样抠出来跑(合并最新 verdict / 摘要文案 / 文件名校验)----
+  // ---- 纯函数:从产物里原样抠出来跑(下面几段共用这一份,冒烟那段验坏行也用它)----
+  const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
+  ok(fbSrc.includes('accFbMerge') && fbSrc.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
+  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbChip }')()
   {
-    const src = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
-    ok(src.includes('accFbMerge') && src.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
-    const F = new Function(src + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbChip }')()
     const NUL = String.fromCharCode(0)
     const lines = [
       '{"ts":"2026-09-10T12:03:41Z","pr":277,"item":"JJ3","who":"Rico","verdict":"bad","note":"空态那句没换"}',
@@ -5488,8 +5488,6 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       {
         writeFileSync(jsonlP, readFileSync(jsonlP, 'utf8') + '半行 {"pr":277\n')
         const g = await req(srv.base, '/acceptance-feedback.jsonl')
-        const src = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
-        const F = new Function(src + '\nreturn { accFbParse }')()
         const p = F.accFbParse(g.text)
         ok(p.bad === 1 && p.rows.length === 10, '坏行只被跳过并计数,前面的账一条不丢', `${p.rows.length} / ${p.bad}`)
       }
