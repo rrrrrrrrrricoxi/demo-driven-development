@@ -39,7 +39,9 @@ what they wrote. Generated output and served responses are byte-identical to
   delete and no edit — a mistake is corrected by appending. The checklist's
   `revision` is stamped by the server at write time, so once the list changes,
   feedback from the previous revision is still shown but greyed with
-  「清单已改(rev N)」.
+  「清单已改(rev N)」 — and the row's summary counts only the current revision,
+  reporting the rest as `旧清单 N` instead of letting a tick from before the
+  rewrite stand as a verdict on the text that replaced it.
 - **Two write endpoints in `serve.py`** (stdlib only, still one file, still no
   dependencies): `POST /api/acceptance/mark` and
   `POST /api/acceptance/shot?pr=&item=&who=`. Everything is validated even

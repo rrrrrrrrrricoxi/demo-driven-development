@@ -137,7 +137,10 @@ that file every 20 seconds while the acceptance tab is visible, plus whenever th
 window regains focus or the tab is opened, so a colleague's verdict shows up in
 seconds without regenerating anything. Later lines win over earlier ones for the
 same (person, item) verdict; notes and screenshots accumulate; a malformed line
-is skipped and counted, never fatal. Local ticks and the "copy result" button are
+is skipped and counted, never fatal. Bump a checklist's `revision` and the older
+marks stay visible but stop counting: the expanded row greys them with
+「清单已改(rev N)」 and the summary reports them as `旧清单 N`, so a ✓ from
+before the rewrite never reads as a ✓ on the text that replaced it. Local ticks and the "copy result" button are
 untouched — they remain your own progress; this only adds what other people said.
 
 Everything is validated server-side even though the board is on a trusted

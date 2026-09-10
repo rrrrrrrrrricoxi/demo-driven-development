@@ -2920,26 +2920,38 @@ const ACC_FB_JS = !AFB ? '' : `
       }
       return { rows: rows, bad: bad }
     }
-    function accFbMerge(rows) { // 同一 (who, item):后写的 verdict 覆盖前一条;备注与图累积
-      var by = {}
+    function accFbMerge(rows) { // 只按 (pr, item) 归堆;哪几行还算数由 accFbLive 按清单 revision 说了算
+      var by = Object.create(null)
       rows.forEach(function (r) {
         var k = r.pr + '\\u0000' + r.item
-        var e = by[k] || (by[k] = { verdicts: {}, order: [], notes: [], shots: [], rows: [] })
-        if (r.verdict === 'ok' || r.verdict === 'bad') {
-          if (!Object.prototype.hasOwnProperty.call(e.verdicts, r.who)) e.order.push(r.who)
-          e.verdicts[r.who] = r.verdict
-        }
-        if (r.note) e.notes.push(r)
-        if (r.shot) e.shots.push(r)
+        var e = by[k] || (by[k] = { rows: [] })
         e.rows.push(r)
       })
       return by
     }
-    function accFbChip(e) { // 入口摘要:「✓ Rico · ✕ codev · 2 图」;没有反馈 = 空串(入口保持原样)
-      if (!e) return ''
-      var parts = e.order.map(function (w) { return (e.verdicts[w] === 'ok' ? '✓ ' : '✕ ') + w })
-      if (e.notes.length) parts.push(e.notes.length + ' 备注')
-      if (e.shots.length) parts.push(e.shots.length + ' 图')
+    function accFbStale(r, rev) { // 清单改了版:旧版上写的那几行还看得见,但不再替人背书
+      return Boolean(rev && r.rev && Number(r.rev) !== rev)
+    }
+    function accFbLive(e, rev) { // 当版清单上的合并结果:同一 (who, item) 后写的 verdict 覆盖前一条,备注与图累积
+      var v = { verdicts: Object.create(null), order: [], notes: 0, shots: 0, old: 0 }
+      var rows = (e && e.rows) || []
+      rows.forEach(function (r) {
+        if (accFbStale(r, rev)) { v.old++; return }
+        if (r.verdict === 'ok' || r.verdict === 'bad') {
+          if (!(r.who in v.verdicts)) v.order.push(r.who) // 无原型对象:名字叫 __proto__ 也只是个普通键
+          v.verdicts[r.who] = r.verdict
+        }
+        if (r.note) v.notes++
+        if (r.shot) v.shots++
+      })
+      return v
+    }
+    function accFbChip(e, rev) { // 入口摘要:「✓ Rico · ✕ codev · 2 图」;没有反馈 = 空串(入口保持原样)
+      var v = accFbLive(e, rev)
+      var parts = v.order.map(function (w) { return (v.verdicts[w] === 'ok' ? '✓ ' : '✕ ') + w })
+      if (v.notes) parts.push(v.notes + ' 备注')
+      if (v.shots) parts.push(v.shots + ' 图')
+      if (v.old) parts.push('旧清单 ' + v.old) // 陈述事实:改版前的账,不冒充「这条通过了」
       return parts.join(' · ')
     }
     function accFbTime(ts) { // jsonl 里记的是 UTC,读的人看自己的钟
@@ -3041,7 +3053,7 @@ const ACC_FB_JS = !AFB ? '' : `
       if (!rows.length) { list.appendChild(fbEl('p', 'accfbe', '还没有反馈')); return }
       var rev = Number(row.dataset.accrev || 0)
       rows.forEach(function (r) {
-        var stale = Boolean(rev && r.rev && Number(r.rev) !== rev)
+        var stale = accFbStale(r, rev)
         var line = fbEl('div', 'accfbr' + (stale ? ' stale' : ''))
         line.appendChild(fbEl('b', '', String(r.who)))
         if (r.verdict === 'ok' || r.verdict === 'bad') line.appendChild(fbEl('span', 'accfbvd ' + r.verdict, r.verdict === 'ok' ? '✓' : '✕'))
@@ -3061,7 +3073,7 @@ const ACC_FB_JS = !AFB ? '' : `
       pane.querySelectorAll('.accitem').forEach(function (row) {
         var t = row.querySelector('.accfbt')
         if (t) {
-          var txt = accFbChip(FB[fbKey(row)])
+          var txt = accFbChip(FB[fbKey(row)], Number(row.dataset.accrev || 0))
           t.textContent = txt || '反馈 ▸'
           t.parentElement.classList.toggle('has', Boolean(txt))
         }

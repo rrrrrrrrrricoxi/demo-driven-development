@@ -5328,7 +5328,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   // ---- 纯函数:从产物里原样抠出来跑(下面几段共用这一份,冒烟那段验坏行也用它)----
   const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
   ok(fbSrc.includes('accFbMerge') && fbSrc.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
-  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbChip, accFbTime, fbHttpMsg }')()
+  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbLive, accFbChip, accFbTime, fbHttpMsg }')()
   {
     // 写口答了非 2xx 时页面说什么。最可能的首跑状态是宿主那份 serve.py 还没有 do_POST
     // (种子文件,init 从不覆盖):BaseHTTPRequestHandler 兜底答 501 + 一页 text/html,
@@ -5356,13 +5356,35 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const p = F.accFbParse(lines)
     ok(p.rows.length === 3 && p.bad === 2, '坏行跳过并计数(非法 JSON 一条 + 缺 who 一条)', `${p.rows.length} / ${p.bad}`)
     const e = F.accFbMerge(p.rows)['277' + NUL + 'JJ3']
-    ok(e.verdicts.Rico === 'ok' && e.verdicts.codev === 'bad',
-      '同一 (who, item):后写的 verdict 覆盖前一条(Rico 由 bad 改成 ok)', JSON.stringify(e.verdicts))
-    ok(e.order.join(' ') === 'Rico codev', '出场顺序按第一次表态排,改主意不插队', e.order.join(' '))
-    ok(e.notes.length === 1 && e.shots.length === 1, '备注与图是累积的,不被后一条顶掉')
-    ok(F.accFbChip(e) === '✓ Rico · ✕ codev · 1 备注 · 1 图', '入口摘要文案', F.accFbChip(e))
-    ok(F.accFbChip(null) === '' && F.accFbChip(F.accFbMerge([])['x']) === '',
+    const v = F.accFbLive(e, 2)
+    ok(v.verdicts.Rico === 'ok' && v.verdicts.codev === 'bad',
+      '同一 (who, item):后写的 verdict 覆盖前一条(Rico 由 bad 改成 ok)', JSON.stringify(v.verdicts))
+    ok(v.order.join(' ') === 'Rico codev', '出场顺序按第一次表态排,改主意不插队', v.order.join(' '))
+    ok(v.notes === 1 && v.shots === 1, '备注与图是累积的,不被后一条顶掉')
+    ok(F.accFbChip(e, 2) === '✓ Rico · ✕ codev · 1 备注 · 1 图', '入口摘要文案', F.accFbChip(e, 2))
+    ok(F.accFbChip(null, 2) === '' && F.accFbChip(F.accFbMerge([])['x'], 2) === '',
       '没有反馈 = 空串(入口保持「反馈 ▸」原样)')
+    {
+      // 清单改版:本地勾按 rev 清零、展开区里旧行标灰,入口那枚 chip 从前不认 rev —— 它照旧写着
+      // 「✓ Rico」,与一条刚在新版清单上通过的行长得一模一样。扫一列 chip 的人读到的是「已通过」。
+      const mixed = F.accFbMerge(F.accFbParse([
+        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":1,"verdict":"ok"}',
+        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"codev","rev":1,"note":"改版前的备注"}',
+        '{"ts":"2026-09-10T12:30:00Z","pr":277,"item":"JJ3","who":"codev","rev":2,"verdict":"bad"}',
+      ].join('\n')).rows)['277' + NUL + 'JJ3']
+      ok(F.accFbChip(mixed, 2) === '✕ codev · 旧清单 2', '改版后:只算当版的行,旧账另起一段陈述', F.accFbChip(mixed, 2))
+      ok(F.accFbChip(mixed, 1) === '✓ Rico · 1 备注 · 旧清单 1', 'rev 1 那边同一把尺(反过来看也对)', F.accFbChip(mixed, 1))
+      ok(F.accFbChip(mixed, 0) === '✓ Rico · ✕ codev · 1 备注', '取不到 rev(老板子 / 没盖 rev 的行):全算,与 0.17.0 之前一致', F.accFbChip(mixed, 0))
+    }
+    {
+      // who 是测试人自己敲的字,拿它当普通对象的键 = 名字叫 __proto__ 时 chip 一行说两遍、
+      // 记的是 ✓ 显示成 ✕(赋值命中 Object.prototype 的 setter,静默 no-op)
+      const proto = F.accFbMerge(F.accFbParse([
+        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"__proto__","verdict":"bad"}',
+        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"__proto__","verdict":"ok"}',
+      ].join('\n')).rows)['277' + NUL + 'JJ3']
+      ok(F.accFbChip(proto, 2) === '✓ __proto__', 'who 叫 __proto__:也只是一个普通名字(不重复、不显示成 ✕)', F.accFbChip(proto, 2))
+    }
     ok(F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg', 277, 'JJ3'), '服务端拼得出的名字:认')
     ok(!F.accFbShotOk('../../etc/passwd', 277, 'JJ3') && !F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg/../x.jpg', 277, 'JJ3'),
       '路径注入:不认(名字直接进 img src,这条是硬门)')
