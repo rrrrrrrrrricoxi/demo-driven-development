@@ -20,6 +20,8 @@
 #   校验全做(清单里有没有这个 PR / 条目、who 长度与控制字符、verdict 枚举、note 长度、
 #   图 ≤ 2 MB + 魔数 + Content-Type 相符),文件名只由服务端拼(不接受客户端文件名);
 #   写盘走 O_APPEND 单次 write + fsync —— 两个人同时点也不会把对方的行截断。
+#   写口还有一道跨站门(Sec-Fetch-Site / Origin)+ mark 认死 application/json:信任边界是
+#   「连得到这个端口的人都能写」,但别人网页上的一行 fetch 不该算在这个边界里(见 README)。
 
 import functools
 import gzip
@@ -161,6 +163,9 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             return self.send_error(501, "Unsupported method ('POST')")  # 与没有 do_POST 时同一句
         if not feedback_on():
             return self.reply_json(404, {"error": "acceptanceFeedback 未开(kanban.config.json)"})
+        bad = self.cross_site()
+        if bad:
+            return self.reply_json(403, {"error": bad})
         try:
             body = self.post_mark() if route == MARK_ROUTE else self.post_shot()
         except Rejected as e:
@@ -168,6 +173,20 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         except OSError as e:  # 落盘失败不吞:页面上要看得见
             return self.reply_json(500, {"error": "写入失败:%s" % e})
         self.reply_json(200, body)
+
+    def cross_site(self):
+        """跨站就回一句 why;同源(或压根不是浏览器发的)回空串。
+
+        浏览器给每个请求盖 Sec-Fetch-Site,跨站的写请求还带 Origin;本机的 curl / 脚本两者都不发,
+        所以这道门只挡「别人的网页替你的浏览器来写」,不挡你自己的命令行。
+        """
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site and site != "same-origin":
+            return "跨站请求不受理(Sec-Fetch-Site: %s)" % site
+        origin = self.headers.get("Origin")
+        if origin and origin.split("//", 1)[-1] != (self.headers.get("Host") or ""):
+            return "跨站请求不受理(Origin: %s)" % origin
+        return ""
 
     def reply_json(self, code, obj):
         body = obj if isinstance(obj, bytes) else json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -217,6 +236,12 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         return pr, item, who, rev
 
     def post_mark(self):
+        # 认死 application/json:text/plain 那几个是 CORS simple type,浏览器发它们不走预检,
+        # 跨站的一行 fetch 就能落一条署他人名的验收结论。要 application/json 就得先过预检,
+        # 而这台服务对 OPTIONS 答 501 —— 跨站那条路到此为止(shot 口本来就靠 image/* 走这条理)。
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            raise Rejected("Content-Type 只收 application/json")
         try:
             data = json.loads(self.read_body(MAX_MARK).decode("utf-8"))
         except (UnicodeDecodeError, ValueError):

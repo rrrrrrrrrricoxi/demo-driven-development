@@ -52,9 +52,13 @@ what they wrote. Generated output and served responses are byte-identical to
   composed server-side** (`acc-<pr>-<item>-<UTC timestamp>.jpg`; the item id is
   slugged to `[A-Za-z0-9_.-]`), so a client-supplied name is never trusted.
   Writes are one `O_APPEND` write plus `fsync`: two people clicking at the same
-  moment cannot interleave. The config is read per request, so flipping the key
-  does not need a restart, and with the key off both routes answer 404 while any
-  other POST path keeps today's 501.
+  moment cannot interleave. Both routes answer 403 to a cross-site write
+  (`Sec-Fetch-Site` from elsewhere, or an `Origin` that is not this server's),
+  and `mark` takes only `application/json`, so no page you happen to be visiting
+  can post a verdict under your name as a CORS simple request; a curl or script
+  sends neither header and is unaffected. The config is read per request, so
+  flipping the key does not need a restart, and with the key off both routes
+  answer 404 while any other POST path keeps today's 501.
 - **Polling instead of regeneration**: the page fetches the jsonl with
   `cache: no-store` every 20 seconds while the acceptance tab is visible, when
   the window regains focus, and when the tab is opened. Failures are silent and

@@ -150,6 +150,16 @@ never trusted. Writes are a single `O_APPEND` write plus `fsync`, so two people
 clicking at once cannot interleave. With the key unset the endpoints answer 404
 and generated output is byte-identical to a board without the feature.
 
+Both endpoints refuse cross-site writes: a request whose `Sec-Fetch-Site` says it
+came from somewhere else, or whose `Origin` is not this server's own, gets a 403,
+and `mark` accepts only `application/json` — `text/plain` would be a CORS simple
+request, which is exactly the shape a page you happen to be visiting could use to
+file a verdict under your name. Command-line clients send neither header and are
+unaffected. The trust boundary itself is unchanged and worth stating plainly:
+`serve.py` binds `0.0.0.0` and has no accounts, so **anyone who can reach the
+port can write** — run it on a network you trust, and remember the ledger is
+append-only in git, where a forged line shows up in the next `git diff`.
+
 Feedback screenshots stay out of git by default: add
 `app/kanban/shots/acc-*` to your `.gitignore` (the plugin prints this as a
 reminder and never edits your ignore file), and they are excluded from the

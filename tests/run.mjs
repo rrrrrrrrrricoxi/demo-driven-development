@@ -5440,6 +5440,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         ['shot 文件名注入', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../../etc/passwd' }), 'shot'],
         ['shot 名字对但文件不在', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: 'acc-277-JJ3-20260910T120341.jpg' }), 'shots/'],
         ['请求体不是 JSON', await req(srv.base, '/api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' }), 'JSON'],
+        // text/plain 是 CORS simple type(发它不走预检)—— 认死 application/json,跨站那条路才断得干净
+        ['mark 的 Content-Type 是 text/plain', await req(srv.base, '/api/acceptance/mark',
+          { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ pr: 277, item: 'JJ3', who: 'R', verdict: 'ok' }) }), 'Content-Type'],
         ['图的 Content-Type 不收', await shot('pr=277&item=JJ3&who=R', JPG, 'image/gif'), 'Content-Type'],
         ['魔数与 Content-Type 对不上', await shot('pr=277&item=JJ3&who=R', Buffer.from('GIF89a......'), 'image/jpeg'), '魔数'],
         ['图超 2 MB', await shot('pr=277&item=JJ3&who=R', Buffer.concat([JPG, Buffer.alloc(2 * 1024 * 1024)]), 'image/jpeg'), '上限'],
@@ -5490,6 +5493,30 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         const g = await req(srv.base, '/acceptance-feedback.jsonl')
         const p = F.accFbParse(g.text)
         ok(p.bad === 1 && p.rows.length === 10, '坏行只被跳过并计数,前面的账一条不丢', `${p.rows.length} / ${p.bad}`)
+      }
+      // 跨站门:别人的网页替你的浏览器来写,一行都不许落。
+      // (排在最后:这一段自己也真写一行,不打扰上面那几条按行数点数的断言)
+      {
+        const before = readFileSync(jsonlP, 'utf8')
+        const forge = (extra) => req(srv.base, '/api/acceptance/mark', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...extra },
+          body: JSON.stringify({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'ok', note: '别人网页替我写的' }),
+        })
+        const f1 = await forge({ Origin: 'https://evil.example' })
+        ok(f1.status === 403 && String(f1.json && f1.json.error).includes('Origin'),
+          '跨站 Origin:403 —— 攻击者读不到回应,但那一票也不该落进账', `${f1.status} ${f1.text.slice(0, 90)}`)
+        const f2 = await forge({ 'Sec-Fetch-Site': 'cross-site' })
+        ok(f2.status === 403 && String(f2.json && f2.json.error).includes('Sec-Fetch-Site'),
+          '浏览器盖的跨站戳:403(现代浏览器都发这个头)', `${f2.status} ${f2.text.slice(0, 90)}`)
+        const f3 = await req(srv.base, '/api/acceptance/shot?pr=277&item=JJ3&who=Rico',
+          { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'Sec-Fetch-Site': 'same-site' }, body: JPG })
+        ok(f3.status === 403, '图那条口同一道门(same-site 也不算同源)', `${f3.status} ${f3.text.slice(0, 90)}`)
+        ok(readFileSync(jsonlP, 'utf8') === before, '被跨站门挡下的三笔:jsonl 一个字节没长')
+        ok(readdirSync(join(kb, 'shots')).every((f) => !f.startsWith('acc-277-JJ3-')), '被挡下的那张图也没落盘')
+        const good = await forge({ Origin: srv.base, 'Sec-Fetch-Site': 'same-origin' })
+        ok(good.status === 200 && readFileSync(jsonlP, 'utf8').length > before.length,
+          '同源浏览器那副戳(Origin 就是本服务 + same-origin):照旧写得进', `${good.status} ${good.text.slice(0, 90)}`)
       }
     } finally {
       srv.proc.kill('SIGKILL')
