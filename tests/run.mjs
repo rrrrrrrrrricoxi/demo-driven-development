@@ -116,6 +116,34 @@ mkdirSync(NO_INSTALLS, { recursive: true })
 const runStop = (scriptsDir, root, { input = '{}', env = {} } = {}) =>
   spawnSync(process.execPath, [join(scriptsDir, 'stop-hook.mjs')],
     { encoding: 'utf8', input, env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: root, ...env } })
+// ---- serve.py 冒烟用:随机端口起一台,同一个测试负责收尸(进程退出时再兜一刀)----
+// 端口写死 0 = 内核分配:测试机上常驻的 8898/5175 那几台一根汗毛都不许碰。
+const HAS_PY3 = (() => { const p = spawnSync('python3', ['-c', 'pass'], { encoding: 'utf8' }); return !p.error && p.status === 0 })()
+const SERVERS = []
+process.on('exit', () => { for (const p of SERVERS) { try { p.kill('SIGKILL') } catch {} } })
+const startServe = (dir) => new Promise((res, rej) => {
+  // stderr 丢掉:http.server 每个请求都往那儿写一行,没人读就会把管道塞满、服务卡死
+  const proc = spawn('python3', [join(dir, 'serve.py'), '0'], { stdio: ['ignore', 'pipe', 'ignore'] })
+  SERVERS.push(proc)
+  let buf = ''
+  const to = setTimeout(() => rej(new Error(`serve.py 10s 没打出 banner:${buf}`)), 10000)
+  proc.stdout.on('data', (d) => {
+    buf += String(d)
+    const m = /:(\d+)\//.exec(buf)
+    if (!m) return
+    clearTimeout(to)
+    res({ proc, port: Number(m[1]), base: `http://127.0.0.1:${m[1]}` })
+  })
+  proc.on('error', (e) => { clearTimeout(to); rej(e) })
+  proc.on('exit', (c) => { clearTimeout(to); rej(new Error(`serve.py 起不来(exit ${c}):${buf}`)) })
+})
+const req = async (base, path, opt) => {
+  const r = await fetch(base + path, opt)
+  const text = await r.text()
+  let json = null
+  try { json = JSON.parse(text) } catch {}
+  return { status: r.status, text, json, headers: r.headers }
+}
 const touch = (p) => { const t = new Date(Date.now() + 5); utimesSync(p, t, t) }
 const readDemo = (kb, f) => readFileSync(join(kb, 'demos', f), 'utf8')
 
@@ -5225,6 +5253,336 @@ console.log('T72 守卫转发到更新的安装')
   stampTo(MY_VER) // 戳回到本版(不能靠重跑 gen —— gen 自己也拒绝盖更新的产物,那条正是本条要绕开的)
   const r9 = fwd()
   ok(!/MARKER-99/.test(r9.stdout) && r9.status === 0, '产物不比我新 → 根本不转发:这是版本冲突的补救,不是常态路径', (r9.stdout || '').slice(0, 200))
+}
+
+// ============ T73 验收反馈共享 acceptanceFeedback(opt-in;关档逐字节冻结;写口在 serve.py)============
+console.log('T73 验收反馈共享 acceptanceFeedback')
+{
+  const fx73 = mkFixture('fx73', { 's.html': demoHtml('s') })
+  const kb = fx73.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html'), accP = join(kb, 'acceptance-manifest.json')
+  const relP = join(kb, 'release-manifest.json'), jsonlP = join(kb, 'acceptance-feedback.jsonl')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const LIST = {
+    pr: 277, revision: 2, title: '通扫收口',
+    groups: [{ id: 'J', title: 'J 组', tip: '' }],
+    items: [
+      { id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' },
+      { id: 'A"1', group: 'J', title: '带引号的 id', do: '点一下', exp: '有反应' },
+    ],
+  }
+  wr(accP, { current: 277, lists: [LIST] })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  wr(cfgP, cfg)
+
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, kb)
+  const offSha = sha(idxP)
+  const off = readFileSync(idxP, 'utf8')
+  ok(!off.includes('accfb') && !off.includes('data-accme') && !off.includes('accFbMerge')
+    && !off.includes('acceptance-feedback.jsonl') && !off.includes('api/acceptance/'),
+    '未配 acceptanceFeedback:入口 / 身份芯片 / 运行时 / jsonl 与写口路径,一个字都不出')
+  cfg.acceptanceFeedback = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, 'acceptanceFeedback:false 与未配逐字节相同(冻结)')
+  cfg.acceptanceFeedback = true
+  wr(cfgP, cfg)
+  const rOn = runGen(NEW_SCRIPTS, kb)
+  ok(rOn.status === 0, 'acceptanceFeedback:true gen exit 0', rOn.stderr)
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- 入口与身份芯片 ----
+  ok(count(on, 'data-accfb=') === 2 && on.includes('<span class="accfbt">反馈 ▸</span>'),
+    '每条验收行右端一枚「反馈 ▸」(2 条 = 2 枚)', String(count(on, 'data-accfb=')))
+  ok(on.includes('data-accid="A&quot;1"') && on.includes('data-accfb="A&quot;1"'),
+    '带引号的条目 id 照旧 esc(入口的 data 属性也走同一把尺)')
+  ok(count(on, 'data-accrev="2"') === 2, '每行带上清单 revision(旧反馈标灰「清单已改」靠它)', String(count(on, 'data-accrev="2"')))
+  ok(on.includes('<span class="accme" data-accme hidden>') && on.includes('data-accwho'),
+    'tab 顶部一枚身份芯片(名字运行期填,gen 期一个字都不知道)')
+  ok(on.includes('.accfbx {') && on.includes('.accfb.has {'), '样式随开关进来(展开区 + 有反馈时的入口)')
+  ok(on.includes("'htest_acc_who'"), '身份存 <brand>_acc_who(与勾选那把 LS_PREFIX 同一处)')
+  ok(on.includes("fetch('acceptance-feedback.jsonl', { cache: 'no-store' })"), 'jsonl 每次现拉,不吃缓存')
+  ok(on.includes("setInterval(fbTick, 20000)") && on.includes("document.addEventListener('visibilitychange'")
+    && on.includes("window.addEventListener('focus', fbTick)"),
+    '三条刷新路径:可见期间 20s 一轮 / 回到前台 / 窗口获焦')
+  ok(on.includes("if (window.accFbPoll) accFbPoll()"), '切进验收 tab 那一下也拉一次(show 里补一句)')
+  ok(on.includes('1280 / Math.max(w, h)') && on.includes("'image/jpeg', 0.8"),
+    '上传前 canvas 压缩:长边 ≤ 1280、JPEG 0.8')
+  ok(on.includes("fetch('api/acceptance/mark'") && on.includes("'api/acceptance/shot?pr='"),
+    '两个写口都从页面这边接上了')
+  {
+    const fbjs = on.slice(on.indexOf('/* ======== 验收反馈共享'), on.indexOf('function accRoute()'))
+    ok(fbjs.length > 2000 && !/innerHTML\s*=/.test(fbjs) && !fbjs.includes('insertAdjacentHTML'),
+      '反馈这段一次 innerHTML 都没写 —— 备注/名字是别人写的正文,只走 textContent', String(fbjs.length))
+  }
+  {
+    const sc = on.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
+    let compiled = true
+    for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
+    ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+
+  // ---- 纯函数:从产物里原样抠出来跑(合并最新 verdict / 摘要文案 / 文件名校验)----
+  {
+    const src = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
+    ok(src.includes('accFbMerge') && src.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
+    const F = new Function(src + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbChip }')()
+    const NUL = String.fromCharCode(0)
+    const lines = [
+      '{"ts":"2026-09-10T12:03:41Z","pr":277,"item":"JJ3","who":"Rico","verdict":"bad","note":"空态那句没换"}',
+      '这行不是 JSON',
+      '',
+      '{"ts":"2026-09-10T12:09:00Z","pr":277,"item":"JJ3","who":"Rico","verdict":"ok"}',
+      '{"ts":"2026-09-10T12:10:00Z","pr":277,"item":"JJ3","who":"codev","verdict":"bad","shot":"acc-277-JJ3-20260910T121000.jpg"}',
+      '{"pr":277,"item":"JJ3"}',
+    ].join('\n')
+    const p = F.accFbParse(lines)
+    ok(p.rows.length === 3 && p.bad === 2, '坏行跳过并计数(非法 JSON 一条 + 缺 who 一条)', `${p.rows.length} / ${p.bad}`)
+    const e = F.accFbMerge(p.rows)['277' + NUL + 'JJ3']
+    ok(e.verdicts.Rico === 'ok' && e.verdicts.codev === 'bad',
+      '同一 (who, item):后写的 verdict 覆盖前一条(Rico 由 bad 改成 ok)', JSON.stringify(e.verdicts))
+    ok(e.order.join(' ') === 'Rico codev', '出场顺序按第一次表态排,改主意不插队', e.order.join(' '))
+    ok(e.notes.length === 1 && e.shots.length === 1, '备注与图是累积的,不被后一条顶掉')
+    ok(F.accFbChip(e) === '✓ Rico · ✕ codev · 1 备注 · 1 图', '入口摘要文案', F.accFbChip(e))
+    ok(F.accFbChip(null) === '' && F.accFbChip(F.accFbMerge([])['x']) === '',
+      '没有反馈 = 空串(入口保持「反馈 ▸」原样)')
+    ok(F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg', 277, 'JJ3'), '服务端拼得出的名字:认')
+    ok(!F.accFbShotOk('../../etc/passwd', 277, 'JJ3') && !F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg/../x.jpg', 277, 'JJ3'),
+      '路径注入:不认(名字直接进 img src,这条是硬门)')
+    ok(!F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg', 277, 'ZZ9'), '别的条目的图:不认(挂错行也是错)')
+    ok(!F.accFbShotOk('acc-277-JJ3-20260910T120341.gif', 277, 'JJ3') && !F.accFbShotOk('acc-277-JJ3-nope.jpg', 277, 'JJ3'),
+      '扩展名 / 时刻不对:不认')
+    ok(F.accFbShotOk('acc-277-A_1-20260910T120341-2.png', '277', 'A"1'),
+      '引号 id 落成 A_1、同秒第二张的 -2、png 上传:都认(与 serve.py 同一把尺)')
+    ok(!F.accFbShotOk('acc-277-aXb-20260910T120341.jpg', 277, 'a.b'),
+      'slug 里的「.」不当通配符用(a.b 只配 a.b)')
+    ok(F.accFbSlug('../x') === '.._x' && F.accFbSlug('') === '_', 'slug:路径分隔符与空串都落到安全字符')
+  }
+
+  // ---- acceptanceFeedback 开着但 acceptanceTab 关着:一行警告,产物照旧冻结 ----
+  {
+    const c2 = rd(cfgP)
+    c2.acceptanceTab = false
+    c2.acceptanceFeedback = false
+    wr(cfgP, c2)
+    runGen(NEW_SCRIPTS, kb)
+    const noTabSha = sha(idxP)
+    c2.acceptanceFeedback = true
+    wr(cfgP, c2)
+    const rw = runGen(NEW_SCRIPTS, kb)
+    ok(rw.status === 0 && /acceptanceFeedback/.test(rw.stderr) && /acceptanceTab/.test(rw.stderr),
+      '开了反馈却没开验收 tab:一行警告点名两个键(不硬报错)', rw.stderr.slice(0, 140))
+    ok(sha(idxP) === noTabSha, '那种配置下产物逐字节不变(反馈没地方挂 = 按关处理)')
+  }
+
+  // ---- 截图廊忽略 acc-* ----
+  {
+    writeFileSync(join(kb, 'shots', 'd1-normal.png'), 'x')
+    writeFileSync(join(kb, 'shots', 'acc-277-JJ3-20260910T120341.png'), 'x')
+    const c3 = rd(cfgP)
+    c3.acceptanceTab = true
+    c3.acceptanceFeedback = true
+    wr(cfgP, c3)
+    runGen(NEW_SCRIPTS, kb)
+    const gal = readFileSync(join(kb, 'shots.html'), 'utf8')
+    ok(gal.includes('d1-normal.png') && !gal.includes('acc-277-JJ3'),
+      '截图廊只收常规截图,acc-* 不进廊(它们按条目挂在验收 tab 里)')
+    rmSync(join(kb, 'shots', 'acc-277-JJ3-20260910T120341.png'))
+    rmSync(join(kb, 'shots', 'd1-normal.png'))
+    runGen(NEW_SCRIPTS, kb)
+  }
+
+  // ---- serve.py:两个写口的校验矩阵 + 端到端冒烟(随机端口,同一个测试负责收尸)----
+  if (!HAS_PY3) {
+    ok(true, '本机没有 python3,serve.py 那组跳过(CI 的 ubuntu 上有)')
+  } else {
+    cpSync(join(REPO, 'templates', 'serve.py'), join(kb, 'serve.py'))
+    const c4 = rd(cfgP)
+    c4.acceptanceFeedback = false // 先关着起服:开关是每请求现读的,不必重启
+    wr(cfgP, c4)
+    const srv = await startServe(kb)
+    try {
+      const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(64)])
+      const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)])
+      const mark = (body) => req(srv.base, '/api/acceptance/mark',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const shot = (q, buf, type = 'image/jpeg') => req(srv.base, '/api/acceptance/shot?' + q,
+        { method: 'POST', headers: { 'Content-Type': type }, body: buf })
+
+      // 关着:两条写口 404,别的 POST 路径照旧 501,GET 一个字节没变
+      ok((await mark({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'ok' })).status === 404
+        && (await shot('pr=277&item=JJ3&who=Rico', JPG)).status === 404,
+        'acceptanceFeedback 关着:两条写口都 404')
+      ok((await req(srv.base, '/api/nope', { method: 'POST', body: '{}' })).status === 501,
+        '别的 POST 路径照旧 501(与没有这段代码时同一句)')
+      {
+        const g = await req(srv.base, '/index.html')
+        ok(g.status === 200 && g.text === readFileSync(idxP, 'utf8'), 'GET 照旧原样发(逐字节)')
+      }
+      c4.acceptanceFeedback = true
+      wr(cfgP, c4)
+      ok((await mark({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'ok' })).status === 200,
+        '开关拨到 true:不重启服务,下一个请求就认(每请求现读 config)')
+
+      // 校验矩阵
+      const cases = [
+        ['pr 不在清单里', await mark({ pr: 999, item: 'JJ3', who: 'R', verdict: 'ok' }), 'PR #999'],
+        ['item 不属于这份清单', await mark({ pr: 277, item: 'NOPE', who: 'R', verdict: 'ok' }), 'NOPE'],
+        ['who 超长(21 字)', await mark({ pr: 277, item: 'JJ3', who: 'x'.repeat(21), verdict: 'ok' }), 'who'],
+        ['who 空', await mark({ pr: 277, item: 'JJ3', who: '', verdict: 'ok' }), 'who'],
+        ['who 带控制字符', await mark({ pr: 277, item: 'JJ3', who: 'ab', verdict: 'ok' }), 'who'],
+        ['verdict 不在枚举里', await mark({ pr: 277, item: 'JJ3', who: 'R', verdict: 'maybe' }), 'verdict'],
+        ['note 超 2000 字', await mark({ pr: 277, item: 'JJ3', who: 'R', note: 'x'.repeat(2001) }), 'note'],
+        ['三样都没有', await mark({ pr: 277, item: 'JJ3', who: 'R' }), 'verdict'],
+        ['shot 文件名注入', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: '../../etc/passwd' }), 'shot'],
+        ['shot 名字对但文件不在', await mark({ pr: 277, item: 'JJ3', who: 'R', shot: 'acc-277-JJ3-20260910T120341.jpg' }), 'shots/'],
+        ['请求体不是 JSON', await req(srv.base, '/api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' }), 'JSON'],
+        ['图的 Content-Type 不收', await shot('pr=277&item=JJ3&who=R', JPG, 'image/gif'), 'Content-Type'],
+        ['魔数与 Content-Type 对不上', await shot('pr=277&item=JJ3&who=R', Buffer.from('GIF89a......'), 'image/jpeg'), '魔数'],
+        ['图超 2 MB', await shot('pr=277&item=JJ3&who=R', Buffer.concat([JPG, Buffer.alloc(2 * 1024 * 1024)]), 'image/jpeg'), '上限'],
+        ['图的 pr 不在清单里', await shot('pr=999&item=JJ3&who=R', JPG), 'PR #999'],
+      ]
+      for (const [name, res, needle] of cases) {
+        ok(res.status === 400 && res.json && String(res.json.error).includes(needle),
+          `校验:${name} → 400 + 一句原因`, `${res.status} ${res.text.slice(0, 90)}`)
+      }
+      ok(!existsSync(join(kb, 'shots', 'passwd')) && !existsSync(join(kb, '..', '..', 'passwd')),
+        '被拒的那几笔一个文件都没落盘')
+
+      // 端到端:两笔 mark + 一张图 + GET jsonl
+      const m1 = await mark({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'bad', note: '空态那句<b>没换</b>' })
+      const m2 = await mark({ pr: 277, item: 'A"1', who: 'codev', verdict: 'ok' })
+      ok(m1.status === 200 && m1.json.pr === 277 && m1.json.who === 'Rico' && m1.json.rev === 2,
+        'mark 写成功:回的就是写进去的那一行(rev 由服务端按清单盖,不信客户端)', m1.text.slice(0, 120))
+      ok(m1.json.note === '空态那句<b>没换</b>', '备注原样存(转义是渲染那头的事,存的时候不改人写的字)')
+      ok(m2.status === 200 && m2.json.item === 'A"1', '带引号的条目 id 也写得进去')
+      const up = await shot('pr=277&item=' + encodeURIComponent('A"1') + '&who=codev', PNG, 'image/png')
+      ok(up.status === 200 && /^acc-277-A_1-\d{8}T\d{6}\.png$/.test(up.json.shot),
+        '图落盘:文件名只由服务端拼(pr + slug 过的条目 id + UTC 时刻)', up.text.slice(0, 120))
+      ok(existsSync(join(kb, 'shots', up.json.shot)), '图确实在 shots/ 里')
+      const m3 = await mark({ pr: 277, item: 'A"1', who: 'codev', shot: up.json.shot })
+      ok(m3.status === 200 && m3.json.shot === up.json.shot, '刚上传的那张挂得到条目上')
+      {
+        const g = await req(srv.base, '/acceptance-feedback.jsonl')
+        ok(g.status === 200 && String(g.headers.get('cache-control')).includes('no-store'),
+          'jsonl 的 GET 带 no-store(轮询要新鲜)', String(g.headers.get('cache-control')))
+        const rows = g.text.trim().split('\n').map((l) => JSON.parse(l))
+        ok(rows.length === 4 && rows[0].who === 'Rico' && rows[3].shot === up.json.shot,
+          '追加式:先写的在前,后写的在后(含开关刚打开时那笔)', String(rows.length))
+      }
+      // 并发:六笔同时打,六行俱全、行行合法(O_APPEND 单次 write)
+      {
+        const before = readFileSync(jsonlP, 'utf8').split('\n').filter(Boolean).length
+        await Promise.all([...Array(6)].map((_, i) =>
+          mark({ pr: 277, item: 'JJ3', who: 'w' + i, verdict: i % 2 ? 'ok' : 'bad', note: '并发 ' + i })))
+        const lines = readFileSync(jsonlP, 'utf8').split('\n').filter(Boolean)
+        ok(lines.length === before + 6, '并发六笔 = 六行,一行不少', `${before} → ${lines.length}`)
+        let allJson = true
+        for (const l of lines) { try { JSON.parse(l) } catch { allJson = false } }
+        ok(allJson, '并发之下每一行仍是完整 JSON(没有半行叠半行)')
+      }
+      // 坏行混进来:读的人跳过它,不阻断
+      {
+        writeFileSync(jsonlP, readFileSync(jsonlP, 'utf8') + '半行 {"pr":277\n')
+        const g = await req(srv.base, '/acceptance-feedback.jsonl')
+        const src = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
+        const F = new Function(src + '\nreturn { accFbParse }')()
+        const p = F.accFbParse(g.text)
+        ok(p.bad === 1 && p.rows.length === 10, '坏行只被跳过并计数,前面的账一条不丢', `${p.rows.length} / ${p.bad}`)
+      }
+    } finally {
+      srv.proc.kill('SIGKILL')
+    }
+  }
+
+  // ---- 守卫:未提交的新增行 / 可清的截图 ----
+  {
+    const git = (...args) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: fx73.root, encoding: 'utf8' })
+    writeFileSync(jsonlP, [
+      '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"verdict":"bad"}',
+      '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"note":"再一条"}',
+      '{"ts":"2026-09-10T12:02:00Z","pr":277,"item":"JJ3","who":"codev","rev":2,"verdict":"ok"}',
+      '',
+    ].join('\n'))
+    const s1 = runStop(NEW_SCRIPTS, fx73.root)
+    const msg1 = (JSON.parse(s1.stdout || '{}').systemMessage) || ''
+    ok(msg1.includes('#277 新增 3 条未提交') && msg1.includes('Rico 2') && msg1.includes('codev 1'),
+      '还没提交的 jsonl:守卫一行说清哪个 PR、几条、谁写的', msg1.slice(0, 200))
+    git('add', '-A'); git('commit', '-q', '-m', 'feedback')
+    const s2 = runStop(NEW_SCRIPTS, fx73.root)
+    ok(!((JSON.parse(s2.stdout || '{}').systemMessage) || '').includes('验收反馈:'), '提交完就不再说(账已经进 git)')
+    writeFileSync(jsonlP, readFileSync(jsonlP, 'utf8') +
+      '{"ts":"2026-09-10T13:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"verdict":"ok"}\n')
+    const s3 = runStop(NEW_SCRIPTS, fx73.root)
+    ok(((JSON.parse(s3.stdout || '{}').systemMessage) || '').includes('#277 新增 1 条未提交'),
+      '已跟踪文件后来又添的行,照样数得出来(git diff 认增行)')
+    {
+      const c5 = rd(cfgP)
+      c5.acceptanceFeedback = false
+      wr(cfgP, c5)
+      const s4 = runStop(NEW_SCRIPTS, fx73.root)
+      ok(!((JSON.parse(s4.stdout || '{}').systemMessage) || '').includes('验收反馈:'),
+        '开关关着:这条通知一个字都不出(零命中不出声)')
+      c5.acceptanceFeedback = true
+      wr(cfgP, c5)
+    }
+  }
+
+  // ---- 可清的反馈截图:守卫报数,prune 脚本才动手 ----
+  {
+    const old = '2026-08-01T00:00:00Z' // 相对下面那个「今天」是 40 天前
+    const today = new Date().toISOString().slice(0, 10)
+    const daysAgo = (n) => new Date(Date.parse(today + 'T12:00:00Z') - n * 86400000).toISOString()
+    wr(relP, {
+      stages: [{ id: 'dev', label: 'dev', hint: '' }, { id: 'prod', label: 'prod', hint: '' }],
+      releases: [],
+      prs: [
+        { number: 277, state: 'merged', mergedAt: daysAgo(40), title: 'a' },
+        { number: 278, state: 'merged', mergedAt: daysAgo(29), title: 'b' },
+        { number: 279, state: 'open', mergedAt: null, title: 'c' },
+      ],
+      syncedAt: null,
+    })
+    const shotsDir = join(kb, 'shots')
+    for (const f of readdirSync(shotsDir)) rmSync(join(shotsDir, f)) // 冒烟那几张先清掉,这一段自己摆盘
+    for (let i = 0; i < 10; i++) writeFileSync(join(shotsDir, `acc-277-JJ3-2026091${i}T120000.jpg`), 'x'.repeat(100))
+    writeFileSync(join(shotsDir, 'acc-278-JJ3-20260910T120000.jpg'), 'x')
+    writeFileSync(join(shotsDir, 'acc-279-JJ3-20260910T120000.jpg'), 'x')
+    writeFileSync(join(shotsDir, 'd1-keep.png'), 'x')
+    const s5 = runStop(NEW_SCRIPTS, fx73.root)
+    const msg5 = (JSON.parse(s5.stdout || '{}').systemMessage) || ''
+    ok(msg5.includes('10 张') && msg5.includes('acc-feedback-prune.mjs'),
+      '攒够 10 张可清的:守卫一行报数 + 那条命令(绝不自动删)', msg5.slice(0, 200))
+    const jsonlBefore = readFileSync(jsonlP, 'utf8')
+    const dry = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'), '--dir', kb, '--dry-run'], { encoding: 'utf8' })
+    ok(dry.status === 0 && count(dry.stdout, '将删 shots/acc-277') === 10 && dry.stdout.includes('一个字节没动'),
+      'dry-run 列出 10 张、盘上什么都没动', dry.stdout.slice(0, 200))
+    ok(existsSync(join(shotsDir, 'acc-277-JJ3-20260910T120000.jpg')), 'dry-run 之后图还在')
+    const run = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'), '--dir', kb], { encoding: 'utf8' })
+    ok(run.status === 0 && !existsSync(join(shotsDir, 'acc-277-JJ3-20260910T120000.jpg')),
+      '不加 --dry-run 才真删(判据:PR 已合并满 30 天)', run.stdout.slice(0, 200))
+    ok(existsSync(join(shotsDir, 'acc-278-JJ3-20260910T120000.jpg')), '合并才 29 天的:留着(30 天是硬边界)')
+    ok(existsSync(join(shotsDir, 'acc-279-JJ3-20260910T120000.jpg')), 'PR 还开着的:留着')
+    ok(existsSync(join(shotsDir, 'd1-keep.png')), '非 acc- 的截图一张不碰(那些是进 git 的证据)')
+    ok(readFileSync(jsonlP, 'utf8') === jsonlBefore, 'jsonl 一行没删 —— 图没了,那几行「谁说了什么」照旧在')
+    const again = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'), '--dir', kb, '--days', '60'], { encoding: 'utf8' })
+    ok(again.status === 0 && again.stdout.includes('没有可清'), '换成 60 天窗口:一张都不该清', again.stdout.slice(0, 160))
+  }
+
+  // ---- 关回 false:与冻结基线逐字节相同 ----
+  {
+    const c6 = rd(cfgP)
+    c6.acceptanceTab = true
+    c6.acceptanceFeedback = false
+    wr(cfgP, c6)
+    rmSync(relP)
+    for (const f of readdirSync(join(kb, 'shots'))) rmSync(join(kb, 'shots', f)) // 截图数会烤进 tab 徽章,清干净再比
+    runGen(NEW_SCRIPTS, kb)
+    ok(sha(idxP) === offSha, '关回 false 后与冻结基线逐字节相同')
+  }
 }
 
 // ============ T70 英文串表(loadStrings 不做逐键回落:少一个键 = 守卫在收工那一刻 TypeError)============
