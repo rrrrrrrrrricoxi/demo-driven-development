@@ -2959,6 +2959,19 @@ const ACC_FB_JS = !AFB ? '' : `
       if (isNaN(d.getTime())) return ''
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
     }
+    function accFbPasteFile(cd, editable) { // 这一次 ⌘V 该不该由我们接住:接得住就给出那张图
+      var items = (cd && cd.items) || [], types = (cd && cd.types) || []
+      // 剪贴板同时带文字与图(从 Excel / 预览 / 多数截图工具复制就是这样),而人正在输入框里:
+      // 他要粘的是那段文字。抢过来只会「备注永远粘不进去,倒是每次传一张图」。
+      if (editable && Array.prototype.indexOf.call(types, 'text/plain') >= 0) return null
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf('image/') === 0) {
+          var f = items[i].getAsFile()
+          if (f) return f
+        }
+      }
+      return null
+    }
     function fbJson(t) { try { return JSON.parse(t) } catch (e) { return null } } // 两个写口的回应都这么读
     function fbHttpMsg(status, t) { // 写口答了非 2xx:服务端说得出话就用它的原话,说不出话的两种自己解释
       var j = fbJson(t)
@@ -3150,6 +3163,9 @@ const ACC_FB_JS = !AFB ? '' : `
       pane.addEventListener('click', function (ev) {
         var t = ev.target
         if (!t || !t.closest) return
+        // 多个展开区同开时,贴图落在「最后碰过的那个」上:点备注框、点 ✓✕、点贴图都算碰过
+        var inBox = t.closest('.accfbx')
+        if (inBox) { var ir = inBox.closest('.accitem'); if (ir) fbPasteRow = ir }
         var entry = t.closest('[data-accfb]')
         if (entry) {
           var row = entry.closest('.accitem')
@@ -3157,6 +3173,7 @@ const ACC_FB_JS = !AFB ? '' : `
           box.hidden = !box.hidden
           entry.setAttribute('aria-expanded', box.hidden ? 'false' : 'true')
           if (!box.hidden) { fbList(box, row); fbPasteRow = row; fbFetch() }
+          else if (fbPasteRow === row) fbPasteRow = null // 收起来就把指针交回去,别让图落到看不见的行上
           return
         }
         var v = t.closest('[data-accfbv]')
@@ -3167,22 +3184,23 @@ const ACC_FB_JS = !AFB ? '' : `
           return
         }
         var ps = t.closest('[data-accfbpaste]')
-        if (ps) { fbPasteRow = ps.closest('.accitem'); fbMsg(fbBox(fbPasteRow), '按 ⌘V / Ctrl+V 贴图(手机用「选图」)'); return }
+        if (ps) { fbMsg(fbBox(ps.closest('.accitem')), '按 ⌘V / Ctrl+V 贴图(手机用「选图」)'); return } // 指针上面那句已经落好
         var pk = t.closest('[data-accfbpick]')
         if (pk) { pk.closest('.accitem').querySelector('.accfbfile').click(); return }
         var sd = t.closest('[data-accfbsend]')
         if (sd) { fbSend(sd.closest('.accitem')); return }
         if (t.closest('[data-accwho]')) fbAskWho()
       })
-      document.addEventListener('paste', function (ev) { // 展开区开着就接得住剪贴板里的图
+      document.addEventListener('paste', function (ev) { // 展开区开着才接剪贴板里的图
+        // 行永远在 DOM 里(gen 期就烤好了,筛选只是隐藏),所以「还在页面上」这条判断从来不为假 ——
+        // 真正的问题是那个框还开着没有:收起来了还接,图照传照落盘,而「图已上传」那句写进一个
+        // 看不见的框里,人只会以为按了没反应,再贴一次、再多一张孤儿图。
         if (!fbPasteRow || !document.body.contains(fbPasteRow)) return
-        var items = (ev.clipboardData && ev.clipboardData.items) || []
-        for (var i = 0; i < items.length; i++) {
-          if (items[i].type && items[i].type.indexOf('image/') === 0) {
-            var f = items[i].getAsFile()
-            if (f) { ev.preventDefault(); fbUpload(fbPasteRow, f); return }
-          }
-        }
+        var pbox = fbPasteRow.querySelector('.accfbx')
+        if (!pbox || pbox.hidden) return
+        var tgt = ev.target
+        var f = accFbPasteFile(ev.clipboardData, Boolean(tgt && tgt.closest && tgt.closest('input, textarea, [contenteditable]')))
+        if (f) { ev.preventDefault(); fbUpload(fbPasteRow, f) }
       })
       document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') fbTick() })
       window.addEventListener('focus', fbTick)

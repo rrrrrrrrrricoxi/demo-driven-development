@@ -5328,7 +5328,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   // ---- 纯函数:从产物里原样抠出来跑(下面几段共用这一份,冒烟那段验坏行也用它)----
   const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
   ok(fbSrc.includes('accFbMerge') && fbSrc.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
-  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbLive, accFbChip, accFbTime, fbHttpMsg }')()
+  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbLive, accFbChip, accFbTime, accFbPasteFile, fbHttpMsg }')()
   {
     // 写口答了非 2xx 时页面说什么。最可能的首跑状态是宿主那份 serve.py 还没有 do_POST
     // (种子文件,init 从不覆盖):BaseHTTPRequestHandler 兜底答 501 + 一页 text/html,
@@ -5343,6 +5343,19 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     ok(F.fbHttpMsg(500, 'boom') === '写不进去(500)', '既说不出话又不是 501:退到「写不进去(码)」', F.fbHttpMsg(500, 'boom'))
   }
   ok(count(on, 'fbHttpMsg(r.status, t)') === 2, '两个写口共用这一只(记下 / 上传各一处)', String(count(on, 'fbHttpMsg(r.status, t)')))
+  {
+    // 贴图接不接得住:剪贴板同时带文字与图是常态(Excel / 预览 / 多数截图工具),
+    // 人在备注框里粘的是文字 —— 抢过来就成了「备注永远粘不进去,倒是每次传一张图」
+    const cd = (types) => ({ types, items: types.map((ty) => ({ type: ty, getAsFile: () => (ty.indexOf('image/') === 0 ? { name: ty } : null) })) })
+    ok(F.accFbPasteFile(cd(['image/png']), false), '只有图:接住')
+    ok(F.accFbPasteFile(cd(['text/plain', 'image/png']), false), '图文混合、人不在输入框里:仍接住(截图工具常带一份文件名文本)')
+    ok(!F.accFbPasteFile(cd(['text/plain', 'image/png']), true), '图文混合、光标在备注框里:不抢,让文字粘进去')
+    ok(!F.accFbPasteFile(cd(['text/plain']), false) && !F.accFbPasteFile(null, false), '只有文字 / 没有剪贴板:接不住也不报错')
+    ok(F.accFbPasteFile(cd(['image/png']), true), '只有图、就算光标在输入框里:接住(那儿本来也没有文字可粘)')
+  }
+  ok(on.includes('else if (fbPasteRow === row) fbPasteRow = null') && on.includes('if (!pbox || pbox.hidden) return'),
+    '展开区一收起,贴图的指针就交回去;听到 ⌘V 也先看那个框还开着没有')
+  ok(on.includes("var inBox = t.closest('.accfbx')"), '多个展开区同开:以最后碰过的那个为准')
   {
     const NUL = String.fromCharCode(0)
     const lines = [
