@@ -589,6 +589,14 @@ async function buildPlan(root, st, gi, opt, det) {
     plan.port = cfg.port
     plan.portNote = S.init.portNoteExisting
     plan.brand = cfg.brand
+    // 验收反馈共享(v0.17.0)开着:反馈截图默认不该进 git。只说一行,不替人改 .gitignore ——
+    // 那是仓库主人的文件,init 往里加行是越界(种入一份新的是另一回事)。
+    if (cfg.acceptanceFeedback === true) {
+      const ignored = [join(root, '.gitignore'), join(st.kanban, '.gitignore')].some((p) => {
+        try { return readFileSync(p, 'utf8').split('\n').some((l) => l.trim().replace(/^app\/kanban\//, '').replace(/^\/+/, '') === 'shots/acc-*') } catch { return false }
+      })
+      plan.accFbIgnore = !ignored
+    }
   } else if (opt.port !== null) {
     plan.port = opt.port
     plan.portNote = S.init.portNoteManual
@@ -612,6 +620,16 @@ async function buildPlan(root, st, gi, opt, det) {
     else plan.gitignoreAdd = gitignoreMissing(giPath)
   }
   for (const f of ['serve.py', 'serve-kanban.sh']) if (!existsSync(join(st.kanban, f))) plan.creates.push(`app/kanban/${f}`)
+  // serve.py 是种入件(writeOnce:已在场就不动)。新版脚本带的新能力(v0.17.0 的验收反馈写口)
+  // 只在新版里 —— 宿主那份落后就说一行,换不换由人定(那份可能被改过,init 不该替人盖)。
+  const servePath = join(st.kanban, 'serve.py')
+  if (existsSync(servePath)) {
+    const serveVer = (s) => (/^# ddd-serve (v\d+)$/m.exec(s) || [])[1] || ''
+    const wantVer = serveVer(readFileSync(join(TPL, 'serve.py'), 'utf8'))
+    let haveVer = ''
+    try { haveVer = serveVer(readFileSync(servePath, 'utf8')) } catch {}
+    if (wantVer && haveVer !== wantVer) plan.serveStale = { have: haveVer, want: wantVer }
+  }
 
   // settings:模拟合并,列出将新增的 deny 条目
   const inject = JSON.parse(readFileSync(join(TPL, 'settings-inject.json'), 'utf8'))
@@ -659,6 +677,8 @@ function printPlan(root, st, gi, plan, opt) {
   if (!plan.dirs.length && !plan.creates.length) console.log(S.init.planNoCreates)
   if (plan.narrativeSkip) console.log(S.init.planNarrativeSkip)
   if (plan.gitignoreAdd.length) console.log(S.init.planGitignoreMerge(plan.gitignoreAdd))
+  if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore)
+  if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
   console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
   if (plan.mergeDeferred) console.log(S.init.planMergeDeferred)
@@ -962,6 +982,8 @@ async function doApply(root, st, gi, opt, plan) {
     console.log(S.init.applyNoGit)
   }
   if (plan.mergeDeferred) console.log(S.init.applyMergeDeferred)
+  if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore) // 提醒而非动作:host 的 .gitignore 由人改
+  if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(S.init.applyDone(plan.port))
   console.log(S.init.applyServe(plan.port))
 }

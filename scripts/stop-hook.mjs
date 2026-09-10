@@ -38,6 +38,10 @@
 //   6. 卡文件审计(v0.14.0,只在 config.cardsDir 开时):文件名与卡里的 id 不符 / JSON 解析失败
 //      → 点名文件(各最多 5 个 + 总数)。这几种 gen 会硬失败,但一次只报得出第一个。
 //      同一个键还让新鲜度盯住 <cardsDir>/**/*.json(卡也是 gen 输入)、让孤儿语料纳入卡文件正文。
+//   6b. 验收反馈共享(v0.17.0,只在 config.acceptanceFeedback 开时):acceptance-feedback.jsonl 里
+//      有没提交的新增行 → 一行「#277 新增 3 条未提交(甲 2 · 乙 1)」(依据一条 git diff,
+//      没 git 就闭嘴);可清的反馈截图攒到 10 张 → 一行,给出 acc-feedback-prune.mjs 那条命令。
+//      两条都非阻断,也绝不代为提交或删图。
 //   7. 分支审计(v0.15.14,BL-C112 §1):当前分支相对主线带着看板改动 → 一条非阻断 notice。
 //      看板只在主线上改:带回来的头文件 items/entries 会让 gen 硬报错,分支上的旧卡快照
 //      会静默盖掉主线上改过的卡。口径与 board-branch-check.mjs 同一份;零命中完全不出声。
@@ -70,6 +74,7 @@ import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } fro
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, daysBetween, localDate, scanCardDir } from './cards.mjs'
 import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
+import { ACC_FB_PRUNE_DAYS, ACC_FB_PRUNE_MIN, prunable } from './acc-feedback-prune.mjs'
 
 const KANBAN = detect()
 if (!KANBAN) process.exit(0)
@@ -435,6 +440,60 @@ let RLM = null
   const relPath = join(KANBAN, 'release-manifest.json')
   if (existsSync(relPath)) {
     try { RLM = JSON.parse(readFileSync(relPath, 'utf8')) } catch {} // 坏 JSON:gen 已经出过声,守卫不重复吵
+  }
+}
+
+// ---- ⑨ 验收反馈共享(v0.17.0,只在 config.acceptanceFeedback 开时跑):两条非阻断 notice ----
+// (a) acceptance-feedback.jsonl 里新增了几行还没提交 —— 那是验收现场的账,留在工作区里等于没留;
+//     依据一条 git diff(没 git / 问不出来就闭嘴,不拿不确定当依据)。
+// (b) 可清的反馈截图攒到 10 张 —— 说一行,绝不自动删(删图是人的决定,脚本只报数)。
+{
+  let fbOn = false
+  try { fbOn = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8')).acceptanceFeedback === true } catch {}
+  const fbPath = join(KANBAN, 'acceptance-feedback.jsonl')
+  if (fbOn && existsSync(fbPath)) {
+    // (a) 未提交的新增行:git diff 认得已跟踪文件的增行;还没 add 过的整份文件全算新增
+    const git = (args) => spawnSync('git', args, { cwd: KANBAN, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const tracked = git(['ls-files', '--error-unmatch', '--', fbPath])
+    let added = []
+    if (!tracked.error) {
+      if (tracked.status === 0) {
+        const d = git(['diff', '-U0', '--no-color', 'HEAD', '--', fbPath])
+        if (!d.error && d.status === 0) {
+          added = d.stdout.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1))
+        }
+      } else { // 文件在,但 git 里还没有它 —— 整份都是没提交的
+        const inside = git(['rev-parse', '--is-inside-work-tree'])
+        if (!inside.error && inside.status === 0) {
+          try { added = readFileSync(fbPath, 'utf8').split('\n') } catch {}
+        }
+      }
+    }
+    const byPr = new Map()
+    for (const raw of added) {
+      let o = null
+      try { o = JSON.parse(raw) } catch { continue } // 空行与坏行都在这儿落地
+      if (!o || o.pr == null || !o.who) continue
+      const pr = Number(o.pr)
+      if (!byPr.has(pr)) byPr.set(pr, new Map())
+      const w = byPr.get(pr)
+      w.set(String(o.who), (w.get(String(o.who)) || 0) + 1)
+    }
+    if (byPr.size) {
+      const rows = [...byPr.entries()]
+        .map(([pr, w]) => ({ pr, n: [...w.values()].reduce((a, x) => a + x, 0), who: [...w.entries()].map(([id, n]) => `${id} ${n}`) }))
+        .sort((a, z) => z.n - a.n)
+      notices.push(S.accFbUncommitted(rows.slice(0, 2), rows.length))
+    }
+    // (b) 可清的截图:与 acc-feedback-prune.mjs 同一把尺(合并日取 release-manifest)
+    if (RLM) {
+      let files = []
+      try { files = readdirSync(join(KANBAN, 'shots')).filter((f) => f.startsWith('acc-')) } catch {}
+      if (files.length >= ACC_FB_PRUNE_MIN) {
+        const rows = prunable(files, RLM, ACC_FB_PRUNE_DAYS, TODAY)
+        if (rows.length >= ACC_FB_PRUNE_MIN) notices.push(S.accFbPrunable(rows.length, ACC_FB_PRUNE_DAYS))
+      }
+    }
   }
 }
 

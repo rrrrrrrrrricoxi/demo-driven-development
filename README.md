@@ -26,7 +26,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback`, `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -115,6 +115,72 @@ paste back into the manifest's `result`, so a finished round of acceptance lands
 in git instead of in one browser. Cards whose pull request has a checklist gain a
 link to it and a live `n/N` counter. Left unset, output is byte-identical to a
 board without the feature; turning it on without the manifest is a hard error.
+
+## Shared acceptance feedback (optional)
+
+A static board keeps every tick in the browser that made it, which is fine while
+one person is testing and useless the moment two are: the other tester's ticks,
+their notes and their screenshots live somewhere you cannot see. Set
+`config.acceptanceFeedback` to `true` (on top of `acceptanceTab`) and every
+checklist row grows a quiet **反馈 ▸** entry on its right. Open it inline and you
+can mark the row ✓ / ✕, leave one line of notes, and paste or pick a screenshot;
+"记下" posts it. Once there is feedback the entry itself becomes the summary —
+`✓ 甲 · ✕ 乙 · 2 图` — and the expanded row lists every mark underneath,
+thumbnails included. Testers name themselves once (stored as
+`<brand>_acc_who` in that browser) and the tab header carries a `我是 … · 换人`
+chip.
+
+The shared source of truth is `app/kanban/acceptance-feedback.jsonl`, one JSON
+object per line, written by two append-only `POST` endpoints in the bundled
+`serve.py` (`/api/acceptance/mark` and `/api/acceptance/shot`). The page polls
+that file every 20 seconds while the acceptance tab is visible, plus whenever the
+window regains focus or the tab is opened, so a colleague's verdict shows up in
+seconds without regenerating anything. Later lines win over earlier ones for the
+same (person, item) verdict; notes and screenshots accumulate; a malformed line
+is skipped and counted, never fatal. Bump a checklist's `revision` and the older
+marks stay visible but stop counting: the expanded row greys them with
+「清单已改(rev N)」 and the summary reports them as `旧清单 N`, so a ✓ from
+before the rewrite never reads as a ✓ on the text that replaced it. Local ticks and the "copy result" button are
+untouched — they remain your own progress; this only adds what other people said.
+
+Everything is validated server-side even though the board is on a trusted
+network: the pull request must be in the checklist, the item must belong to it,
+`who` is 1–20 characters with no control characters, `verdict` is `ok` / `bad` or
+absent, `note` caps at 2000 characters, an upload must be JPEG or PNG by magic
+number and content type and stay under 2 MB, and **the filename is composed by
+the server** (`acc-<pr>-<item>-<UTC timestamp>.jpg`) — a client-supplied name is
+never trusted. Writes are a single `O_APPEND` write plus `fsync`, so two people
+clicking at once cannot interleave. With the key unset the endpoints answer 404
+and generated output is byte-identical to a board without the feature.
+
+Both endpoints refuse cross-site writes: a request whose `Sec-Fetch-Site` says it
+came from somewhere else, or whose `Origin` is not this server's own, gets a 403,
+and `mark` accepts only `application/json` — `text/plain` would be a CORS simple
+request, which is exactly the shape a page you happen to be visiting could use to
+file a verdict under your name. Command-line clients send neither header and are
+unaffected. The trust boundary itself is unchanged and worth stating plainly:
+`serve.py` binds `0.0.0.0` and has no accounts, so **anyone who can reach the
+port can write** — run it on a network you trust, and remember the ledger is
+append-only in git, where a forged line shows up in the next `git diff`.
+
+Feedback screenshots stay out of git by default: add
+`app/kanban/shots/acc-*` to your `.gitignore` (the plugin prints this as a
+reminder and never edits your ignore file), and they are excluded from the
+screenshot gallery. To keep one as evidence, rename it without the `acc-`
+prefix and put it in a card's `shots` field. To clear the rest,
+`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run` lists the shots whose
+pull request merged more than 30 days ago (`--days N` to change the window) and
+dropping `--dry-run` deletes them; the `.jsonl` is never touched, so the record
+of who said what survives the images. The Stop guard says one line when the
+jsonl has uncommitted lines, and another when ten or more shots are prunable —
+it never commits or deletes anything itself.
+
+The endpoints only exist in the `serve.py` shipped with 0.17.0 and later. Boards
+seeded by an earlier version keep the copy they have (the plugin never overwrites
+a file you may have edited); `kanban-init` prints a line when yours is behind, and
+upgrading is a copy of `templates/serve.py` plus a restart of the server. Until
+then the board says so where it happens: an older `serve.py` answers a write with
+501, and the row shows that sentence rather than the status code.
 
 ## Release progress (optional)
 

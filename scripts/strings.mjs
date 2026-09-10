@@ -41,6 +41,12 @@ const zh = {
     `⚠ 看板守卫:验收清单 ${list} 里条目 id「${id}」重复 —— 勾选状态按 id 存,重复即互相顶掉,请改成唯一 id。`,
   accUnknownCard: (list, id) =>
     `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
+  // v0.17.0:验收反馈是当场记下的账,留在工作区里等于没留(换台机器就看不见了)。只提醒,不代提交。
+  accFbUncommitted: (rows, total) =>
+    `验收反馈:${rows.map((r) => `#${r.pr} 新增 ${r.n} 条未提交(${r.who.join(' · ')})`).join(';')}` +
+    `${total > rows.length ? ` …等 ${total} 个 PR` : ''} —— 收工前提交 app/kanban/acceptance-feedback.jsonl。`,
+  accFbPrunable: (n, days) =>
+    `验收反馈截图:${n} 张对应的 PR 已合并满 ${days} 天,可清 —— \`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run\` 先看清单,去掉 --dry-run 才删(jsonl 一行不动)。`,
   richLongText: (worst, total) =>
     `⚠ 看板守卫:${total} 张卡的正文字段超过 800 字且无 detail(最长:${worst.id} 的 ${worst.key})—— 卡正文留结论,长证据与灰盒记录移进 detail。`,
   // 新卡这一档是阻断(v0.16.2):正文刚写出来还在手边,当场拆最省事;等它进了历史再回头拆,改的
@@ -309,6 +315,9 @@ const zh = {
     planNoCreates: '[plan] 骨架文件已齐,零新建',
     planNarrativeSkip: '[plan] path-manifest.json:缺省不铺(「决策路径」标签页自动不出现);要叙事模块加 --with-narrative',
     planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore 已在,将并入缺失条目(去重):${items.join(' · ')}`,
+    // v0.17.0:反馈截图默认不进 git。init 只说这一行 —— 宿主的 .gitignore 是人的文件,不替人加行。
+    planAccFbIgnore: '[plan] 提醒:config 开着 acceptanceFeedback,验收反馈截图默认不进 git —— 请自行在 .gitignore 加一行 `app/kanban/shots/acc-*`(要留证的图改名去掉 acc- 前缀,再挂进卡的 shots 字段)',
+    planServeStale: (have, want) => `[plan] 提醒:app/kanban/serve.py 是 ${have || '更早的版本'}(plugin 模板已是 ${want})—— 新写口(如 v0.17.0 的验收反馈)只在新版里。要升:先看自己有没有改过那份,没改就用 plugin templates/serve.py 覆盖并重启 serve`,
     planSettingsAdd: (items) =>
       `[plan] .claude/settings.json 将并入 permissions.deny(去重,不动其他键):\n${items.map((d) => `  + ${d}`).join('\n')}`,
     planSettingsOk: '[plan] .claude/settings.json:deny 条目已齐,跳过',
@@ -425,6 +434,11 @@ const en = {
     `⚠ Kanban guard: acceptance checklist ${list} has a duplicate item id "${id}" — tick state is stored by id, so duplicates overwrite each other. Make the ids unique.`,
   accUnknownCard: (list, id) =>
     `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
+  accFbUncommitted: (rows, total) =>
+    `Acceptance feedback: ${rows.map((r) => `#${r.pr} has ${r.n} new uncommitted line(s) (${r.who.join(' · ')})`).join('; ')}` +
+    `${total > rows.length ? ` …and ${total} pull requests in total` : ''} — commit app/kanban/acceptance-feedback.jsonl before you stop.`,
+  accFbPrunable: (n, days) =>
+    `Acceptance feedback shots: ${n} of them belong to pull requests merged more than ${days} days ago and can go — run \`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run\` for the list, drop --dry-run to delete (the jsonl is never touched).`,
   richLongText: (worst, total) =>
     `⚠ Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail (longest: ${worst.key} on ${worst.id}) — keep the card body to conclusions and move long evidence into detail.`,
   richLongNewBlock: (rows, total) =>
@@ -697,6 +711,8 @@ kanban.config.json). This command never commits — git add the card files yours
     planNoCreates: '[plan] skeleton complete, nothing to create',
     planNarrativeSkip: '[plan] path-manifest.json: not laid by default (the "decision path" tab simply will not appear); add --with-narrative for the narrative module',
     planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore exists; missing entries will be merged in (deduped): ${items.join(' · ')}`,
+    planAccFbIgnore: '[plan] Note: acceptanceFeedback is on in the config, and acceptance feedback shots stay out of git by default — add `app/kanban/shots/acc-*` to your .gitignore yourself (to keep one as evidence, rename it without the acc- prefix and put it in a card\'s shots field)',
+    planServeStale: (have, want) => `[plan] Note: app/kanban/serve.py is ${have || 'an earlier version'} while the plugin template is ${want} — the newer write endpoints (v0.17.0 acceptance feedback) only exist in the newer one. To upgrade: check whether you have edited your copy, and if not, overwrite it from the plugin's templates/serve.py and restart the server`,
     planSettingsAdd: (items) =>
       `[plan] .claude/settings.json will gain permissions.deny entries (deduped, other keys untouched):\n${items.map((d) => `  + ${d}`).join('\n')}`,
     planSettingsOk: '[plan] .claude/settings.json: every deny entry present, skipping',
@@ -836,6 +852,7 @@ const genZh = {
   lanesInvalid: (v) => `kanban.config.json lanes 非法:${v};合法值:null 或对象 { "ids": [...], ... }(见 kanban-init SKILL)`,
   accManifestMissing: (err) => `kanban.config.json 开了 acceptanceTab,但看板目录的 acceptance-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/acceptance-manifest.json;不想开就把 acceptanceTab 去掉)`,
   relManifestMissing: (err) => `kanban.config.json 开了 releaseTab,但看板目录的 release-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/release-manifest.json,内容由 scripts/pr-sync.mjs 填;不想开就把 releaseTab 去掉)`,
+  accFeedbackNeedsTab: () => 'kanban.config.json 开了 acceptanceFeedback,但没开 acceptanceTab —— 反馈是挂在验收行上的,没有验收 tab 就无处可挂,本次按关处理(要用就把 acceptanceTab 也设成 true)',
   relStagesNoDev: () => 'release-manifest.json 的 stages 里没有 id 为 "dev" 的段:dev(开着的 PR)是必备段,宿主可以只列两段但不能省掉 dev(缺 test = 合了即发,是允许的)',
   cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json 配了 cardsDir = "${dir}"(一卡一文件),${file} 里却还留着 ${key} 数组 —— 两处都能写的字段迟早对不上。卡的真源是 ${dir}/ 下的文件,把头文件的 ${key} 删掉(或跑 scripts/cards-join.mjs 合回单文件并去掉 cardsDir)`,
   cardsDirMissing: (rel) => `kanban.config.json 配了 cardsDir,但卡目录 ${rel} 不在(相对看板目录)—— 建目录并把卡放进去,或把 cardsDir 去掉退回单文件形制`,
@@ -875,6 +892,7 @@ const genEn = {
   lanesInvalid: (v) => `kanban.config.json lanes is invalid: ${v}; valid values: null, or an object { "ids": [...], ... } (see the kanban-init skill)`,
   accManifestMissing: (err) => `kanban.config.json enables acceptanceTab, but the board's acceptance-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/acceptance-manifest.json; drop acceptanceTab to turn the tab off)`,
   relManifestMissing: (err) => `kanban.config.json enables releaseTab, but the board's release-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/release-manifest.json, filled in by scripts/pr-sync.mjs; drop releaseTab to turn the tab off)`,
+  accFeedbackNeedsTab: () => 'kanban.config.json enables acceptanceFeedback but not acceptanceTab — shared feedback hangs off acceptance checklist rows, so with no acceptance tab there is nothing to hang it on. Treated as off for this run (set acceptanceTab to true as well to use it)',
   relStagesNoDev: () => 'release-manifest.json has no stage with id "dev": dev (open pull requests) is required. A board may list only two stages, but not drop dev (dropping test — "merged means shipped" — is fine)',
   cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json sets cardsDir = "${dir}" (one file per card), yet ${file} still has a ${key} array — two writable places for the same field drift apart sooner or later. The cards live under ${dir}/; delete ${key} from the header file (or run scripts/cards-join.mjs to go back to single files and drop cardsDir)`,
   cardsDirMissing: (rel) => `kanban.config.json sets cardsDir, but the card directory ${rel} is not there (relative to the kanban directory) — create it and put the cards in, or drop cardsDir to stay on single-file manifests`,
