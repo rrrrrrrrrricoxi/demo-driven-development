@@ -127,7 +127,7 @@ can mark the row ✓ / ✕, leave one line of notes, and paste or pick a screens
 "记下" posts it. Once there is feedback the entry itself becomes the summary —
 `✓ Rico · ✕ codev · 2 图` — and the expanded row lists every mark underneath,
 thumbnails included. Testers name themselves once (stored as
-`<brand>_acc_who` in that browser) and the tab header carries a `我是 …· 换人`
+`<brand>_acc_who` in that browser) and the tab header carries a `我是 … · 换人`
 chip.
 
 The shared source of truth is `app/kanban/acceptance-feedback.jsonl`, one JSON

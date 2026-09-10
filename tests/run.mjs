@@ -5672,6 +5672,30 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       c5.acceptanceFeedback = true
       wr(cfgP, c5)
     }
+    // 没有 git 的板:spec §4 写的是「无 git 时不报」,而 mkFixture 每个 fixture 都 git init 过 ——
+    // tracked.error / rev-parse --is-inside-work-tree 那条回退路原来一条断言都没有,
+    // 重构掉也不会有人红脸。这里连正对照一起摆:同一块板 git init 之后立刻就报得出来。
+    {
+      const ng = mkFixture('fx73ng', { 's.html': demoHtml('s') })
+      rmSync(join(ng.root, '.git'), { recursive: true, force: true })
+      const ngCfg = JSON.parse(readFileSync(join(ng.kb, 'kanban.config.json'), 'utf8'))
+      ngCfg.acceptanceFeedback = true // 只开这一个:守卫那两条提醒只看它,清单不必在场
+      writeFileSync(join(ng.kb, 'kanban.config.json'), JSON.stringify(ngCfg, null, 2) + '\n')
+      writeFileSync(join(ng.kb, 'acceptance-feedback.jsonl'), [
+        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"verdict":"bad"}',
+        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"note":"再一条"}',
+        '{"ts":"2026-09-10T12:02:00Z","pr":277,"item":"JJ3","who":"codev","rev":2,"verdict":"ok"}',
+        '',
+      ].join('\n'))
+      const n1 = runStop(NEW_SCRIPTS, ng.root)
+      ok(n1.status === 0 && !((JSON.parse(n1.stdout || '{}').systemMessage) || '').includes('验收反馈:'),
+        '没有 git 的板:问不出「提交了没」,就一个字都不说(也不崩)', `${n1.status} ${n1.stdout.slice(0, 160)}`)
+      execFileSync('git', ['init', '-q'], { cwd: ng.root })
+      const n2 = runStop(NEW_SCRIPTS, ng.root)
+      ok(((JSON.parse(n2.stdout || '{}').systemMessage) || '').includes('#277 新增 3 条未提交'),
+        '同一块板 git init 之后立刻报得出来 —— 上面那句沉默是「问不出」,不是这盘摆坏了',
+        (JSON.parse(n2.stdout || '{}').systemMessage || '').slice(0, 160))
+    }
   }
 
   // ---- 可清的反馈截图:守卫报数,prune 脚本才动手 ----
