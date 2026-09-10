@@ -2947,6 +2947,15 @@ const ACC_FB_JS = !AFB ? '' : `
       if (isNaN(d.getTime())) return ''
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
     }
+    function fbJson(t) { try { return JSON.parse(t) } catch (e) { return null } } // 两个写口的回应都这么读
+    function fbHttpMsg(status, t) { // 写口答了非 2xx:服务端说得出话就用它的原话,说不出话的两种自己解释
+      var j = fbJson(t)
+      if (j && j.error) return j.error
+      // 501 = 这台的 serve.py 还没有 do_POST(宿主的 serve.py 是 writeOnce 的种子,init 不覆盖)——
+      // 最可能的首跑状态,也是最不该只给一个裸状态码的那个
+      if (status === 501) return '这台的 serve.py 还没有反馈写口(v0.17.0 起才有)—— 用 plugin 的 templates/serve.py 覆盖 app/kanban/serve.py,重启 serve 再刷新'
+      return '写不进去(' + status + ')'
+    }
     /* ---- 运行期 ---- */
     var FB = {}, FB_BAD = 0, FB_WHO = '', FB_STAGE = {}, fbPasteRow = null
     var FB_WHO_KEY = '${LS_PREFIX}_acc_who'
@@ -2960,7 +2969,6 @@ const ACC_FB_JS = !AFB ? '' : `
       return e
     }
     function fbMsg(box, t) { var m = box.querySelector('.accfbm'); if (m) m.textContent = t || '' }
-    function fbJson(t) { try { return JSON.parse(t) } catch (e) { return null } } // 两个写口的回应都这么读
     function fbWhoChip() {
       var chip = document.querySelector('[data-accme]')
       if (!chip) return
@@ -3090,8 +3098,9 @@ const ACC_FB_JS = !AFB ? '' : `
           { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
       }).then(function (r) {
         return r.text().then(function (t) {
+          if (!r.ok) throw new Error(fbHttpMsg(r.status, t))
           var j = fbJson(t)
-          if (!r.ok || !j || !accFbShotOk(j.shot, row.dataset.accpr, row.dataset.accid)) throw new Error((j && j.error) || ('上传失败(' + r.status + ')'))
+          if (!j || !accFbShotOk(j.shot, row.dataset.accpr, row.dataset.accid)) throw new Error('服务端回的文件名不认得,这张先不挂')
           return j.shot
         })
       }).then(function (name) {
@@ -3115,7 +3124,7 @@ const ACC_FB_JS = !AFB ? '' : `
       fbMsg(box, '记下中…')
       fetch('api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) { return r.text().then(function (t) {
-          if (!r.ok) { fbMsg(box, (fbJson(t) || {}).error || ('写入失败(' + r.status + ')')); return }
+          if (!r.ok) { fbMsg(box, fbHttpMsg(r.status, t)); return }
           delete FB_STAGE[fbKey(row)]
           box.querySelector('.accfbn').value = ''
           box.querySelectorAll('.accfbv.on').forEach(function (b) { b.classList.remove('on') })

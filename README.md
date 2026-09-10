@@ -175,7 +175,9 @@ it never commits or deletes anything itself.
 The endpoints only exist in the `serve.py` shipped with 0.17.0 and later. Boards
 seeded by an earlier version keep the copy they have (the plugin never overwrites
 a file you may have edited); `kanban-init` prints a line when yours is behind, and
-upgrading is a copy of `templates/serve.py` plus a restart of the server.
+upgrading is a copy of `templates/serve.py` plus a restart of the server. Until
+then the board says so where it happens: an older `serve.py` answers a write with
+501, and the row shows that sentence rather than the status code.
 
 ## Release progress (optional)
 

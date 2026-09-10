@@ -5328,7 +5328,21 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   // ---- 纯函数:从产物里原样抠出来跑(下面几段共用这一份,冒烟那段验坏行也用它)----
   const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
   ok(fbSrc.includes('accFbMerge') && fbSrc.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
-  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbChip }')()
+  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbChip, accFbTime, fbHttpMsg }')()
+  {
+    // 写口答了非 2xx 时页面说什么。最可能的首跑状态是宿主那份 serve.py 还没有 do_POST
+    // (种子文件,init 从不覆盖):BaseHTTPRequestHandler 兜底答 501 + 一页 text/html,
+    // JSON 解不出来,原来就落成一个只有开发者看得懂的「写入失败(501)」。
+    ok(F.fbHttpMsg(501, '<html><body>Error 501</body></html>').includes('serve.py')
+      && F.fbHttpMsg(501, '').includes('v0.17.0'),
+      '501:说清是这台的 serve.py 老了、怎么换(不是一个裸状态码)', F.fbHttpMsg(501, ''))
+    ok(F.fbHttpMsg(400, '{"error":"note 超过 2000 字"}') === 'note 超过 2000 字',
+      '服务端说得出话就用它的原话,一个字不改(魔数 / 尺寸那类 400 照旧)')
+    ok(F.fbHttpMsg(403, '{"error":"跨站请求不受理(Origin: https://evil.example)"}').includes('跨站'),
+      '跨站门那句 403 也原样透出来')
+    ok(F.fbHttpMsg(500, 'boom') === '写不进去(500)', '既说不出话又不是 501:退到「写不进去(码)」', F.fbHttpMsg(500, 'boom'))
+  }
+  ok(count(on, 'fbHttpMsg(r.status, t)') === 2, '两个写口共用这一只(记下 / 上传各一处)', String(count(on, 'fbHttpMsg(r.status, t)')))
   {
     const NUL = String.fromCharCode(0)
     const lines = [
