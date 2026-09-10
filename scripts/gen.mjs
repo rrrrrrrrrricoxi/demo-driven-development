@@ -2608,7 +2608,7 @@ const accItemHtml = (l, it) => {
   const tags = (it.key ? '<span class="acckey">核心</span>' : '') +
     (rd ? `<span class="acctag">${esc(rd.label || rd.id)}</span>` : '') +
     (l.nums.length > 1 ? `<span class="acctag">#${it.pr}</span>` : '')
-  // 反馈入口:同行右端一枚灰钮,有反馈时钮面换成摘要(「✓ Rico · ✕ codev · 2 图」,运行期填)。
+  // 反馈入口:同行右端一枚灰钮,有反馈时钮面换成摘要(「✓ 甲 · ✕ 乙 · 2 图」,运行期填)。
   // 展开区不烤进产物 —— 一份清单几十上百条,每条烤一套表单是白搭的字节;点开时现建一个。
   const fb = !AFB ? '' : `
               <button type="button" class="accfb" data-accfb="${esc(it.id)}" aria-expanded="false"><span class="accfbt">反馈 ▸</span></button>`
@@ -2678,7 +2678,7 @@ const accCurHtml = (() => {
   </section>`
 })()
 
-// 身份芯片(反馈共享开着时):「我是 Rico · 换人」。名字存这台浏览器,gen 期一个字都不知道。
+// 身份芯片(反馈共享开着时):「我是 甲 · 换人」。名字存这台浏览器,gen 期一个字都不知道。
 const ACC_ME_CHIP = !AFB ? '' : `
     <span class="accme" data-accme hidden><span class="accmen"></span><button type="button" class="accmeb" data-accwho>换人</button></span>`
 const ACC_FB_SESS = !AFB ? '' : ' · 反馈(✓/✕、备注、截图)经本机的 <code>serve.py</code> 共享给同看板的人'
@@ -2949,7 +2949,7 @@ const ACC_FB_JS = !AFB ? '' : `
       })
       return v
     }
-    function accFbChip(e, rev) { // 入口摘要:「✓ Rico · ✕ codev · 2 图」;没有反馈 = 空串(入口保持原样)
+    function accFbChip(e, rev) { // 入口摘要:「✓ 甲 · ✕ 乙 · 2 图」;没有反馈 = 空串(入口保持原样)
       var v = accFbLive(e, rev)
       var parts = v.order.map(function (w) { return (v.verdicts[w] === 'ok' ? '✓ ' : '✕ ') + w })
       if (v.notes) parts.push(v.notes + ' 备注')

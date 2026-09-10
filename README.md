@@ -125,7 +125,7 @@ their notes and their screenshots live somewhere you cannot see. Set
 checklist row grows a quiet **反馈 ▸** entry on its right. Open it inline and you
 can mark the row ✓ / ✕, leave one line of notes, and paste or pick a screenshot;
 "记下" posts it. Once there is feedback the entry itself becomes the summary —
-`✓ Rico · ✕ codev · 2 图` — and the expanded row lists every mark underneath,
+`✓ 甲 · ✕ 乙 · 2 图` — and the expanded row lists every mark underneath,
 thumbnails included. Testers name themselves once (stored as
 `<brand>_acc_who` in that browser) and the tab header carries a `我是 … · 换人`
 chip.

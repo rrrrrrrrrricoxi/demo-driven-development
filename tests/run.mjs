@@ -5373,35 +5373,35 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   {
     const NUL = String.fromCharCode(0)
     const lines = [
-      '{"ts":"2026-09-10T12:03:41Z","pr":277,"item":"JJ3","who":"Rico","verdict":"bad","note":"空态那句没换"}',
+      '{"ts":"2026-09-10T12:03:41Z","pr":277,"item":"JJ3","who":"tester-a","verdict":"bad","note":"空态那句没换"}',
       '这行不是 JSON',
       '',
-      '{"ts":"2026-09-10T12:09:00Z","pr":277,"item":"JJ3","who":"Rico","verdict":"ok"}',
-      '{"ts":"2026-09-10T12:10:00Z","pr":277,"item":"JJ3","who":"codev","verdict":"bad","shot":"acc-277-JJ3-20260910T121000.jpg"}',
+      '{"ts":"2026-09-10T12:09:00Z","pr":277,"item":"JJ3","who":"tester-a","verdict":"ok"}',
+      '{"ts":"2026-09-10T12:10:00Z","pr":277,"item":"JJ3","who":"tester-b","verdict":"bad","shot":"acc-277-JJ3-20260910T121000.jpg"}',
       '{"pr":277,"item":"JJ3"}',
     ].join('\n')
     const p = F.accFbParse(lines)
     ok(p.rows.length === 3 && p.bad === 2, '坏行跳过并计数(非法 JSON 一条 + 缺 who 一条)', `${p.rows.length} / ${p.bad}`)
     const e = F.accFbMerge(p.rows)['277' + NUL + 'JJ3']
     const v = F.accFbLive(e, 2)
-    ok(v.verdicts.Rico === 'ok' && v.verdicts.codev === 'bad',
-      '同一 (who, item):后写的 verdict 覆盖前一条(Rico 由 bad 改成 ok)', JSON.stringify(v.verdicts))
-    ok(v.order.join(' ') === 'Rico codev', '出场顺序按第一次表态排,改主意不插队', v.order.join(' '))
+    ok(v.verdicts['tester-a'] === 'ok' && v.verdicts['tester-b'] === 'bad',
+      '同一 (who, item):后写的 verdict 覆盖前一条(tester-a 由 bad 改成 ok)', JSON.stringify(v.verdicts))
+    ok(v.order.join(' ') === 'tester-a tester-b', '出场顺序按第一次表态排,改主意不插队', v.order.join(' '))
     ok(v.notes === 1 && v.shots === 1, '备注与图是累积的,不被后一条顶掉')
-    ok(F.accFbChip(e, 2) === '✓ Rico · ✕ codev · 1 备注 · 1 图', '入口摘要文案', F.accFbChip(e, 2))
+    ok(F.accFbChip(e, 2) === '✓ tester-a · ✕ tester-b · 1 备注 · 1 图', '入口摘要文案', F.accFbChip(e, 2))
     ok(F.accFbChip(null, 2) === '' && F.accFbChip(F.accFbMerge([])['x'], 2) === '',
       '没有反馈 = 空串(入口保持「反馈 ▸」原样)')
     {
       // 清单改版:本地勾按 rev 清零、展开区里旧行标灰,入口那枚 chip 从前不认 rev —— 它照旧写着
-      // 「✓ Rico」,与一条刚在新版清单上通过的行长得一模一样。扫一列 chip 的人读到的是「已通过」。
+      // 「✓ tester-a」,与一条刚在新版清单上通过的行长得一模一样。扫一列 chip 的人读到的是「已通过」。
       const mixed = F.accFbMerge(F.accFbParse([
-        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":1,"verdict":"ok"}',
-        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"codev","rev":1,"note":"改版前的备注"}',
-        '{"ts":"2026-09-10T12:30:00Z","pr":277,"item":"JJ3","who":"codev","rev":2,"verdict":"bad"}',
+        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":1,"verdict":"ok"}',
+        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"tester-b","rev":1,"note":"改版前的备注"}',
+        '{"ts":"2026-09-10T12:30:00Z","pr":277,"item":"JJ3","who":"tester-b","rev":2,"verdict":"bad"}',
       ].join('\n')).rows)['277' + NUL + 'JJ3']
-      ok(F.accFbChip(mixed, 2) === '✕ codev · 旧清单 2', '改版后:只算当版的行,旧账另起一段陈述', F.accFbChip(mixed, 2))
-      ok(F.accFbChip(mixed, 1) === '✓ Rico · 1 备注 · 旧清单 1', 'rev 1 那边同一把尺(反过来看也对)', F.accFbChip(mixed, 1))
-      ok(F.accFbChip(mixed, 0) === '✓ Rico · ✕ codev · 1 备注', '取不到 rev(老板子 / 没盖 rev 的行):全算,与 0.17.0 之前一致', F.accFbChip(mixed, 0))
+      ok(F.accFbChip(mixed, 2) === '✕ tester-b · 旧清单 2', '改版后:只算当版的行,旧账另起一段陈述', F.accFbChip(mixed, 2))
+      ok(F.accFbChip(mixed, 1) === '✓ tester-a · 1 备注 · 旧清单 1', 'rev 1 那边同一把尺(反过来看也对)', F.accFbChip(mixed, 1))
+      ok(F.accFbChip(mixed, 0) === '✓ tester-a · ✕ tester-b · 1 备注', '取不到 rev(老板子 / 没盖 rev 的行):全算,与 0.17.0 之前一致', F.accFbChip(mixed, 0))
     }
     {
       // who 是测试人自己敲的字,拿它当普通对象的键 = 名字叫 __proto__ 时 chip 一行说两遍、
@@ -5517,8 +5517,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         { method: 'POST', headers: { 'Content-Type': type }, body: buf })
 
       // 关着:两条写口 404,别的 POST 路径照旧 501,GET 一个字节没变
-      ok((await mark({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'ok' })).status === 404
-        && (await shot('pr=277&item=JJ3&who=Rico', JPG)).status === 404,
+      ok((await mark({ pr: 277, item: 'JJ3', who: 'tester-a', verdict: 'ok' })).status === 404
+        && (await shot('pr=277&item=JJ3&who=tester-a', JPG)).status === 404,
         'acceptanceFeedback 关着:两条写口都 404')
       ok((await req(srv.base, '/api/nope', { method: 'POST', body: '{}' })).status === 501,
         '别的 POST 路径照旧 501(与没有这段代码时同一句)')
@@ -5528,7 +5528,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       }
       c4.acceptanceFeedback = true
       wr(cfgP, c4)
-      ok((await mark({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'ok' })).status === 200,
+      ok((await mark({ pr: 277, item: 'JJ3', who: 'tester-a', verdict: 'ok' })).status === 200,
         '开关拨到 true:不重启服务,下一个请求就认(每请求现读 config)')
 
       // 校验矩阵
@@ -5571,17 +5571,17 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         '被拒的那几笔一个文件都没落盘')
 
       // 端到端:两笔 mark + 一张图 + GET jsonl
-      const m1 = await mark({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'bad', note: '空态那句<b>没换</b>' })
-      const m2 = await mark({ pr: 277, item: 'A"1', who: 'codev', verdict: 'ok' })
-      ok(m1.status === 200 && m1.json.pr === 277 && m1.json.who === 'Rico' && m1.json.rev === 2,
+      const m1 = await mark({ pr: 277, item: 'JJ3', who: 'tester-a', verdict: 'bad', note: '空态那句<b>没换</b>' })
+      const m2 = await mark({ pr: 277, item: 'A"1', who: 'tester-b', verdict: 'ok' })
+      ok(m1.status === 200 && m1.json.pr === 277 && m1.json.who === 'tester-a' && m1.json.rev === 2,
         'mark 写成功:回的就是写进去的那一行(rev 由服务端按清单盖,不信客户端)', m1.text.slice(0, 120))
       ok(m1.json.note === '空态那句<b>没换</b>', '备注原样存(转义是渲染那头的事,存的时候不改人写的字)')
       ok(m2.status === 200 && m2.json.item === 'A"1', '带引号的条目 id 也写得进去')
-      const up = await shot('pr=277&item=' + encodeURIComponent('A"1') + '&who=codev', PNG, 'image/png')
+      const up = await shot('pr=277&item=' + encodeURIComponent('A"1') + '&who=tester-b', PNG, 'image/png')
       ok(up.status === 200 && /^acc-277-A_1-\d{8}T\d{6}\.png$/.test(up.json.shot),
         '图落盘:文件名只由服务端拼(pr + slug 过的条目 id + UTC 时刻)', up.text.slice(0, 120))
       ok(existsSync(join(kb, 'shots', up.json.shot)), '图确实在 shots/ 里')
-      const m3 = await mark({ pr: 277, item: 'A"1', who: 'codev', shot: up.json.shot })
+      const m3 = await mark({ pr: 277, item: 'A"1', who: 'tester-b', shot: up.json.shot })
       ok(m3.status === 200 && m3.json.shot === up.json.shot, '刚上传的那张挂得到条目上')
       {
         const g = await req(srv.base, '/acceptance-feedback.jsonl')
@@ -5591,7 +5591,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
           'jsonl 也压(唯一每 20 秒重拉、又只增不删的那份文本,不该是唯一漏掉 gzip 的)',
           String(g.headers.get('content-encoding')))
         const rows = g.text.trim().split('\n').map((l) => JSON.parse(l))
-        ok(rows.length === 4 && rows[0].who === 'Rico' && rows[3].shot === up.json.shot,
+        ok(rows.length === 4 && rows[0].who === 'tester-a' && rows[3].shot === up.json.shot,
           '追加式:先写的在前,后写的在后(含开关刚打开时那笔)', String(rows.length))
       }
       // 并发:六笔同时打,六行俱全、行行合法(O_APPEND 单次 write)
@@ -5619,7 +5619,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         const forge = (extra) => req(srv.base, '/api/acceptance/mark', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...extra },
-          body: JSON.stringify({ pr: 277, item: 'JJ3', who: 'Rico', verdict: 'ok', note: '别人网页替我写的' }),
+          body: JSON.stringify({ pr: 277, item: 'JJ3', who: 'tester-a', verdict: 'ok', note: '别人网页替我写的' }),
         })
         const f1 = await forge({ Origin: 'https://evil.example' })
         ok(f1.status === 403 && String(f1.json && f1.json.error).includes('Origin'),
@@ -5627,7 +5627,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         const f2 = await forge({ 'Sec-Fetch-Site': 'cross-site' })
         ok(f2.status === 403 && String(f2.json && f2.json.error).includes('Sec-Fetch-Site'),
           '浏览器盖的跨站戳:403(现代浏览器都发这个头)', `${f2.status} ${f2.text.slice(0, 90)}`)
-        const f3 = await req(srv.base, '/api/acceptance/shot?pr=277&item=JJ3&who=Rico',
+        const f3 = await req(srv.base, '/api/acceptance/shot?pr=277&item=JJ3&who=tester-a',
           { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'Sec-Fetch-Site': 'same-site' }, body: JPG })
         ok(f3.status === 403, '图那条口同一道门(same-site 也不算同源)', `${f3.status} ${f3.text.slice(0, 90)}`)
         ok(readFileSync(jsonlP, 'utf8') === before, '被跨站门挡下的三笔:jsonl 一个字节没长')
@@ -5645,20 +5645,20 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   {
     const git = (...args) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: fx73.root, encoding: 'utf8' })
     writeFileSync(jsonlP, [
-      '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"verdict":"bad"}',
-      '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"note":"再一条"}',
-      '{"ts":"2026-09-10T12:02:00Z","pr":277,"item":"JJ3","who":"codev","rev":2,"verdict":"ok"}',
+      '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"verdict":"bad"}',
+      '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"note":"再一条"}',
+      '{"ts":"2026-09-10T12:02:00Z","pr":277,"item":"JJ3","who":"tester-b","rev":2,"verdict":"ok"}',
       '',
     ].join('\n'))
     const s1 = runStop(NEW_SCRIPTS, fx73.root)
     const msg1 = (JSON.parse(s1.stdout || '{}').systemMessage) || ''
-    ok(msg1.includes('#277 新增 3 条未提交') && msg1.includes('Rico 2') && msg1.includes('codev 1'),
+    ok(msg1.includes('#277 新增 3 条未提交') && msg1.includes('tester-a 2') && msg1.includes('tester-b 1'),
       '还没提交的 jsonl:守卫一行说清哪个 PR、几条、谁写的', msg1.slice(0, 200))
     git('add', '-A'); git('commit', '-q', '-m', 'feedback')
     const s2 = runStop(NEW_SCRIPTS, fx73.root)
     ok(!((JSON.parse(s2.stdout || '{}').systemMessage) || '').includes('验收反馈:'), '提交完就不再说(账已经进 git)')
     writeFileSync(jsonlP, readFileSync(jsonlP, 'utf8') +
-      '{"ts":"2026-09-10T13:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"verdict":"ok"}\n')
+      '{"ts":"2026-09-10T13:00:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"verdict":"ok"}\n')
     const s3 = runStop(NEW_SCRIPTS, fx73.root)
     ok(((JSON.parse(s3.stdout || '{}').systemMessage) || '').includes('#277 新增 1 条未提交'),
       '已跟踪文件后来又添的行,照样数得出来(git diff 认增行)')
@@ -5682,9 +5682,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       ngCfg.acceptanceFeedback = true // 只开这一个:守卫那两条提醒只看它,清单不必在场
       writeFileSync(join(ng.kb, 'kanban.config.json'), JSON.stringify(ngCfg, null, 2) + '\n')
       writeFileSync(join(ng.kb, 'acceptance-feedback.jsonl'), [
-        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"verdict":"bad"}',
-        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"Rico","rev":2,"note":"再一条"}',
-        '{"ts":"2026-09-10T12:02:00Z","pr":277,"item":"JJ3","who":"codev","rev":2,"verdict":"ok"}',
+        '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"verdict":"bad"}',
+        '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"note":"再一条"}',
+        '{"ts":"2026-09-10T12:02:00Z","pr":277,"item":"JJ3","who":"tester-b","rev":2,"verdict":"ok"}',
         '',
       ].join('\n'))
       const n1 = runStop(NEW_SCRIPTS, ng.root)

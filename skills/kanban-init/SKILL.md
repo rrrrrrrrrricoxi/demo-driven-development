@@ -144,7 +144,7 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
 
 `config.acceptanceFeedback` 缺省关;设 `true` 后每条验收行右端多一枚安静的「反馈 ▸」:点开是行内展开区,
 `✓ 通过 / ✕ 不对` 二选一(可不选)+ 一行备注 +「贴图」(监听 paste)/「选图」(手机用)+「记下」,
-下面列这条目的全部反馈(`Rico ✓ 12:03 备注…` + 缩略图)。有反馈时入口自己变成摘要:`✓ Rico · ✕ codev · 2 图`。
+下面列这条目的全部反馈(`甲 ✓ 12:03 备注…` + 缩略图)。有反馈时入口自己变成摘要:`✓ 甲 · ✕ 乙 · 2 图`。
 
 - **真源是 `app/kanban/acceptance-feedback.jsonl`**(一行一条,进 git):由 `serve.py` 的两个只追加的 POST 口写 ——
   `POST /api/acceptance/mark`(JSON `{pr,item,who,verdict?,note?,shot?}`)与 `POST /api/acceptance/shot?pr=&item=&who=`
@@ -152,7 +152,7 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
 - **页面轮询**:验收 tab 可见期间每 20 s、窗口回到前台、切进这个 tab 时各拉一次;失败静默重试,不弹窗。
   合并口径:同一 (who, 条目) 取最新 `verdict`,备注与图累积;坏行跳过并计数。
 - **身份**:第一次「记下」/「贴图」时问一次「我是」(1–20 字),存这台浏览器的 `<brand>_acc_who`;tab 顶部一枚
-  「我是 Rico · 换人」芯片。**不做账号,不做登录** —— 信任边界是「连得到这个端口的人都能写」(serve.py 绑 0.0.0.0),
+  「我是 甲 · 换人」芯片。**不做账号,不做登录** —— 信任边界是「连得到这个端口的人都能写」(serve.py 绑 0.0.0.0),
   所以这个口只该开在内网 / Tailscale 上。别人网页替你的浏览器来写不算在这个边界里:两条写口都认
   Sec-Fetch-Site / Origin,mark 还认死 `application/json`(跨站就得先过预检,而 OPTIONS 答 501)。
 - **本地勾选与「复制勾选结果」一个字节都没动**:那仍是自己的进度,共享的账是 jsonl。
@@ -162,7 +162,7 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
   宿主的 `.gitignore`(那是仓库主人的文件)。要留证的图改名去掉 `acc-` 前缀,挂进卡的 `shots` 字段才进 git。
   清理走 `node <plugin>/scripts/acc-feedback-prune.mjs [--days 30] [--dry-run]`(判据:对应 PR 已合并满 N 天,
   合并日取 release-manifest);jsonl 一行不动。
-- **守卫两条非阻断提醒**:jsonl 有没提交的新增行(`#277 新增 3 条未提交(Rico 2 · codev 1)`,没 git 就不说)、
+- **守卫两条非阻断提醒**:jsonl 有没提交的新增行(`#277 新增 3 条未提交(甲 2 · 乙 1)`,没 git 就不说)、
   可清的反馈截图攒到 10 张。都只报数,不代为提交或删图。
 - **宿主的 `serve.py` 得是 v0.17.0 那版**:它是 init 种入件,已在场就不覆盖(可能被改过)。落后时 `init --plan/--apply`
   会说一行,升级 = 用 plugin `templates/serve.py` 覆盖 + 重启 serve。

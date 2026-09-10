@@ -26,7 +26,7 @@ what they wrote. Generated output and served responses are byte-identical to
   no modal, nothing covering the item text: ✓ / ✕ (either, or neither), one line
   of notes, 贴图 (listens for a paste) / 选图 (a file input, for phones), and
   记下. Once a row has feedback the entry becomes its summary —
-  `✓ Rico · ✕ codev · 2 图` — and the open row lists every mark below it with
+  `✓ 甲 · ✕ 乙 · 2 图` — and the open row lists every mark below it with
   thumbnails, timestamped (the date appears once a mark is not from today) and
   with a superseded verdict greyed and labelled `后来改成 ✓`, since correcting a
   mistake here means appending, not editing. A tester names themselves once (`window.prompt`, 1–20 characters,
@@ -84,7 +84,7 @@ what they wrote. Generated output and served responses are byte-identical to
   merge date from `release-manifest.json` rather than file timestamps. The jsonl
   is never touched — the images go, the record of who said what stays.
 - **Two non-blocking guard lines**: the jsonl has uncommitted new lines
-  (`验收反馈:#277 新增 3 条未提交(Rico 2 · codev 1)`, from one `git diff`,
+  (`验收反馈:#277 新增 3 条未提交(甲 2 · 乙 1)`, from one `git diff`,
   silent where there is no git), and ten or more screenshots are prunable. The
   guard reports; it never commits and never deletes.
 
