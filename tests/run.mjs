@@ -5345,7 +5345,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
   ok(fbSrc.includes('accFbMerge') && fbSrc.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
   const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbLive, accFbChip, accFbTime, accFbPasteFile, fbHttpMsg, accFbMineAt, accFbPick, accFbAct, accFbSendable, accFbNoWrite, accFbBadTail }')()
-  const merge1 = (lines) => F.accFbMerge(F.accFbParse(lines.join('\n')).rows)['277' + String.fromCharCode(0) + 'JJ3']
+  const NUL = String.fromCharCode(0)
+  const merge1 = (lines) => F.accFbMerge(F.accFbParse(lines.join('\n')).rows)['277' + NUL + 'JJ3']
   {
     // 写口答了非 2xx 时页面说什么。最可能的首跑状态是宿主那份 serve.py 还没有 do_POST
     // (种子文件,init 从不覆盖):BaseHTTPRequestHandler 兜底答 501 + 一页 text/html,
@@ -5388,7 +5389,6 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   ok(on.includes("'后来改成 ' + (latest[r.who] === 'ok' ? '✓' : '✕')"),
     '同一人前后两个 verdict:被顶掉的那条自己说「后来改成 ✓ / ✕」(chip 与列表不再自相矛盾)')
   {
-    const NUL = String.fromCharCode(0)
     const lines = [
       '{"ts":"2026-09-10T12:03:41Z","pr":277,"item":"JJ3","who":"tester-a","verdict":"bad","note":"空态那句没换"}',
       '这行不是 JSON',
@@ -5742,11 +5742,11 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         const p = F.accFbParse(g.text)
         ok(p.rows.length === before + 3 && v1.status === 200 && v3.status === 200,
           '三条记录俱在:撤回是追加,不是抹(两个人同时验时看得见对方刚才判过)', `${before} → ${p.rows.length}`)
-        const e = F.accFbMerge(p.rows)['277' + String.fromCharCode(0) + 'JJ3']
+        const e = F.accFbMerge(p.rows)['277' + NUL + 'JJ3']
         ok(F.accFbLive(e, 2).verdicts['tester-c'] === 'bad' && F.accFbMineAt(e, 2, 'tester-c').v === 'bad',
           '合并取最新:撤回之后再判,读回来就是最后那一次', JSON.stringify(F.accFbLive(e, 2).verdicts))
         const only = await mark({ pr: 277, item: 'A"1', who: 'tester-c', verdict: 'none' })
-        ok(only.status === 200 && F.accFbLive(F.accFbMerge(F.accFbParse(only.text).rows)['277' + String.fromCharCode(0) + 'A"1'], 2).verdicts['tester-c'] === undefined,
+        ok(only.status === 200 && F.accFbLive(F.accFbMerge(F.accFbParse(only.text).rows)['277' + NUL + 'A"1'], 2).verdicts['tester-c'] === undefined,
           '没判过就撤回:也收得下(账上多一条「我不再判它」),合并出来仍是未判', `${only.status} ${only.text.slice(0, 120)}`)
       }
       // 跨站门:别人的网页替你的浏览器来写,一行都不许落。

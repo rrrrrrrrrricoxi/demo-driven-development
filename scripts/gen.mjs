@@ -866,8 +866,8 @@ const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
     for (const k of it.data || []) if (!data[k]) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的数据块「${k}」`)
     return { ...it, id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
   })
-  // preSet:清单 result.checked 里的条目(v0.17.1 起在行上渲成只读的「已收」灰标,不计入谁的判定)
-  return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [], preSet: new Set((((l.result || {}).checked) || []).map(String)) }
+  // pre:清单 result.checked 里的条目 —— 烤进数据块给旧勾选作初值,v0.17.1 起还在行上渲成只读的「已收」灰标
+  return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [], pre: ((l.result || {}).checked || []).map(String) }
 })
 { // 同一 PR 出现在两份清单 = 勾选进度会分家,提醒
   const owner = new Map()
@@ -2611,7 +2611,7 @@ const accItemHtml = (l, it) => {
     (rd ? `<span class="acctag">${esc(rd.label || rd.id)}</span>` : '') +
     (l.nums.length > 1 ? `<span class="acctag">#${it.pr}</span>` : '') +
     // 既往已收(清单 result.checked):只读的灰标,不冒充谁的判定,也不进进度(v0.17.1)
-    (AFB && l.preSet.has(it.id) ? '<span class="accgot" title="这条在清单的 result 里收过账了(只读,不算进我的判定)">已收</span>' : '')
+    (AFB && l.pre.includes(it.id) ? '<span class="accgot" title="这条在清单的 result 里收过账了(只读,不算进我的判定)">已收</span>' : '')
   // 左栏判定(v0.17.1「判定即勾选」):✓ / ✕ 两枚钮,点一下即 POST,点已选的那枚 = 撤回。
   // 关着时这里仍是 0.17.0 那只勾选框,一个字节不动。
   const vd = !AFB ? `
@@ -2925,7 +2925,7 @@ const OV_ACC_BAR = !OVERVIEW ? '' : `
 const ACC_D_LISTS = !ACC ? [] : ACC_LISTS.map((l) => ({
   k: l.key, rev: l.rev, nums: l.nums,
   items: l.items.map((it) => ({ id: it.id, g: it.group, pr: it.pr, rd: it.round })),
-  pre: ((l.result || {}).checked || []).map(String),
+  pre: l.pre,
 }))
 const ACC_D_TSV = !ACC ? {} : Object.fromEntries(ACC_LISTS.map((l) => [l.key, Object.fromEntries(Object.keys(l.data).map((k) => [k, accTsv(l, k)]))]))
 const ACC_D_OF_PR = !ACC ? {} : Object.fromEntries(ACC_LISTS.flatMap((l) => l.nums.map((n) => [String(n), l.key])))
@@ -3109,16 +3109,11 @@ const ACC_FB_JS = !AFB ? '' : `
       if (k in FB_OPT) return FB_OPT[k]
       return accFbPick(accFbMineAt(FB[k], l.rev, FB_WHO), fbLocal(l)[id])
     }
-    function fbVdRow(row) { var l = fbListOf(row); return l ? fbVdOf(l, row.dataset.accid, row.dataset.accpr) : '' }
     function fbSendable() { return accFbSendable(FB_NOWRITE, FB_PROBED) }
-    function fbDegrade() { // 认清这台没有写口:记下来,tab 顶上那行灰字亮起来
-      if (!FB_NOWRITE) { FB_NOWRITE = true; try { localStorage.setItem(FB_NOWRITE_KEY, '1') } catch (e) {} }
-      fbDegLine()
-    }
-    function fbUpgrade() { // 写口又在了(换了新 serve.py / 开关拨回来):那行灰字自己收走
-      if (!FB_NOWRITE) return
-      FB_NOWRITE = false
-      try { localStorage.removeItem(FB_NOWRITE_KEY) } catch (e) {}
+    function fbSetNoWrite(v) { // 认清这台有没有写口:记在浏览器里,tab 顶上那行灰字跟着亮 / 收
+      if (FB_NOWRITE === v) return
+      FB_NOWRITE = v
+      try { v ? localStorage.setItem(FB_NOWRITE_KEY, '1') : localStorage.removeItem(FB_NOWRITE_KEY) } catch (e) {}
       fbDegLine()
     }
     function fbDegLine() { var p = document.querySelector('[data-accdeg]'); if (p) p.hidden = !FB_NOWRITE }
@@ -3151,19 +3146,19 @@ const ACC_FB_JS = !AFB ? '' : `
       var p = document.getElementById('pane-acceptance')
       if (p && p.classList.contains('pane-active') && document.visibilityState !== 'hidden') fbFetch()
     }
-    function fbThumb(name) { // 缩略图一处拼:名字过了 accFbShotOk(或刚由服务端给回)才敢进 src
+    // 'shots/' 那截一处拼(缩略图与放大共用):名字过了 accFbShotOk(或刚由服务端给回)才敢进 src
+    function fbShotImg(name) { var im = document.createElement('img'); im.src = 'shots/' + name; im.alt = name; return im }
+    function fbThumb(name) {
       var b = fbEl('button', 'accfbimg')
       b.dataset.accshot = name
       b.title = '点开看大图'
-      var im = document.createElement('img')
-      im.src = 'shots/' + name; im.alt = name; im.loading = 'lazy'
+      var im = fbShotImg(name); im.loading = 'lazy'
       b.appendChild(im)
       return b
     }
     function fbZoom(name, opener) { // 就地放大:铺满视口的遮罩 + 居中原图;点空白 / Esc / 关闭钮都能关
       var ov = fbEl('div', 'accfbzoom')
-      var im = document.createElement('img')
-      im.src = 'shots/' + name; im.alt = name
+      var im = fbShotImg(name)
       var x = fbEl('button', 'accfbzx', '×')
       x.setAttribute('aria-label', '关闭')
       ov.append(im, x)
@@ -3213,6 +3208,7 @@ const ACC_FB_JS = !AFB ? '' : `
       if (m) m.textContent = t || ''
       fbOpen(row)
     }
+    function fbHidden(row, sel) { var el = row.querySelector(sel); return !el || el.hidden } // 展开区还没建 = 那块收着(点一下就该开)
     function fbOpen(row) { // 三块(原因 / 输入 / 时间线)都收着时,整个展开区一起收走
       var box = row.querySelector('.accfbx')
       if (!box) return
@@ -3325,7 +3321,7 @@ const ACC_FB_JS = !AFB ? '' : `
         .then(function (r) {
           return r.text().then(function (t) {
             if (!r.ok) throw fbErr(fbHttpMsg(r.status, t), accFbNoWrite(r.status))
-            fbUpgrade()
+            fbSetNoWrite(false) // 写口又在了(换了新 serve.py / 开关拨回来):那行灰字自己收走
             var j = fbJson(t)
             if (j && j.item != null) { var k = fbKey(row), e = FB[k] || (FB[k] = { rows: [] }); e.rows.push(j) }
             return j
@@ -3334,6 +3330,9 @@ const ACC_FB_JS = !AFB ? '' : `
           throw fbErr('连不上写口 —— 看板要经 serve.py(v0.17.0 起的那版)打开才有写口', true)
         })
     }
+    // 备注 / 图那两条路写完的收尾一样:清掉状态那句、把时间线摊开让人当场看见、重算计数、再拉一次账
+    function fbSaved(row) { fbSay(row, ''); fbTimeline(row, true); window.accSync(); fbFetch() }
+    function fbFail(row, e) { if (e && e.nowrite) fbSetNoWrite(true); fbSay(row, String((e && e.message) || e)) } // 写不进去:该降级的降级,原话落在行下
     function fbKeepLocal(l, row, k, vd) { // 无写口:判定存这台浏览器,颜色不回滚
       fbLocalSet(l, row.dataset.accid, vd)
       delete FB_OPT[k]
@@ -3360,7 +3359,7 @@ const ACC_FB_JS = !AFB ? '' : `
         window.accSync()
         fbFetch()
       }, function (e) {
-        if (e && e.nowrite) { fbDegrade(); fbKeepLocal(l, row, k, vd); return }
+        if (e && e.nowrite) { fbSetNoWrite(true); fbKeepLocal(l, row, k, vd); return }
         delete FB_OPT[k]
         window.accSync() // 回滚:重画成账上原来的样子
         fbSay(row, String((e && e.message) || e))
@@ -3377,15 +3376,9 @@ const ACC_FB_JS = !AFB ? '' : `
       n.value = '' // 先清空:回车存过一次,随后的失焦就不会再存一遍
       if (!fbSendable()) { fbSay(row, '这台看板没有写口,备注存不下来 —— 判定还在这台浏览器里'); return }
       fbSay(row, '记下中…')
-      fbMark(row, { who: who, note: note }).then(function () {
-        fbSay(row, '')
-        fbTimeline(row, true) // 存进去了就让人当场看见
-        window.accSync()
-        fbFetch()
-      }, function (e) {
-        if (e && e.nowrite) fbDegrade()
+      fbMark(row, { who: who, note: note }).then(function () { fbSaved(row) }, function (e) {
         n.value = note // 没写进去,把那句话还给人,别让它凭空消失
-        fbSay(row, String((e && e.message) || e))
+        fbFail(row, e)
       })
     }
     function fbShrink(file) { // 上传前压:长边 ≤ 1280、JPEG 0.8 —— 手机直出那种 4MB 图也进得来
@@ -3424,15 +3417,7 @@ const ACC_FB_JS = !AFB ? '' : `
         })
       }).then(function (name) {
         return fbMark(row, { who: who, shot: name })
-      }).then(function () {
-        fbSay(row, '')
-        fbTimeline(row, true)
-        window.accSync()
-        fbFetch()
-      }).catch(function (e) {
-        if (e && e.nowrite) fbDegrade()
-        fbSay(row, String((e && e.message) || e))
-      })
+      }).then(function () { fbSaved(row) }).catch(function (e) { fbFail(row, e) })
     }
     if (pane) {
       pane.addEventListener('click', function (ev) {
@@ -3444,18 +3429,9 @@ const ACC_FB_JS = !AFB ? '' : `
         var vb = t.closest('[data-accv]')
         if (vb) { fbVerdict(vb.closest('.accitem'), vb.dataset.accv); return }
         var entry = t.closest('[data-accfb]')
-        if (entry) {
-          var erow = entry.closest('.accitem')
-          fbTimeline(erow, erow.querySelector('.accfbl') ? erow.querySelector('.accfbl').hidden : true)
-          return
-        }
+        if (entry) { var erow = entry.closest('.accitem'); fbTimeline(erow, fbHidden(erow, '.accfbl')); return }
         var add = t.closest('[data-accadd]')
-        if (add) {
-          var arow = add.closest('.accitem')
-          var abox = arow.querySelector('.accfbx')
-          fbEdit(arow, !abox || abox.querySelector('.accfbed').hidden)
-          return
-        }
+        if (add) { var arow = add.closest('.accitem'); fbEdit(arow, fbHidden(arow, '.accfbed')); return }
         var sh = t.closest('[data-accshot]')
         if (sh) { fbZoom(sh.dataset.accshot, sh); return }
         var pk = t.closest('[data-accfbpick]')
