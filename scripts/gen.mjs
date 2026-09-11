@@ -4270,22 +4270,27 @@ const REL_CSS = !REL ? '' : `
   .reltsc { max-height: 72vh; overflow: auto; }
   table.relt { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 880px; }
   table.relt th { position: sticky; top: 0; z-index: 2; background: ${tk('faint-bg')}; text-align: left; font-weight: 500;
-     color: var(--faint); font-size: 11px; padding: 8px 9px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+     color: var(--faint); font-size: 11px; padding: 8px 9px; border-bottom: 1px solid var(--line-strong); white-space: nowrap;
+     vertical-align: middle; }
   table.relt th.relso { cursor: pointer; user-select: none; }
   table.relt th.relso:hover { color: var(--ink); }
   .relar { font-size: 9px; opacity: .55; }
-  table.relt td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.relt td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   table.relt tr[hidden] { display: none; }
   .relr.relhit { background: ${tk('gold-bg')}; }
   .rc-n { width: 54px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .rc-n a { color: inherit; text-decoration: none; }
   .rc-n a:hover { color: var(--accent); }
-  .rc-t { min-width: 230px; line-height: 1.5; }
+  /* 数据格一律单行不折:折一格就只把那一行拱高,整列的行高再也对不齐。
+     放不下由 .reltsc 横向滚动承担,min-width 只做下限(v0.17.2)。 */
+  .rc-t { min-width: 230px; line-height: 1.5; white-space: nowrap; }
   .rc-s { width: 88px; }
   .rc-d { width: 126px; color: var(--mut); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .rc-k { width: 130px; }
-  .rc-b { width: 150px; color: var(--faint); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-     overflow-wrap: anywhere; }
+  .rc-k { min-width: 130px; white-space: nowrap; }
+  /* 药丸那 2px 下边距是留给折行的:表里不折了,它只会把有卡的那一行顶高 1.81px */
+  .rc-k .relcard { margin-bottom: 0; }
+  .rc-b { min-width: 150px; color: var(--faint); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+     white-space: nowrap; }
   .rc-a { width: 74px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .relnil { color: var(--faint); }
   .relsg { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 5px; font-weight: 600; white-space: nowrap; }
@@ -4305,8 +4310,11 @@ const REL_CSS = !REL ? '' : `
   .relgc { flex: none; font-size: 10px; color: var(--faint); }
   .relgb b { flex: none; font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
   .relgn { flex: none; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  /* 分组头那句说明是横幅不是数据格(colspan 跨全列):它必须能折行。
+     从前 nowrap 时,这一条的 min-content 就是整句话的宽 —— 一句 3000px 的说明
+     把整张表的宽度绑架走,数据列全被推出屏幕(v0.17.2)。 */
   .relgt { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--faint);
-     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+     white-space: normal; overflow-wrap: anywhere; }
   .relnone > td, .relnone2 { padding: 22px; text-align: center; color: var(--faint); font-size: 12.5px; }
   .relnone2 { margin: 0; }
   /* 时间线(v0.13.1 重做):一版一带,折叠只占带头,展开走泳道打包;轴按当天繁忙度加宽 */

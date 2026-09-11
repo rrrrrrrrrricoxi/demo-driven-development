@@ -9,6 +9,48 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.2] - 2026-09-11
+
+Row heights in the release tab's table view. Rows were taller than their text
+and the text sat pinned to the top of whatever height a row happened to get.
+The root cause was one cell that is not a data cell: the per-version group
+header spans all seven columns and carried `white-space: nowrap`, so its
+min-content width *was* the whole sentence. At a 1018px scroll container that
+dragged the table out to 1511px, and since the title column was the only one
+without a width it swallowed every pixel of the slack — 885px of column for
+half that much text, with status, cards and branch pushed off screen. Meanwhile
+the branch column wrapped long names onto a second line (that row 67.78px, its
+neighbours 34.19px) and `td { vertical-align: top }` left the text in the tall
+rows stuck against the top edge, 17.89px above centre.
+
+The fix follows the house rule for data tables — columns sized by their
+content, data cells on one line, never squeezed, horizontal scroll when they do
+not fit, every row the same height.
+
+### Fixed
+- **The group-header note wraps now** (`white-space: normal` +
+  `overflow-wrap: anywhere`). It is a banner across a `colspan`, not a data
+  cell, so wrapping is the right answer — and it stops one sentence from
+  setting the minimum width of the entire table.
+- **Cells are vertically centred.** `table.relt td` and `th` are both
+  `vertical-align: middle`.
+- **Branch, title and card columns stay on one line.** `.rc-b` drops
+  `overflow-wrap: anywhere` for `white-space: nowrap`; its `width: 150px` and
+  the card column's `width: 130px` become `min-width`, so a long branch name or
+  a third card pill widens its column and the table scrolls instead of the row
+  growing a second line. `.rc-t` keeps `min-width: 230px` as a floor.
+- **Card pills lose their 2px bottom margin inside the table** — it existed for
+  wrapped lines and, with nothing wrapping, only made rows carrying cards
+  1.81px taller than the rest.
+
+Measured in a real browser on a board with long branch names and a long version
+note: at both 1280px and 390px every visible row is now 34.19px (before:
+34.19 / 50.19 / 67.78 / 85.38), text centres to within 0.5px, the table is
+1481.8px against a column sum of 1481.9px (before: 1510.6px of table holding
+885.6px of title column), and the overflow scrolls inside `.reltsc` with the
+last column reachable. Boards with `releaseTab` off are byte-identical apart
+from the version stamp.
+
 ## [0.17.1] - 2026-09-11
 
 The verdict *is* the tick. 0.17.0 left a checklist row with two ways to mark it:
