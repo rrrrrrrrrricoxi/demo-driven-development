@@ -1041,7 +1041,7 @@ const REL_MANIFEST = {
     const b1 = both.indexOf('// 放不下的收进一枚 +N', b0)
     ok(b0 > 0 && b1 > b0, '壳里有 curCls / curTxt / tlBar / tlA / tlSq / tlCap / tlChip 这一段')
     const mk = new Function('xe', 'href', 'pass', 'relCaps', 'TL', both.slice(b0, b1)
-      + '\nreturn { curCls: curCls, curTxt: curTxt, tlBar: tlBar, tlSq: tlSq, tlCap: tlCap, tlChip: tlChip }')
+      + '\nreturn { curCls: curCls, tlBar: tlBar, tlSq: tlSq, tlCap: tlCap, tlChip: tlChip }')
     const F = mk((s) => String(s), () => '', () => true, relCaps, { row: 13 })
     const G1 = { sg: 'dev', q: 4, g: 'dev', nm: 'dev' }
     const OTH = { n: 232, t: '同带的乙', s: 'merged' } // 同一条带里的另一条 PR:它不许长出描边
@@ -1058,12 +1058,9 @@ const REL_MANIFEST = {
     ok(/class="relpb relcb relc s-dev q4 open relcur"/.test(t1c) && t1c.includes('class="relcp"'),
       'A 档的两端端帽横杠:壳上挂 relcur(CSS 把圈画在帽上,不圈住中间那截虚长的轨)', (t1c.match(/class="[^"]*"/) || [])[0])
     const t2 = F.tlChip({ d: D230 }, G1, 40, 30, false, 42)
-    ok(/class="relpb relchip relc s-dev q4 open relcur"/.test(t2) && t2.endsWith('>#230</a>'),
-      'B 档日格芯片:relcur 挂上了,号原样留着(42px 写不下「验收中」,就只留描边)', t2.slice(-24))
-    const t2w = F.tlChip({ d: D230 }, G1, 40, 30, false, 96)
-    ok(t2w.endsWith('>#230 验收中</a>'), '宽到同时放得下号与标注才并排写,号在前', t2w.slice(-28))
-    ok(F.curTxt(D230, 42) === '#230' && F.curTxt(D230, 96) === '#230 验收中' && F.curTxt(OTH, 96) === '#232',
-      '号是数据、「验收中」是标注:标注永远不许把号顶掉,放不下就只写号')
+    ok(/class="relpb relchip relc s-dev q4 open relcur"/.test(t2) && t2.endsWith('>#230</a>') && !t2.includes('验收中'),
+      'B 档日格芯片:只加描边,字还是那个号 —— 芯片宽是全图统一的 relChipW,塞不下第二种信息,「验收中」交给副行', t2.slice(-24))
+    ok(!both.includes('curTxt'), '芯片不为「验收中」留分支:整份产物里没有 curTxt 这只函数')
   }
   { // 副行:那条 PR 画得出来才说,画不出来一个字都不说
     const g0 = both.indexOf('var body = [], gut = [')
@@ -6261,7 +6258,7 @@ console.log('T74 行卡药丸不压标题')
   const frozen1 = rowOf(on, 'BL-1'), frozen2 = r2
 
   // 再加一张药丸爆表的卡:没超标的两行必须一个字节都不动
-  bl.items.push(item({ id: 'BL-3', title: LONG, pr: many }))
+  bl.items.push(item({ id: 'BL-3', title: LONG, date: '2026-09-01', pr: many }))
   bl.items.push(item({ id: 'BL-4', title: LONG, date: '2026-01-02', session: Array.from({ length: 9 }, (_, i) => 's' + i).join(' ') }))
   wr(blP, bl)
   const r3 = runGen(NEW_SCRIPTS, kb)
@@ -6277,7 +6274,28 @@ console.log('T74 行卡药丸不压标题')
   const r5 = rowOf(on2, 'BL-4')
   ok(r5.includes('class="rtagmore"') && r5.includes('>+3</i>') && r5.includes('data-dorm="2026-01-02" hidden'),
     'hidden 的沉睡挂钩不是药丸:不计数、也不许被折走(折走了浏览器就算不出天数)', (r5.match(/<i class="rtagmore"[^>]*>[^<]*<\/i>/) || [''])[0])
-  ok(r5.indexOf('class="rtagmore"') < r5.indexOf('data-dorm'), '它留在药丸带末尾,+N 之后')
+  ok(r5.indexOf('data-dorm') < r5.indexOf('class="rtagmore"') && r5.includes('hidden></span></span><i class="rtagmore"'),
+    '它留在 .rtags 里(位置与不折时一样),+N 是 .rtags 的兄弟排在它后面', (r5.match(/<span class="rspdorm"[\s\S]{0,80}/) || [''])[0])
+
+  // ———— 窄屏:该让位的只有标题与药丸条 ————
+  // 日期与 ▾ 是每一行的锚,窄下来被挤出行外(卡是 overflow: hidden)比药丸被裁严重得多。
+  // 像素级由浏览器冒烟量;这里钉的是让位的资格:除标题与药丸条外,行里每一件都 flex: none。
+  const cssOf = (sel) => (on2.match(new RegExp(sel.replace('.', '\\.') + ' \\{[^}]*\\}')) || [''])[0]
+  ok(/flex: 0 \.02 auto/.test(cssOf('.rtags')) && /min-width: 0/.test(cssOf('.rtags')) && /overflow: hidden/.test(cssOf('.rtags')),
+    '药丸条可收缩、自己裁自己(收缩权重压到 .02:先压标题到下限,压不动了才轮到它)', cssOf('.rtags').replace(/\s+/g, ' ').slice(0, 110))
+  for (const sel of ['.rtagmore', '.rline', '.cdate', '.rtoggle', '.badge'])
+    ok(/flex: none/.test(cssOf(sel)), `${sel} 钉了 flex: none —— 窄下来它一步都不让`, cssOf(sel).replace(/\s+/g, ' ').slice(0, 90))
+  ok(/\.rhead \.tid \{[^}]*flex: none/.test(on2), '.rhead .tid 同样一步都不让')
+  ok(/class="rtitle">[\s\S]*?class="rtags">[\s\S]*?<\/span><i class="rtagmore"[\s\S]*?class="rspacer"[\s\S]*?class="cdate">[\s\S]*?class="rtoggle"/.test(r4),
+    '次序锁死:[标题][药丸条][+N][撑开][日期][▾] —— +N 在药丸条**外面**,裁的是条、不是这个数',
+    (r4.match(/class="(rtitle|rtags|rtagmore|rspacer|cdate|rtoggle)"?/g) || []).join(' '))
+  ok(!/class="rtags"[^>]*>[\s\S]*?rtagmore[\s\S]*?<\/span>\s*<span class="rspacer"/.test(r4),
+    '+N 不再是 .rtags 的孩子(在里头就会跟着药丸一起被裁掉)')
+  // 手机档:百分比下限保不住锚(状态药丸的字数是宿主定的),改成药丸让到底、标题不设下限
+  const mq = (on2.match(/@media \(max-width: 640px\) \{[\s\S]*?\n  \}/) || [''])[0]
+  ok(/\.rtitle \{[^}]*flex: 0 \.02 auto/.test(mq) && /\.rtitle \{[^}]*min-width: 0/.test(mq) && /\.rtags \{[^}]*flex: 0 1 auto/.test(mq),
+    '≤ 640px:标题下限撤掉、收缩权重与药丸对调 —— 这一档谁都不许把日期与 ▾ 挤出行外',
+    mq.replace(/\s+/g, ' ').slice(0, 150))
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

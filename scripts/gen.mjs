@@ -1572,7 +1572,10 @@ const rtagsHtml = (tags) => {
   const pills = all.filter((x) => !rtagHidden(x))
   if (pills.length <= RTAGS_SHOW) return `<span class="rtags">${all.join('')}</span>`
   const fold = pills.slice(RTAGS_SHOW)
-  return `<span class="rtags">${pills.slice(0, RTAGS_SHOW).join('')}<i class="rtagmore" title="${fold.map(rtagText).join(' · ')}">+${fold.length}</i>${all.filter(rtagHidden).join('')}</span>`
+  // +N 是 .rtags 的**兄弟**不是孩子:药丸条窄下来时自己裁自己(overflow: hidden),
+  // 而这枚数目贴在右边永不被裁。裁掉的几枚不去追平那个数 —— 追平要运行期量宽,
+  // 而行整条可点、展开就全在,不值得为此多一套测量。
+  return `<span class="rtags">${pills.slice(0, RTAGS_SHOW).join('')}${all.filter(rtagHidden).join('')}</span><i class="rtagmore" title="${fold.map(rtagText).join(' · ')}">+${fold.length}</i>`
 }
 // upd(v0.14.0,仅 cardsDir 开)= 卡文件最后改动日;date 是建卡日,两个说的不是一件事,并排放
 const rowHead = ({ id, badge, title, tags = [], line = '', date = '', upd = '' }) => `
@@ -4540,11 +4543,6 @@ const REL_JS = !REL ? '' : `
     // 正在验收的那一条:三档字形共用这一个类(CSS 里是一圈不占位的 box-shadow)。
     // 判据不在这里算 —— gen 已经把 cur 烤进 D 了,表格那一行的「验收中」标认的是同一个号。
     function curCls(d) { return d && d.cur ? ' relcur' : '' }
-    // 芯片档的字:号永远留着 —— 号是数据,「验收中」只是标注,标注不许把数据顶掉
-    // (副行那句「· 验收中 #N」已经说了这件事,真正只有芯片才有的信息恰恰是号)。
-    // 只有同一个芯片宽同时放得下两者才并排写;放不下就只留描边。
-    // 36 = 「 验收中」那一空格加三个汉字的墨宽,12 = relChipW 留的左右内边距,号按它同一套 7.5px/字算
-    function curTxt(d, cw) { var s = '#' + d.n; return d.cur && cw >= 12 + 7.5 * s.length + 36 ? s + ' 验收中' : s }
     function tlBar(bb, g, top, q, lbl) { // 条与泳道位共用 relPack 算好的那一份 x / w,不另算
       var d = bb.item.d, cls = 'relpb relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '') + curCls(d)
       if (q) cls += pass(d) ? ' hit' : ' dim'
@@ -4577,7 +4575,7 @@ const REL_JS = !REL ? '' : `
         + '<i class="relcp" style="left:' + (c.b - bb.x) + 'px;width:' + c.bw + 'px"></i>')
     }
     function tlChip(it, g, x, y, q, cw) { // 号直接写在图上:不用悬停也不用点就知道是谁
-      return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', curTxt(it.d, cw))
+      return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', '#' + it.d.n)
     }
     // 放不下的收进一枚 +N。它不是某一条 PR,挂不上 data-relpk;改挂折叠带那副「带 + 那一天」的钩子。
     // 被收起来的号一并烤在 data-relfold 上(v0.15.15):+N 问的是「没展开的是谁」,答那一整天等于没答 ——
@@ -5634,10 +5632,22 @@ ${PATH_CSS_A}
      给它一截保底,挤不下的药丸交给 .rtagmore 那枚 +N */
   .rtitle { flex: 0 1 auto; font-size: 14px; font-weight: 600; color: var(--ink);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: min(16em, 40%); }
-  .rtags { display: flex; gap: 4px; flex: none; }
-  /* 折起来的那几枚:名单在 title 里(照 .depmore 的样子,不新造控件) */
+  /* 药丸条可收缩、自己裁自己(v0.17.1):日期与 ▾ 是每一行的锚,窄屏上它们不许被挤出行外 ——
+     该让位的是药丸。收缩权重给得极小(.02):flex 按「权重 × 基准宽」分摊,两边都写 1 的话,
+     标题还有富余时药丸就先被切了;这样是标题先压到它的下限,压不动了才轮到药丸。 */
+  .rtags { display: flex; gap: 4px; flex: 0 .02 auto; min-width: 0; overflow: hidden; }
+  /* 折起来的那几枚:名单在 title 里(照 .depmore 的样子,不新造控件)。
+     它在 .rtags 外面 —— 药丸条裁多少都轮不到它,这个数目永远读得到 */
   .rtagmore { flex: none; font-style: normal; font-size: 10.5px; font-weight: 600;
               line-height: 17px; color: var(--faint); cursor: help; }
+  /* 手机(≤ 640px):一行里塞不下「标题的下限 + 全部锚」—— 状态药丸的字数是宿主定的,
+     「完成(已提交 commit)」这种一枚就吃掉小半行,任何百分比下限都保不住。这一档改成
+     药丸先让到底、标题拿走剩下的全部而自己不设下限:日期与 ▾ 是每一行的锚,挤出行外就是没了
+     (卡是 overflow: hidden)。这个宽度上药丸本来也已经收到 0 了,让的是已经没有的东西。 */
+  @media (max-width: 640px) {
+    .rtitle { flex: 0 .02 auto; min-width: 0; }
+    .rtags { flex: 0 1 auto; }
+  }
   .rtag { font-size: 10.5px; font-weight: 600; border-radius: 5px; padding: 0 6px; line-height: 17px; white-space: nowrap;
           color: color-mix(in srgb, var(--c, ${tk('tag-neutral')}) 66%, ${tk('mix-ink')});
           background: color-mix(in srgb, var(--c, ${tk('tag-neutral')}) 12%, ${tk('mix-paper')});

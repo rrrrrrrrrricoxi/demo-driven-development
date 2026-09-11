@@ -73,8 +73,9 @@ Generated output and served responses stay byte-identical to 0.17.0 unless
   验收中 badge for several releases; the timeline drew that PR like every other
   one, so a `dev` band held several identical-looking glyphs. The glyph now
   carries a non-displacing accent ring in all three zoom tiers (square, capped
-  bar, and day-cell chip — the chip keeps its number and adds 验收中 beside it
-  only where both fit), and the band that PR is drawn in appends `· 验收中 #NNN` to
+  bar, and day-cell chip — the chip keeps writing its number; the whole figure
+  shares one chip width, so the words go where there is room for them), and the
+  band that PR is drawn in appends `· 验收中 #NNN` to
   its sub-line, which reads at any zoom and is never truncated away. If the PR
   falls outside the current window, or its band is filtered out, nothing is
   claimed. Boards with no acceptance manifest, or with no `current`, carry no
@@ -88,9 +89,13 @@ Generated output and served responses stay byte-identical to 0.17.0 unless
   a crowded row shrank the title to zero width — not even an ellipsis. The
   title now keeps a floor of `min(16em, 40%)`, and pills past the eighth fold
   into a `+N` whose `title` lists them, the same idiom the `after` chips use.
-  Hidden runtime hooks (the dormancy marker) are never counted or folded. Rows
-  at or under the limit render byte-for-byte as before, and no config key is
-  involved.
+  The pill strip itself is the part that gives when a row runs out of room — it
+  shrinks and clips its own tail, while the `+N`, the line tag, the date and the
+  ▾ never do; on phone widths (≤640px) the title's floor is released too, since
+  a long enough status label alone can fill the row and those two are the
+  anchors every row is read by. Hidden runtime hooks (the dormancy marker) are
+  never counted or folded. Rows at or under the limit render byte-for-byte as
+  before, and no config key is involved.
 
 ### Fixed
 Review of the change above, on a weak link and with two testers on the same
