@@ -9,6 +9,48 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.3] - 2026-09-11
+
+Signing in is now part of the board, not a browser dialog. The first time you
+judged a row in the acceptance tab, `window.prompt` opened a native modal — the
+one titled "<host> says", in the system's own dark chrome — to ask who you are.
+It reads like a security warning rather than a part of the page, and it fights
+0.17.1's rule that the verdict *is* the tick: one click, stored. The click was
+hijacked into a question, and answering it was the only way through. Worse, a
+browser can switch these dialogs off entirely ("prevent this page from creating
+additional dialogs"), and once it does, there is no way left to sign at all.
+
+### Changed
+- **The signature is an inline, one-line input** where the "先署个名" hint used
+  to appear: in the row for a verdict, note or screenshot, next to the chip for
+  the top-of-tab one. It autofocuses, placeholder `我是(1–20 字)`, and never
+  blocks anything else on the page.
+- **The click is replayed, not lost.** Enter or blur signs you in and then
+  finishes the action you had just clicked — the ✓ you pressed is written as
+  the ✓ you pressed (the verdict is captured before the prompt, so a name that
+  already carries a verdict on that row cannot turn your click into a retract).
+  Notes keep their text in the box across the detour; a pasted screenshot is
+  held and uploaded after signing.
+- **Esc, or leaving the field empty, cancels** — nothing is signed and nothing
+  is recorded.
+- **The identity chip is always visible.** Unsigned it reads `未署名 · 署名`,
+  so signing is discoverable before the first click instead of after it; the
+  same chip opens the same inline input for `换人`.
+- Unchanged: the 20-character cut by code point (never half an emoji), the
+  control-character strip, and the full repaint on identity change so that
+  every count reads as "my verdicts".
+
+### Added
+- A regression test: no `prompt` / `alert` / `confirm` call may appear in a
+  generated board or in `gen.mjs` itself, in either state of the switch.
+
+Verified in a real browser against `serve.py` with the signature cleared: no
+native dialog fires on any path (a page-level counter on all three functions
+stays empty), the ✓ that opened the input lands in the ledger under the name
+just typed, the next row's ✕ goes straight through, Esc leaves both the ledger
+and local storage untouched, and a reload shows `我是 甲 · 换人`. Boards with
+`acceptanceFeedback` off are byte-identical apart from the version stamp.
+
 ## [0.17.2] - 2026-09-11
 
 Row heights in the release tab's table view. Rows were taller than their text

@@ -2733,8 +2733,10 @@ const accCurHtml = (() => {
 })()
 
 // 身份芯片(反馈共享开着时):「我是 甲 · 换人」。名字存这台浏览器,gen 期一个字都不知道。
+// v0.17.3:常显,未署名时烤的就是「未署名 · 署名」—— 署名得在动手之前就能被看见、被点到,
+// 而不是等第一次点 ✓ 才由一句话冒出来问。
 const ACC_ME_CHIP = !AFB ? '' : `
-    <span class="accme" data-accme hidden><span class="accmen"></span><button type="button" class="accmeb" data-accwho>换人</button></span>`
+    <span class="accme" data-accme><span class="accmen">未署名</span><button type="button" class="accmeb" data-accwho>署名</button></span>`
 const ACC_FB_SESS = !AFB ? '' : ' · 判定(✓/✕)、备注与截图经本机的 <code>serve.py</code> 共享给同看板的人'
 // 无写口时那一行灰字(运行期才知道有没有写口,所以烤成 hidden,降级时才亮)
 const ACC_DEG = !AFB ? '' : `
@@ -2867,7 +2869,15 @@ const ACC_FB_CSS = !AFB ? '' : `
      font-size: 24px; line-height: 1; color: #fff; cursor: pointer; }
   .accme { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--mut); }
   .accmeb { appearance: none; border: 0; background: none; font: inherit; font-size: 11px; padding: 0;
-     color: var(--accent); cursor: pointer; }`
+     color: var(--accent); cursor: pointer; }
+  /* 署名就地问(v0.17.3):一行输入框,落在行下那句灰字的位置,或顶上 chip 旁边 —— 不弹系统对话框 */
+  .accwhof { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 7px 0 0; }
+  .accme .accwhof { margin: 0; } /* chip 那只与「未署名」同排,不另起一行 */
+  .accwhoi { flex: none; width: 150px; font: inherit; font-size: 12px; line-height: 20px; padding: 2px 8px;
+     border: 1px solid var(--line-strong); border-radius: 7px; background: var(--card); color: var(--ink); }
+  /* 与 .accfbn 同一个坑:.accitem input(0.17.0 给勾选框写的 15×15)特指度高一档,会把这只框压没 */
+  .accitem input.accwhoi { width: 150px; height: auto; margin: 0; }
+  .accwhoh { font-size: 10.5px; color: var(--faint); }`
 const ACC_CSS = !ACC ? '' : `
   /* ============ 验收 tab(v0.12.0,config.acceptanceTab)============ */
   .acclink { font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px;
@@ -3218,20 +3228,18 @@ const ACC_FB_JS = !AFB ? '' : `
       fbDegLine()
     }
     function fbDegLine() { var p = document.querySelector('[data-accdeg]'); if (p) p.hidden = !FB_NOWRITE }
-    function fbWhoChip() {
+    function fbWhoChip() { // 常显:未署名时这枚 chip 就是那句「署名」(v0.17.3 起不再藏起来)
       var chip = document.querySelector('[data-accme]')
       if (!chip) return
-      chip.hidden = false
       chip.querySelector('.accmen').textContent = FB_WHO ? '我是 ' + FB_WHO : '未署名'
       chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'
     }
-    function fbAskWho() { // 第一次判 / 写备注 / 贴图时问一次,之后记在这台浏览器里
-      var v = window.prompt('我是(1–20 字,记进验收反馈里)', FB_WHO || '')
-      if (v == null) return FB_WHO
+    function fbWhoNorm(v) {
       // 按码点切,不按 UTF-16 格:第 20 格正好落在一个 emoji 的代理对中间时,slice 会切出半个字,
       // 服务端 json.dumps().encode('utf-8') 上炸掉,连接被掐,页面还误报成「你的 serve.py 太旧」
-      v = Array.from(String(v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')
-      if (!v) return FB_WHO
+      return Array.from(String(v == null ? '' : v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')
+    }
+    function fbWhoSet(v) { // 署名落地:记在这台浏览器里,chip 跟着改
       var was = FB_WHO
       FB_WHO = v
       try { localStorage.setItem(FB_WHO_KEY, v) } catch (e) {}
@@ -3239,7 +3247,50 @@ const ACC_FB_JS = !AFB ? '' : `
       // 换了个人就当场重画:左栏、进度、分组、摘要 chip 全按「我的判定」算,而「我」刚刚变了 ——
       // 不重画的话,接手的那个人有 20 秒(下一轮轮询)看着前一个人的判定当成自己的
       if (was !== v) window.accSync()
-      return v
+    }
+    // 署名就地问(v0.17.3)。这儿原来是 window.prompt:顶着「<host> says」的系统弹窗,深色、模态、
+    // 看着像一句安全警告而不像这块板的一部分;它跟 0.17.1 定的「判定即勾选、点一下就存」正面冲突
+    // (一次点击被劫持成一次问答),而且浏览器可以把这类弹窗整个禁掉(「阻止此页面创建更多对话框」)
+    // —— 真禁掉了署名就彻底走不通。改成行内一行输入框:不挡任何别的动作,署完把刚才那一下接着
+    // 做完(点击不丢);留空离开或 Esc 即取消,什么都不记。
+    function fbWhoAsk(row, then) {
+      var host = row ? fbBox(row) : document.querySelector('[data-accme]')
+      if (!host) return
+      var old = host.querySelector('.accwhof')
+      // 这一处已经开着一只:只把「署完接着做什么」换成最新那一下,不重建 —— 重建会把人刚打的字扔掉
+      // (备注那条路上,焦点一挪进来,备注框的 blur 就立刻又来问一次)
+      if (old) { old.fbThen = then || null; old.querySelector('.accwhoi').focus(); return }
+      var f = fbEl('div', 'accwhof')
+      f.fbThen = then || null
+      var i = document.createElement('input')
+      i.type = 'text'; i.className = 'accwhoi'; i.value = FB_WHO || ''
+      i.maxLength = 40 // 40 个 UTF-16 格 = 20 个码点的上限(全是 emoji 也装得下);真正的裁剪在 fbWhoNorm
+      i.placeholder = '我是(1–20 字)'
+      i.setAttribute('aria-label', '署名:我是(1–20 字);回车或离开即署名,Esc 取消')
+      f.append(i, fbEl('span', 'accwhoh', '回车存下 · Esc 取消'))
+      var done = false
+      var close = function () { f.remove(); if (row) fbOpen(row) }
+      var cancel = function () { if (done) return; done = true; close() } // Esc / 留空离开:什么都不记
+      var save = function () {
+        if (done) return
+        var v = fbWhoNorm(i.value)
+        if (!v) { cancel(); return }
+        done = true
+        var go = f.fbThen
+        close()
+        fbWhoSet(v)
+        if (go) go() // 刚才那一下(判定 / 备注 / 贴图)当场补记上,不让一次点击白点
+      }
+      i.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); save(); return }
+        if (ev.key === 'Escape') { ev.preventDefault(); cancel() }
+      })
+      i.addEventListener('blur', save) // 回车或失焦即署名(与备注框同一套手感)
+      if (row) host.insertBefore(f, host.firstChild) // 行里:落在原来那句「先署个名」的位置
+      else host.appendChild(f) // 顶上:紧挨着那枚 chip
+      // 先让这一块可见再聚焦:display:none 的子树里 focus() 一律不作数(fbEdit 那处踩过同一个坑)
+      if (row) fbOpen(row)
+      i.focus()
     }
     function fbFetch() {
       // 出发时刻要记下来:20s 轮询那一发在弱链路上飘几百毫秒是常态,而它读到的文件是发出那一刻的样子
@@ -3341,7 +3392,8 @@ const ACC_FB_JS = !AFB ? '' : `
       var box = row.querySelector('.accfbx')
       if (!box) return
       var m = box.querySelector('.accfbm'), ed = box.querySelector('.accfbed'), ls = box.querySelector('.accfbl')
-      box.hidden = !(m.textContent || !ed.hidden || !ls.hidden)
+      // 署名那一行也算「开着」:它是四块里唯一一块只在没署名时才有的 —— 收走了人就没处打字
+      box.hidden = !(m.textContent || box.querySelector('.accwhof') || !ed.hidden || !ls.hidden)
     }
     function fbEdit(row, open, ph) { // 备注输入:点开一行输入框并聚焦
       var box = fbBox(row)
@@ -3482,8 +3534,13 @@ const ACC_FB_JS = !AFB ? '' : `
       if (!l) return
       var k = fbKey(row), act = accFbAct(fbVdOf(l, row.dataset.accid, row.dataset.accpr), want, Date.now() - (FB_AT[k] || 0))
       if (!act) return // 400ms 内的第二下:防误触,当没点
-      var who = FB_WHO || fbAskWho()
-      if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
+      // 未署名:就地问,一下也不弹框。署完补记的是刚点的那一枚(act 已经算定),不拿新身份重算切换
+      // —— 重算的话,账上「甲」早就判过 ✓ 的那一条,会把这一下读成撤回
+      if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }); return }
+      fbVerdictGo(row, l, k, act)
+    }
+    function fbVerdictGo(row, l, k, act) { // 署过名之后的那一段:上色 → 排队发 → 失败回滚
+      var who = FB_WHO
       FB_AT[k] = Date.now()
       var vd = act === 'none' ? '' : act
       FB_OPT[k] = vd
@@ -3515,8 +3572,9 @@ const ACC_FB_JS = !AFB ? '' : `
       var n = box.querySelector('.accfbn')
       var note = n.value.trim()
       if (!note) return
-      var who = FB_WHO || fbAskWho()
-      if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
+      // 未署名:同一只行内输入框,不弹框。人打的那句话还在框里,署完这一趟接着把它存下去
+      if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }); return }
+      var who = FB_WHO
       // 清空排在「真要发」之后:无写口这条路原来先清后拒,人打的那句话既不在账上也不在框里,
       // 连复制重试都做不到(同一函数下面的失败分支还特意把话还给人)。留着文字,随后的失焦
       // 只会再说一遍这句灰字、不发请求也不产生记录
@@ -3546,8 +3604,9 @@ const ACC_FB_JS = !AFB ? '' : `
       })
     }
     function fbUpload(row, file) { // 上传成功即存,不等别的动作
-      var who = FB_WHO || fbAskWho()
-      if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
+      // 未署名:同一只行内输入框,不弹框。手里这张图留着,署完接着传
+      if (!FB_WHO) { fbWhoAsk(row, function () { fbUpload(row, file) }); return }
+      var who = FB_WHO
       if (!fbSendable()) { fbSay(row, '这台看板没有写口,图传不上去 —— 判定还在这台浏览器里'); return }
       fbSay(row, '压缩中…')
       fbShrink(file).then(function (blob) {
@@ -3583,7 +3642,7 @@ const ACC_FB_JS = !AFB ? '' : `
         if (sh) { fbZoom(sh.dataset.accshot, sh); return }
         var pk = t.closest('[data-accfbpick]')
         if (pk) { pk.closest('.accitem').querySelector('.accfbfile').click(); return }
-        if (t.closest('[data-accwho]')) fbAskWho()
+        if (t.closest('[data-accwho]')) fbWhoAsk(null) // 署名 / 换人:chip 旁边就地出那只输入框
       })
       document.addEventListener('paste', function (ev) { // 备注框开着才接剪贴板里的图
         // 行永远在 DOM 里(gen 期就烤好了,筛选只是隐藏),所以「还在页面上」这条判断从来不为假 ——
