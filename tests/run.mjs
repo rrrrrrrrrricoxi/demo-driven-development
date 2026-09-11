@@ -5395,8 +5395,10 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   ok(on.includes('data-accid="A&quot;1"') && on.includes('data-accfb="A&quot;1"'),
     '带引号的条目 id 照旧 esc(入口的 data 属性也走同一把尺)')
   ok(count(on, 'data-accrev="2"') === 2, '每行带上清单 revision(旧反馈标灰「清单已改」靠它)', String(count(on, 'data-accrev="2"')))
-  ok(on.includes('<span class="accme" data-accme hidden>') && on.includes('data-accwho'),
+  ok(on.includes('<span class="accme" data-accme>') && !on.includes('data-accme hidden') && on.includes('data-accwho'),
     'tab 顶部一枚身份芯片(名字运行期填,gen 期一个字都不知道)')
+  ok(on.includes('<span class="accmen">未署名</span>') && on.includes('data-accwho>署名</button>'),
+    'v0.17.3 芯片常显:未署名时烤的就是「未署名 · 署名」—— 署名在动手之前就看得见、点得到')
   ok(on.includes('.accfbx {') && on.includes('.accv.ok[aria-pressed="true"]') && on.includes('.accv.bad[aria-pressed="true"]'),
     '样式随开关进来(展开区 + 两枚钮判过之后的实心)')
   ok(on.includes('.accitem.bad { border-left: 2px solid #d44c47; padding-left: 11px; }') && on.includes('.accitem.done { background: var(--bg); opacity: .66; }'),
@@ -5477,8 +5479,57 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   ok(on.includes('else if (fbPasteRow === row) fbPasteRow = null') && on.includes('if (!pbox || pbox.hidden) return'),
     '展开区一收起,贴图的指针就交回去;听到 ⌘V 也先看那个框还开着没有')
   ok(on.includes("var inBox = t.closest('.accfbx')"), '多个展开区同开:以最后碰过的那个为准')
-  ok(on.includes("Array.from(String(v)") && on.includes(".slice(0, 20).join('')"),
-    '署名按码点切,不按 UTF-16 格(第 20 格落在 emoji 中间时别切出半个字)')
+  {
+    // 署名的裁剪规则从产物里原样抠出来跑(0.17.3 把它从 prompt 那段里拆成 fbWhoNorm,行内输入框共用)
+    const m = on.match(/function fbWhoNorm\(v\) \{[\s\S]*?\n\s*\}/)
+    const N = m && new Function(m[0] + '\nreturn fbWhoNorm')()
+    ok(Boolean(N), '产物里抠得到 fbWhoNorm(署名裁剪只此一处)')
+    ok(N && N(' 甲 ') === '甲' && N(' 甲') === '甲', '署名先清控制字符、再吃掉首尾空白')
+    ok(N && Array.from(N('一'.repeat(30))).length === 20, '超过 20 字:切到 20')
+    ok(N && Array.from(N('🙂'.repeat(30))).length === 20 && N('🙂'.repeat(30)).length === 40,
+      '署名按码点切,不按 UTF-16 格(第 20 格落在 emoji 中间时别切出半个字)', String(N('🙂'.repeat(30)).length))
+    ok(N && N('') === '' && N(null) === '' && N(undefined) === '', '空的 / null:空字符串 —— 留空离开就是取消')
+  }
+  {
+    // ---- v0.17.3 署名走行内输入,全板一个系统弹窗都不许有 ----
+    // window.prompt 顶着「<host> says」、深色、模态,跟 0.17.1 的「判定即勾选、点一下就存」正面冲突;
+    // 浏览器还能把这类弹窗整个禁掉(「阻止此页面创建更多对话框」),那时署名就彻底走不通。
+    const DIALOG = /(^|[^\w.$])(?:window\s*\.\s*)?(prompt|alert|confirm)\s*\(/
+    ok(!DIALOG.test(on), '开着的那档:产物里 prompt / alert / confirm 一次调用都没有',
+      String((on.match(new RegExp(DIALOG, 'g')) || [])[0] || ''))
+    ok(!DIALOG.test(off), '关着的那档同样干净(那档本来就没有反馈这段)')
+    const genSrc = readFileSync(join(NEW_SCRIPTS, 'gen.mjs'), 'utf8')
+    ok(!DIALOG.test(genSrc), 'gen.mjs 源码里也没有 —— 运行期片段是从这儿烤出去的,堵在源头',
+      String((genSrc.match(new RegExp(DIALOG, 'g')) || [])[0] || ''))
+    ok(on.includes('function fbWhoAsk(row, then)') && !on.includes('fbAskWho'),
+      '问署名只剩 fbWhoAsk 这一只(行内、不阻塞),fbAskWho 连名字都不剩')
+    ok(on.includes("i.placeholder = '我是(1–20 字)'") && on.includes("i.setAttribute('aria-label', '署名:我是(1–20 字);回车或离开即署名,Esc 取消')"),
+      '行内输入框:占位写「我是(1–20 字)」,aria-label 把回车 / Esc 说清楚(键盘可达、读屏读得出)')
+    ok(on.includes("if (ev.key === 'Enter') { ev.preventDefault(); save(); return }")
+      && on.includes("if (ev.key === 'Escape') { ev.preventDefault(); cancel() }")
+      && on.includes("i.addEventListener('blur', save)"),
+      '回车 / 失焦即署名,Esc 取消(与备注框同一套手感)')
+    ok(on.includes('var cancel = function () { if (done) return; done = true; close() }')
+      && on.includes("var v = fbWhoNorm(i.value)\n        if (!v) { cancel(); return }"),
+      'Esc 或留空离开 = 取消:什么都不记(fbWhoSet 一步都走不到)')
+    ok(on.includes('if (go) go()') && on.includes('f.fbThen = then || null'),
+      '署完把刚才那一下接着做完 —— 一次点击不许丢')
+    ok(on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }); return }')
+      && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }); return }')
+      && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbUpload(row, file) }); return }')
+      && on.includes("if (t.closest('[data-accwho]')) fbWhoAsk(null)"),
+      '四个口(判定 / 备注 / 贴图 / 顶上「署名·换人」)都走这一只行内输入')
+    ok(on.includes('function fbVerdictGo(row, l, k, act)') && !on.includes("if (!who) { fbSay(row, '先署个名"),
+      '补记的是刚点的那一枚(act 早算定):不拿新身份重算切换,免得把这一下读成撤回;那句「先署个名」退场')
+    ok(on.includes("if (old) { old.fbThen = then || null; old.querySelector('.accwhoi').focus(); return }"),
+      '同一处已经开着一只就不重建 —— 重建会把人刚打的字扔掉(备注框失焦会立刻再问一次)')
+    ok(on.includes("box.hidden = !(m.textContent || box.querySelector('.accwhof') || !ed.hidden || !ls.hidden)"),
+      '署名那一行也算展开区「开着」:收走了人就没处打字')
+    ok(on.includes('.accwhof { display: flex;') && on.includes('.accitem input.accwhoi {') && on.includes('.accme .accwhof { margin: 0; }'),
+      '样式随开关进来:行里一行、chip 旁边同排,且压得过 .accitem input 那条 15×15')
+    ok(!on.includes('chip.hidden = false') && on.includes("chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'"),
+      '芯片常显:运行期不再有「先藏起来再放出来」那一步,文案在两态之间切')
+  }
   {
     // jsonl 只增不删、跨天跨周挂在同一页上:光一个 12:03 分不出「十分钟前」还是「上周三」
     const t0 = new Date(2026, 8, 10, 12, 3) // 本地时间 2026-09-10 12:03
