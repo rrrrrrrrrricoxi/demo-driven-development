@@ -6298,6 +6298,77 @@ console.log('T74 行卡药丸不压标题')
     mq.replace(/\s+/g, ' ').slice(0, 150))
 }
 
+// ============ T75 发布表格:数据格不折 / 文字上下居中 / 横幅不绑架表宽(v0.17.2;releaseTab 关档照旧四拍冻结)============
+// 病例(1280 视口实测):分组头那句说明是 white-space: nowrap,它的 min-content 就是整句话的宽 ——
+// 一张 1018px 容器里的表被撑到 1511px,而七列里只有标题列没定宽,余量全灌进它(885px,内容只占一半);
+// 分支列 overflow-wrap: anywhere 把 chore/board-branch-check-… 折成两行 → 那一行 67.78px、别的 34.19px;
+// td 又是 vertical-align: top,被撑高的行里文字齐刷刷贴在顶上(中线差 17.89px)。
+// 口径:数据表格只滚不挤 —— 列宽由内容定、数据格单行不折、每行一样高、放不下横向滚。
+console.log('T75 发布表格行高 / 上下居中')
+{
+  const fx75 = mkFixture('fx75', { 's.html': demoHtml('s') })
+  const kb = fx75.kb, cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const relP = join(kb, 'release-manifest.json')
+  const mP = join(kb, 'manifest.json'), decP = join(kb, 'decisions-manifest.json'), blP = join(kb, 'backlog-manifest.json')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o))
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  wr(relP, REL_MANIFEST)
+  const cfg = rd(cfgP)
+  // 规则文本:一条规则可能跨行落,按 `选择器 {` 到下一个 `}` 整段取
+  const rule = (css, sel) => (css.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{[^}]*\\}')) || [''])[0]
+
+  // ---- 四拍:未配 → false 比 sha → true 验行为 → 关回比 sha ----
+  runGen(NEW_SCRIPTS, kb)
+  const offSha = sha(idxP)
+  ok(!readFileSync(idxP, 'utf8').includes('.rc-t {'), '未配 releaseTab:壳里零发布表格样式')
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, 'releaseTab:false 与未配逐字节相同(冻结)')
+
+  cfg.releaseTab = true
+  wr(cfgP, cfg)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'releaseTab:true gen exit 0', r.stderr)
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- ① 横幅折行:分组头那句说明 colspan 跨全列,它是横幅不是数据格 ----
+  const relgt = rule(on, '.relgt')
+  ok(relgt && !/white-space: nowrap/.test(relgt) && /white-space: normal/.test(relgt) && /overflow-wrap: anywhere/.test(relgt),
+    '.relgt 改成可折行(normal + anywhere)—— 不折的话它的 min-content 就是整张表的下限',
+    relgt.replace(/\s+/g, ' '))
+
+  // ---- ② 上下居中:td 与 th 同一档 ----
+  ok(/table\.relt td \{[^}]*vertical-align: middle/.test(on) && !/table\.relt td \{[^}]*vertical-align: top/.test(on),
+    'table.relt td 是 vertical-align: middle,源码里再没有那条 top', rule(on, 'table\\.relt td').replace(/\s+/g, ' '))
+  ok(/table\.relt th \{[^}]*vertical-align: middle/.test(on),
+    '表头 th 一并写死 middle:与数据格同一档,不靠默认值', rule(on, 'table\\.relt th').replace(/\s+/g, ' ').slice(0, 140))
+
+  // ---- ③ 数据列单行不折:定宽退成下限,撑宽由横滚承担 ----
+  const rcb = rule(on, '.rc-b')
+  ok(/white-space: nowrap/.test(rcb) && !/overflow-wrap: anywhere/.test(rcb),
+    '.rc-b 单行不折:长分支名不再折成两行(折一格就只把那一行拱高)', rcb.replace(/\s+/g, ' '))
+  ok(/min-width: 150px/.test(rcb) && !/[^-]width: 150px/.test(rcb),
+    '.rc-b 的 150px 退成 min-width(下限):撑宽这一列而不是被裁', rcb.replace(/\s+/g, ' '))
+  const rct = rule(on, '.rc-t')
+  ok(/white-space: nowrap/.test(rct) && /min-width: 230px/.test(rct),
+    '.rc-t 同样单行不折,min-width: 230px 留作下限', rct.replace(/\s+/g, ' '))
+  const rck = rule(on, '.rc-k')
+  ok(/white-space: nowrap/.test(rck) && /min-width: 130px/.test(rck) && !/[^-]width: 130px/.test(rck),
+    '.rc-k 同一套:一行 PR 挂三张卡时三枚药丸不折行(折了那一行就比别人高)', rck.replace(/\s+/g, ' '))
+  ok(/\.rc-k \.relcard \{[^}]*margin-bottom: 0/.test(on),
+    '药丸那 2px 下边距在表里归零 —— 留着它,有卡的那一行比别人高 1.81px',
+    rule(on, '\\.rc-k \\.relcard').replace(/\s+/g, ' '))
+
+  cfg.releaseTab = false
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })
