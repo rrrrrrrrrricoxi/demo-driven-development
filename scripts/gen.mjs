@@ -451,7 +451,7 @@ const sessAttr = (entry) => {
 }
 // 卡上小章(安静低饱和,贴 rtag chip 习语);未定义 id → 警告 + 灰章,不崩;label 过 esc 防注入
 const sessSeals = (entry) => {
-  if (!SESSION_ON) return ''
+  if (!SESSION_ON) return []
   return sessIdsOf(entry).map((id) => {
     const t = SESSION_TAGS[id]
     if (!t) {
@@ -459,7 +459,7 @@ const sessSeals = (entry) => {
       return `<span class="cardsess unknown" title="未定义的 session 标签:${esc(id)}">${esc(id)}</span>`
     }
     return `<span class="cardsess" style="--sc:${esc(t.color)}" title="${esc(t.desc || t.label)}">${esc(t.label)}</span>`
-  }).join('')
+  })
 }
 
 // ———— 线别(lanes):config 驱动,可选。null / 缺省 = 关(新项目默认)。 ————
@@ -741,24 +741,24 @@ const HOLD_ANY = RESP && [...(m.tasks || []), ...(b.items || []), ...(dm.entries
 // 卡上写了 settleHold = 人已经看过这张卡并判定「这一轮不收」,机器不再重复它已经知道的事:
 // 只留一枚灰芯片,理由挂 title(v0.13.1)。它换掉的是那三枚里的任意一枚,不是叠在它们上面。
 const respChips = (entry) => {
-  if (!RESP) return ''
+  if (!RESP) return []
   const hold = settleHold(entry)
   // 挂起的芯片带上起算日:超 SETTLE_HOLD_DAYS 天,浏览器把它转成琥珀并写上天数(见 RESP_JS)
-  if (hold) return `<span class="rspchip rsp-hold" data-hold="${esc(holdSince(entry))}" title="${esc(hold)}">暂不收账</span>`
+  if (hold) return [`<span class="rspchip rsp-hold" data-hold="${esc(holdSince(entry))}" title="${esc(hold)}">暂不收账</span>`]
   const s = respOf(entry)
-  if (s.kind === 'settle') return '<span class="rspchip rsp-settle" title="所有关联 PR 都已合并,卡还没收到终态 —— 跑 pr-sync.mjs --settle 看清单">PR 已合 · 待收账</span>'
-  if (s.kind === 'reopen') return '<span class="rspchip rsp-reopen" title="卡已在终态,但还有关联 PR 开着">已收账但 PR 未合</span>'
-  if (s.total > 1 && s.merged > 0 && s.merged < s.total) return `<span class="rspchip rsp-part" title="这张卡跨了 ${s.total} 个 PR">${s.merged}/${s.total} 已合</span>`
-  return ''
+  if (s.kind === 'settle') return ['<span class="rspchip rsp-settle" title="所有关联 PR 都已合并,卡还没收到终态 —— 跑 pr-sync.mjs --settle 看清单">PR 已合 · 待收账</span>']
+  if (s.kind === 'reopen') return ['<span class="rspchip rsp-reopen" title="卡已在终态,但还有关联 PR 开着">已收账但 PR 未合</span>']
+  if (s.total > 1 && s.merged > 0 && s.merged < s.total) return [`<span class="rspchip rsp-part" title="这张卡跨了 ${s.total} 个 PR">${s.merged}/${s.total} 已合</span>`]
+  return []
 }
 // 沉睡:ready + 有日期 + 一个 PR 都没挂。天数与阈值判定都在浏览器(gen 零时间),这里只烤日期。
 // cardsDir 开着时天数从「卡文件最后改动日」起算 —— 比建卡 date 诚实(0.13.0 用 date 是当时没有更好的事实)。
 const dormChip = (entry) => {
-  if (!RESP) return ''
+  if (!RESP) return []
   const d = dormantDate(entry)
   return d && !prsOfCard(entry, PR_REPO).length
-    ? `<span class="rspdorm" data-dorm="${esc((CARDS_DIR && cardUpd(entry.id)) || d)}" hidden></span>`
-    : ''
+    ? [`<span class="rspdorm" data-dorm="${esc((CARDS_DIR && cardUpd(entry.id)) || d)}" hidden></span>`]
+    : []
 }
 // links 里指向本仓 /pull/N 的链接:补真实状态后缀;标题里手写的状态词若已过时,划掉(不改数据)。
 // 复用 prsOfCard 认号 —— 与卡的 PR 集合同一条口径,不另写一遍 href 正则。
@@ -798,8 +798,8 @@ const depOpen = (entry) => openCount(depOf(entry)) > 0
 // 卡头芯片两枚:等前置的一枚(灰,逐项状态挂 title)、被依赖的一枚(列卡号,点得动)。
 // 形制照 settleHold「暂不收账」与 refines「⤴ 修订」,不加新颜色。
 const depChips = (entry) => {
-  if (!AFTER_ANY) return ''
-  let out = ''
+  if (!AFTER_ANY) return []
+  const out = []
   const terminal = TERMINAL.has(String(entry.status || ''))
   const list = depOf(entry)
   // 终态之后两枚都不说话:一张 done 的卡挂着「等 2 项」读起来像出错了,「前置已清」则是句废话。
@@ -808,10 +808,10 @@ const depChips = (entry) => {
   if (list.length && !terminal) {
     const title = esc(list.map((r) => depItemText(r)).join(' · '))
     const open = openCount(list)
-    if (open) out += `<span class="depchip dep-wait" title="${title}">等 ${open} 项</span>`
+    if (open) out.push(`<span class="depchip dep-wait" title="${title}">等 ${open} 项</span>`)
     else {
       const at = clearedAt(list)
-      out += `<span class="depchip dep-clear" title="${title}">前置已清${at ? ` · ${esc(at.slice(5))}` : ''}</span>`
+      out.push(`<span class="depchip dep-clear" title="${title}">前置已清${at ? ` · ${esc(at.slice(5))}` : ''}</span>`)
     }
   }
   // 反向:陈述「谁的前置里有它」,不承诺「清掉它就解锁谁」—— 那句话常常不成立(对方还等着别的),
@@ -824,7 +824,7 @@ const depChips = (entry) => {
   if (rev.length && !terminal) {
     const show = rev.slice(0, DEPS_UNLOCK_SHOW).map((id) => `<a href="#${esc(id)}">${esc(id)}</a>`).join(' · ')
     const more = rev.length > DEPS_UNLOCK_SHOW ? `<i class="depmore">+${rev.length - DEPS_UNLOCK_SHOW}</i>` : ''
-    out += `<span class="depchip dep-unlock" title="${esc(`这些卡的前置里有它:${rev.join(' · ')}`)}">被 ${show}${more} 等着</span>`
+    out.push(`<span class="depchip dep-unlock" title="${esc(`这些卡的前置里有它:${rev.join(' · ')}`)}">被 ${show}${more} 等着</span>`)
   }
   return out
 }
@@ -882,14 +882,29 @@ const ACC_CUR = ACC ? ACC_BY_PR.get(Number(acm.current)) || null : null
 // 「验收中」是派生的,不加新状态枚举:current 那份,或(有 release-manifest 时)PR 还开着的那份
 const accLive = (n) => Boolean(ACC_BY_PR.get(n)) && (Number(acm.current) === n || (relPr.get(n) || {}).state === 'open')
 
-// 卡头芯片:PR + 状态后缀 +(验收开时)清单链与运行期进度。无 pr 字段 → '' = 逐字节冻结。
-const prChips = (entry) => declaredPrs(entry, PR_REPO).map((p) => {
-  const st = prStatus(p)
-  const l = p.repo === PR_REPO ? ACC_BY_PR.get(p.num) : null
-  return `<a class="prchip" href="${esc(prUrl(p))}" target="_blank" rel="noopener">${esc(prLabel(p))}${st ? `<span class="prst">${esc(st)}</span>` : ''}</a>` +
-    (l ? `<a class="acclink" href="#acc-${p.num}">清单</a>` : '') +
-    (l && accLive(p.num) ? `<span class="accnow">验收中 · <span data-acc="${p.num}">0/${l.items.length}</span></span>` : '')
-}).join('')
+// 卡头芯片:PR + 状态后缀 +(验收开时)清单链与运行期进度。无 pr 字段 → [] = 逐字节冻结。
+// 一枚一件地交出去,行卡头的 +N 折叠才折得动(见 rtagsHtml)。
+// 一张验收清单可以横跨多个 PR(卡上写 [273,275,276],manifest 里是同一条 lists 项):
+// 清单链与「验收中」按**清单身份**出一次,画在它覆盖的第一个号上。从前逐号各画一份,
+// 三个号就是九枚药丸,把同一行的标题整个压没了(BL-C152 的病例)。PR 芯片本身照旧逐个出。
+const prChips = (entry) => {
+  const prs = declaredPrs(entry, PR_REPO)
+  const seen = new Set()
+  const out = []
+  for (const p of prs) {
+    const st = prStatus(p)
+    out.push(`<a class="prchip" href="${esc(prUrl(p))}" target="_blank" rel="noopener">${esc(prLabel(p))}${st ? `<span class="prst">${esc(st)}</span>` : ''}</a>`)
+    const l = p.repo === PR_REPO ? ACC_BY_PR.get(p.num) : null
+    if (!l || seen.has(l.key)) continue
+    seen.add(l.key)
+    out.push(`<a class="acclink" href="#acc-${p.num}">清单</a>`)
+    // 「验收中」说的是这张清单,不是某一个号:卡上任一被它覆盖的号在验收,这一枚就该出。
+    // 分子由运行期按清单算(syncChips 走 OF_PR → 清单),挂在哪个号上都是同一份进度。
+    const live = prs.find((x) => x.repo === PR_REPO && ACC_BY_PR.get(x.num) === l && accLive(x.num))
+    if (live) out.push(`<span class="accnow">验收中 · <span data-acc="${live.num}">0/${l.items.length}</span></span>`)
+  }
+  return out
+}
 
 // 清单正文:esc 之后只认 **粗体**,换行留成 <br>(照卡片 repro 的做法);数组按段落
 const bold = (s) => Array.isArray(s)
@@ -1543,13 +1558,29 @@ const lineTag = (l) =>
     .filter(Boolean)
     .map((x) => `<span class="rline line-${esc(x)}">${esc(x)}</span>`)
     .join('')
+// 行卡头的药丸带(v0.17.1):一枚一件地收进来,超过 RTAGS_SHOW 枚就把多出来的折成一枚 +N,
+// 名单挂 title —— +N 在这块板上已经是惯例(depChips 的 .depmore),不新造控件也不加 config 键。
+// 没超标的行照旧原样拼起来,那些板的产物一个字节都不变。
+const RTAGS_SHOW = 8
+// hidden 的那枚不是药丸,是运行期挂钩(.rspdorm 的沉睡天数在浏览器里算):不占宽、不计数、也不许被折走
+const rtagHidden = (x) => x.includes('class="rspdorm"')
+// 折起来的那几枚在 title 里说清是谁。取的是它们自己的字,已经过 esc 了,不能再 esc 一遍(会变 &amp;amp;)
+const rtagText = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const rtagsHtml = (tags) => {
+  const all = (Array.isArray(tags) ? tags : [tags]).filter(Boolean)
+  if (!all.length) return ''
+  const pills = all.filter((x) => !rtagHidden(x))
+  if (pills.length <= RTAGS_SHOW) return `<span class="rtags">${all.join('')}</span>`
+  const fold = pills.slice(RTAGS_SHOW)
+  return `<span class="rtags">${pills.slice(0, RTAGS_SHOW).join('')}<i class="rtagmore" title="${fold.map(rtagText).join(' · ')}">+${fold.length}</i>${all.filter(rtagHidden).join('')}</span>`
+}
 // upd(v0.14.0,仅 cardsDir 开)= 卡文件最后改动日;date 是建卡日,两个说的不是一件事,并排放
-const rowHead = ({ id, badge, title, tags = '', line = '', date = '', upd = '' }) => `
+const rowHead = ({ id, badge, title, tags = [], line = '', date = '', upd = '' }) => `
     <div class="rhead">
       <span class="tid">${esc(id)}</span>
       ${badge}
       <span class="rtitle">${esc(title)}</span>
-      ${tags ? `<span class="rtags">${tags}</span>` : ''}
+      ${rtagsHtml(tags)}
       <span class="rspacer"></span>
       ${lineTag(line)}
       ${date ? `<span class="cdate">${esc(date.slice(5))}</span>` : ''}${upd ? `<span class="udate" title="卡文件最后改动 ${esc(upd)}">更新 ${esc(upd.slice(5))}</span>` : ''}
@@ -1558,7 +1589,7 @@ const rowHead = ({ id, badge, title, tags = '', line = '', date = '', upd = '' }
 
 const card = (t) => `
   <article class="card lcard rcard card-${t.status}" id="${esc(t.id)}" data-line="${esc(taskLine(t))}" style="--c:${escC(STATUS_COLOR[t.status])}">
-    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: prChips(t) + respChips(t) + depChips(t), line: taskLine(t) })}
+    ${rowHead({ id: t.id, badge: statusBadge(t.status), title: t.title, tags: [...prChips(t), ...respChips(t), ...depChips(t)], line: taskLine(t) })}
     <div class="rbody">
       <dl>
         ${t.problem ? `<dt>问题</dt><dd class="x">${rt(t.problem)}</dd>` : ''}
@@ -1816,7 +1847,12 @@ const blCard = (it, i) => `
       id: it.id,
       badge: `<span class="badge" style="--c:${escC(BL_STATUS_COLOR[it.status])}">${esc(b.statuses[it.status])}</span>`,
       title: it.title,
-      tags: `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span><span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>${it.blockedOn ? '<span class="rtag blk">⛔</span>' : ''}${sessSeals(it)}${prChips(it)}${respChips(it)}${depChips(it)}${dormChip(it)}`,
+      tags: [
+        `<span class="rtag" style="--c:${escC(TIER_COLOR[it.tier])}">T${esc(it.tier)}</span>`,
+        `<span class="rtag" style="--c:${escC(PRI_COLOR[it.priority])}">${esc(b.priorities[it.priority])}</span>`,
+        ...(it.blockedOn ? ['<span class="rtag blk">⛔</span>'] : []),
+        ...sessSeals(it), ...prChips(it), ...respChips(it), ...depChips(it), ...dormChip(it),
+      ],
       line: blLine(it),
       date: it.date,
       upd: cardUpd(it.id),
@@ -1975,7 +2011,8 @@ const decCard = (e) => {
   const iters = (e.iters || []).map((c) => `<a class="iterchip" href="#TC${esc(c.slice(1))}" title="迭代 ${esc(c)}">${esc(c)}</a>`).join('')
   const refines = (e.refines || []).map((r) => `<a class="refchip" href="#${esc(r.code)}" title="${esc(r.note)}">⤴ 修订 ${esc(r.code)}</a>`).join('')
   const hasMeta = secs || iters || refines
-  const tags = (e.demo ? '<span class="rtag demo">demo</span>' : '') + sessSeals(e) + prChips(e) + respChips(e) + depChips(e)
+  const tags = [...(e.demo ? ['<span class="rtag demo">demo</span>'] : []),
+    ...sessSeals(e), ...prChips(e), ...respChips(e), ...depChips(e)]
   return `
   <article class="deccard lcard rcard dec-${e.status}" id="${esc(e.id)}" data-line="${esc(decLine(e))}" data-date="${esc(e.date || '')}" data-status="${esc(e.status)}" data-type="${esc(tbPrefix(e.id))}" data-search="${esc((e.id + ' ' + e.title).toLowerCase())}"${sessAttr(e)} style="--c:${escC(DEC_STATUS_COLOR[e.status])}">
     ${rowHead({
@@ -5592,9 +5629,15 @@ ${PATH_CSS_A}
            user-select: none; min-height: 38px; }
   .rhead:hover { background: color-mix(in srgb, var(--c) 5%, var(--card)); }
   .rhead .tid { flex: none; }
+  /* min-width 是标题的下限(v0.17.1):药丸一律 flex: none,从前标题写着 min-width: 0,
+     药丸够多时它被压到 0 宽 —— 连省略号都不出,60 多字的标题在行上一个字都读不到。
+     给它一截保底,挤不下的药丸交给 .rtagmore 那枚 +N */
   .rtitle { flex: 0 1 auto; font-size: 14px; font-weight: 600; color: var(--ink);
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: min(16em, 40%); }
   .rtags { display: flex; gap: 4px; flex: none; }
+  /* 折起来的那几枚:名单在 title 里(照 .depmore 的样子,不新造控件) */
+  .rtagmore { flex: none; font-style: normal; font-size: 10.5px; font-weight: 600;
+              line-height: 17px; color: var(--faint); cursor: help; }
   .rtag { font-size: 10.5px; font-weight: 600; border-radius: 5px; padding: 0 6px; line-height: 17px; white-space: nowrap;
           color: color-mix(in srgb, var(--c, ${tk('tag-neutral')}) 66%, ${tk('mix-ink')});
           background: color-mix(in srgb, var(--c, ${tk('tag-neutral')}) 12%, ${tk('mix-paper')});

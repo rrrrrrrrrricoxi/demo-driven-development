@@ -628,7 +628,10 @@ console.log('T34 状态药丸 nowrap')
   const badgeRule = (idx.match(/\.badge\s*\{[^}]*\}/) || [''])[0]
   ok(/white-space:\s*nowrap/.test(badgeRule), '.badge 钉了 white-space: nowrap(逐字可断 → min-content 一字宽)', badgeRule.slice(0, 80))
   ok(/flex:\s*none/.test(badgeRule), '.badge 钉了 flex: none(行卡里只有 .rtitle 该被压)', badgeRule.slice(0, 80))
-  ok(/\.rtitle\s*\{[^}]*min-width:\s*0/.test(idx), '.rtitle 仍是那个唯一该收缩的(min-width: 0 + 省略号)')
+  ok(/\.rtitle \{[^}]*flex: 0 1 auto/.test(idx) && /\.rtitle \{[^}]*text-overflow: ellipsis/.test(idx)
+    && /\.rtitle \{[^}]*min-width: min\(16em, 40%\)/.test(idx),
+    '.rtitle 仍是行卡里唯一该收缩的,但收缩有下限(v0.17.1):min-width: min(16em, 40%) + 省略号 —— min-width: 0 那版会被药丸压到 0 宽,一个字都读不到',
+    ((idx.match(/\.rtitle \{[^}]*\}/) || [''])[0]).replace(/\s+/g, ' ').slice(0, 140))
 }
 
 // ============ T22 合订引用豁免(v0.10.0:被挂卡 demo iframe 内嵌的子页不算孤儿)============
@@ -6203,6 +6206,78 @@ console.log('T70 英文串表')
   ok(/Kanban guard/.test(msg) && /Prerequisites cleared/.test(msg) && /On settle hold/.test(msg) && /prose field over 800/.test(msg),
     '这一批 0.15.x/0.16.x 新键真被调用了一遍(前置已清 / 挂账到期 / 长正文 / 积压)', msg.slice(0, 400))
   ok(!/[\u4e00-\u9fff]/.test(msg), 'en 板上的守卫通知里一个中文字都不该有', (msg.match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
+}
+
+// ============ T74 行卡药丸:一张清单只出一枚 + 溢出折 +N + 标题压不没(BL-C152)============
+// 病例:一张验收清单横跨三个 PR 时,清单链与「验收中」被逐号各画一份 —— 九枚药丸,
+// 而 .rtitle 写着 min-width: 0、药丸一律 flex: none,标题被压到 0 宽,60 多字一个都读不到。
+console.log('T74 行卡药丸不压标题')
+{
+  const fx74 = mkFixture('fx74', { 's.html': demoHtml('s') })
+  const kb = fx74.kb, idxP = join(kb, 'index.html')
+  const rd = (p2) => JSON.parse(readFileSync(p2, 'utf8'))
+  const wr = (p2, o) => writeFileSync(p2, JSON.stringify(o))
+  const mP = join(kb, 'manifest.json'), decP = join(kb, 'decisions-manifest.json'), blP = join(kb, 'backlog-manifest.json')
+  const cfgP = join(kb, 'kanban.config.json'), relP = join(kb, 'release-manifest.json'), accP = join(kb, 'acceptance-manifest.json')
+  const mm = rd(mP), dec = rd(decP), bl = rd(blP)
+  for (const x of [mm, dec, bl]) { x.instance.ghRepo = 'o/r'; x.instance.branch = 'main' }
+  bl.tiers = { 1: '核心' }
+  const LONG = '这条标题有六十多个字,正是那张在行上一个字都读不出来的卡的样子 —— 要的就是药丸挤满一整行时它还能读出开头一截,而不是连省略号都不出'
+  const item = (o) => ({ status: 'ready', priority: 'high', tier: '1', title: 't', problem: 'p', approach: 'a', area: 'x', source: 's', ...o })
+  const pr = (n, st) => ({ number: n, title: 'PR ' + n, state: st, draft: false, base: 'main', branch: 'f/' + n,
+    url: `https://github.com/o/r/pull/${n}`, createdAt: '2026-09-01T01:00:00Z',
+    mergedAt: st === 'merged' ? '2026-09-02T01:00:00Z' : null, closedAt: null, cards: [] })
+  const many = Array.from({ length: 11 }, (_, i) => 301 + i)
+  wr(relP, { stages: REL_MANIFEST.stages, releases: [],
+    prs: [pr(273, 'open'), pr(275, 'merged'), pr(276, 'merged'), ...many.map((n) => pr(n, 'open'))],
+    syncedAt: '2026-09-03T02:00:00Z' })
+  // 一张清单横跨三个号(melon 的病例),current 落在排在最后的那个 273
+  wr(accP, { current: 273, lists: [{ pr: [275, 276, 273], title: '一张清单横跨三个 PR', revision: 1,
+    env: { url: 'http://127.0.0.1:5175' }, rounds: [], groups: [],
+    items: [1, 2, 3, 4, 5].map((i) => ({ id: 'A' + i, title: '条目 ' + i, do: 'd', exp: 'e' })) }] })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  cfg.releaseTab = true
+  cfg.sessionTags = Object.fromEntries(Array.from({ length: 9 }, (_, i) => ['s' + i, { label: 's' + i }]))
+  wr(cfgP, cfg)
+  bl.items = [
+    item({ id: 'BL-1', title: '没挂 PR 的短卡' }),
+    item({ id: 'BL-2', title: LONG, pr: [275, 276, 273] }),
+  ]
+  wr(mP, mm); wr(decP, dec); wr(blP, bl)
+  const r = runGen(NEW_SCRIPTS, kb)
+  ok(r.status === 0, 'gen exit 0', r.stderr)
+  const rowOf = (html, id) => { const a = html.indexOf(`id="${id}"`); return a < 0 ? '' : html.slice(a, html.indexOf('<div class="rbody">', a)) }
+  const on = readFileSync(idxP, 'utf8')
+  const r2 = rowOf(on, 'BL-2')
+  ok(count(r2, 'class="prchip"') === 3, `PR 芯片照旧逐个出(3 个号 3 枚,实际 ${count(r2, 'class="prchip"')} 枚)`)
+  ok(count(r2, '>清单</a>') === 1 && r2.includes('href="#acc-275"'),
+    `一张清单只出一枚「清单」,画在它覆盖的第一个号上(实际 ${count(r2, '>清单</a>')} 枚)`, (r2.match(/href="#acc-\d+"/g) || []).join(' '))
+  ok(count(r2, 'class="accnow"') === 1 && r2.includes('data-acc="273">0/5<'),
+    `「验收中」也只出一枚,分子挂在清单里真正在验收的那个号上(实际 ${count(r2, 'class="accnow"')} 枚)`,
+    (r2.match(/data-acc="\d+">[^<]*/) || [''])[0])
+  ok(!r2.includes('rtagmore'), '7 枚药丸没超标:不折 +N')
+  ok(r2.includes(`<span class="rtitle">${LONG}</span>`), '标题整条烤在 .rtitle 里(截断是 CSS 的事,gen 不替人删字)')
+  const frozen1 = rowOf(on, 'BL-1'), frozen2 = r2
+
+  // 再加一张药丸爆表的卡:没超标的两行必须一个字节都不动
+  bl.items.push(item({ id: 'BL-3', title: LONG, pr: many }))
+  bl.items.push(item({ id: 'BL-4', title: LONG, date: '2026-01-02', session: Array.from({ length: 9 }, (_, i) => 's' + i).join(' ') }))
+  wr(blP, bl)
+  const r3 = runGen(NEW_SCRIPTS, kb)
+  ok(r3.status === 0, '加两张爆表的卡后 gen exit 0', r3.stderr)
+  const on2 = readFileSync(idxP, 'utf8')
+  ok(rowOf(on2, 'BL-1') === frozen1 && rowOf(on2, 'BL-2') === frozen2, '药丸数没超标的行:与加卡之前逐字节相同')
+  const r4 = rowOf(on2, 'BL-3')
+  ok(count(r4, 'class="prchip"') === 6, `13 枚只画前 8 枚(T 档 + 优先级 + 6 枚 PR,实际 ${count(r4, 'class="prchip"')} 枚 PR)`)
+  ok(r4.includes('<i class="rtagmore" title="PR #307 开着 · PR #308 开着 · PR #309 开着 · PR #310 开着 · PR #311 开着">+5</i>'),
+    '溢出的 5 枚折成一枚 +N,名单在 title 里列全', (r4.match(/<i class="rtagmore"[^>]*>[^<]*<\/i>/) || [''])[0])
+  ok(r4.includes(`<span class="rtitle">${LONG}</span>`) && /\.rtitle \{[^}]*min-width: min\(16em, 40%\)/.test(on2),
+    '标题在 13 枚药丸下仍留得住宽度:整条在 .rtitle 里 + CSS 给了 min(16em, 40%) 的下限(像素级另由浏览器冒烟验)')
+  const r5 = rowOf(on2, 'BL-4')
+  ok(r5.includes('class="rtagmore"') && r5.includes('>+3</i>') && r5.includes('data-dorm="2026-01-02" hidden'),
+    'hidden 的沉睡挂钩不是药丸:不计数、也不许被折走(折走了浏览器就算不出天数)', (r5.match(/<i class="rtagmore"[^>]*>[^<]*<\/i>/) || [''])[0])
+  ok(r5.indexOf('class="rtagmore"') < r5.indexOf('data-dorm'), '它留在药丸带末尾,+N 之后')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

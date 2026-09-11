@@ -79,6 +79,18 @@ Generated output and served responses stay byte-identical to 0.17.0 unless
   falls outside the current window, or its band is filtered out, nothing is
   claimed. Boards with no acceptance manifest, or with no `current`, carry no
   such key on any timeline row.
+- **A row card's title can no longer be squeezed to nothing by its own pills.**
+  Two causes, both fixed. One acceptance checklist may cover several PRs; the
+  卡头 drew its 清单 link and 验收中 chip once *per PR*, so a card listing three
+  covered PRs carried nine pills where three belong — they are now emitted once
+  per checklist, on the first covered number, while the PR chips stay one per
+  PR. And since every pill is `flex: none` while `.rtitle` had `min-width: 0`,
+  a crowded row shrank the title to zero width — not even an ellipsis. The
+  title now keeps a floor of `min(16em, 40%)`, and pills past the eighth fold
+  into a `+N` whose `title` lists them, the same idiom the `after` chips use.
+  Hidden runtime hooks (the dormancy marker) are never counted or folded. Rows
+  at or under the limit render byte-for-byte as before, and no config key is
+  involved.
 
 ### Fixed
 Review of the change above, on a weak link and with two testers on the same
