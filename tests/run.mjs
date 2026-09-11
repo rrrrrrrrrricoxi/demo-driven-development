@@ -5271,6 +5271,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       { id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' },
       { id: 'A"1', group: 'J', title: '带引号的 id', do: '点一下', exp: '有反应' },
     ],
+    result: { checked: ['A"1'], at: '2026-09-01' }, // 既往已收的那次:v0.17.1 渲成只读的「已收」灰标
   }
   wr(accP, { current: 277, lists: [LIST] })
   const cfg = rd(cfgP)
@@ -5294,15 +5295,30 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   ok(rOn.status === 0, 'acceptanceFeedback:true gen exit 0', rOn.stderr)
   const on = readFileSync(idxP, 'utf8')
 
-  // ---- 入口与身份芯片 ----
-  ok(count(on, 'data-accfb=') === 2 && on.includes('<span class="accfbt">反馈 ▸</span>'),
-    '每条验收行右端一枚「反馈 ▸」(2 条 = 2 枚)', String(count(on, 'data-accfb=')))
+  // ---- 左栏判定 / 行末入口 / 身份芯片(v0.17.1 判定即勾选)----
+  ok(count(on, 'data-accv="ok"') === 2 && count(on, 'data-accv="bad"') === 2 && !on.includes('data-accck='),
+    '左栏换成 ✓ / ✕ 两枚钮(2 条 = 各 2 枚),勾选框一个不剩',
+    `${count(on, 'data-accv="ok"')} / ${count(on, 'data-accv="bad"')}`)
+  ok(count(on, 'aria-pressed="false"') === 4 && count(on, '<button type="button" class="accv') === 4,
+    '两枚钮是真 <button>(可 Tab、Enter/Space 原生触发)且 aria-pressed 跟随', String(count(on, 'aria-pressed="false"')))
+  ok(count(on, 'data-accadd=') === 2 && on.includes('>＋ 备注 / 图</button>'),
+    '每行右下角常驻「＋ 备注 / 图」—— 不做悬停才现(桌面上藏在悬停里等于不存在)')
+  ok(count(on, 'data-accfb=') === 2 && on.includes('<span class="accfbt"></span>') && on.includes('aria-expanded="false" hidden>'),
+    '行末摘要 chip 烤成 hidden:没人说过话时那儿什么都没有(不再每行挂一枚「反馈 ▸」)')
   ok(on.includes('data-accid="A&quot;1"') && on.includes('data-accfb="A&quot;1"'),
     '带引号的条目 id 照旧 esc(入口的 data 属性也走同一把尺)')
   ok(count(on, 'data-accrev="2"') === 2, '每行带上清单 revision(旧反馈标灰「清单已改」靠它)', String(count(on, 'data-accrev="2"')))
   ok(on.includes('<span class="accme" data-accme hidden>') && on.includes('data-accwho'),
     'tab 顶部一枚身份芯片(名字运行期填,gen 期一个字都不知道)')
-  ok(on.includes('.accfbx {') && on.includes('.accfb.has {'), '样式随开关进来(展开区 + 有反馈时的入口)')
+  ok(on.includes('.accfbx {') && on.includes('.accv.ok[aria-pressed="true"]') && on.includes('.accv.bad[aria-pressed="true"]'),
+    '样式随开关进来(展开区 + 两枚钮判过之后的实心)')
+  ok(on.includes('.accitem.bad { border-left: 2px solid #d44c47; padding-left: 11px; }') && on.includes('.accitem.done { background: var(--bg); opacity: .66; }'),
+    '✓ 沿用 .accitem.done 的变淡;✕ 不变淡、左缘 2px 红边并补 1px 内缩(正文不横移)')
+  ok(on.includes('.accfbzoom { position: fixed; inset: 0;') && on.includes('rgba(0, 0, 0, .62)')
+    && on.includes('max-width: 92vw; max-height: 88vh'),
+    '缩略图就地放大:铺满视口的遮罩 + 居中原图(92vw / 88vh)')
+  ok(on.includes('.accfbnw:focus-within .accfbhint { opacity: 1; }') && on.includes("fbEl('span', 'accfbhint', '⌘V 贴图')"),
+    '贴图提示只在输入框聚焦时出现在框内右缘(不常驻)')
   ok(on.includes("'htest_acc_who'"), '身份存 <brand>_acc_who(与勾选那把 LS_PREFIX 同一处)')
   ok(on.includes("fetch('acceptance-feedback.jsonl', { cache: 'no-store' })"), 'jsonl 每次现拉,不吃缓存')
   ok(on.includes("setInterval(fbTick, 20000)") && on.includes("document.addEventListener('visibilitychange'")
@@ -5328,7 +5344,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
   // ---- 纯函数:从产物里原样抠出来跑(下面几段共用这一份,冒烟那段验坏行也用它)----
   const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
   ok(fbSrc.includes('accFbMerge') && fbSrc.includes('accFbShotOk'), '抠得到那段(纯函数都在壳里)')
-  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbLive, accFbChip, accFbTime, accFbPasteFile, fbHttpMsg }')()
+  const F = new Function(fbSrc + '\nreturn { accFbSlug, accFbShotOk, accFbParse, accFbMerge, accFbLive, accFbChip, accFbTime, accFbPasteFile, fbHttpMsg, accFbMineAt, accFbPick, accFbAct, accFbSendable, accFbNoWrite, accFbBadTail }')()
+  const merge1 = (lines) => F.accFbMerge(F.accFbParse(lines.join('\n')).rows)['277' + String.fromCharCode(0) + 'JJ3']
   {
     // 写口答了非 2xx 时页面说什么。最可能的首跑状态是宿主那份 serve.py 还没有 do_POST
     // (种子文件,init 从不覆盖):BaseHTTPRequestHandler 兜底答 501 + 一页 text/html,
@@ -5388,9 +5405,11 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       '同一 (who, item):后写的 verdict 覆盖前一条(tester-a 由 bad 改成 ok)', JSON.stringify(v.verdicts))
     ok(v.order.join(' ') === 'tester-a tester-b', '出场顺序按第一次表态排,改主意不插队', v.order.join(' '))
     ok(v.notes === 1 && v.shots === 1, '备注与图是累积的,不被后一条顶掉')
-    ok(F.accFbChip(e, 2) === '✓ tester-a · ✕ tester-b · 1 备注 · 1 图', '入口摘要文案', F.accFbChip(e, 2))
-    ok(F.accFbChip(null, 2) === '' && F.accFbChip(F.accFbMerge([])['x'], 2) === '',
-      '没有反馈 = 空串(入口保持「反馈 ▸」原样)')
+    ok(F.accFbChip(e, 2, '') === 'tester-a ✓ · tester-b ✕ · 1 备注 · 1 图', '行末摘要文案', F.accFbChip(e, 2, ''))
+    ok(F.accFbChip(e, 2, 'tester-a') === 'tester-b ✕ · 1 备注 · 1 图',
+      '我自己的判定不进摘要 —— 左栏那两枚钮已经写着了(v0.17.1)', F.accFbChip(e, 2, 'tester-a'))
+    ok(F.accFbChip(null, 2, '') === '' && F.accFbChip(F.accFbMerge([])['x'], 2, '') === '',
+      '没有反馈 = 空串(那枚 chip 干脆不出现)')
     {
       // 清单改版:本地勾按 rev 清零、展开区里旧行标灰,入口那枚 chip 从前不认 rev —— 它照旧写着
       // 「✓ tester-a」,与一条刚在新版清单上通过的行长得一模一样。扫一列 chip 的人读到的是「已通过」。
@@ -5399,9 +5418,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"tester-b","rev":1,"note":"改版前的备注"}',
         '{"ts":"2026-09-10T12:30:00Z","pr":277,"item":"JJ3","who":"tester-b","rev":2,"verdict":"bad"}',
       ].join('\n')).rows)['277' + NUL + 'JJ3']
-      ok(F.accFbChip(mixed, 2) === '✕ tester-b · 旧清单 2', '改版后:只算当版的行,旧账另起一段陈述', F.accFbChip(mixed, 2))
-      ok(F.accFbChip(mixed, 1) === '✓ tester-a · 1 备注 · 旧清单 1', 'rev 1 那边同一把尺(反过来看也对)', F.accFbChip(mixed, 1))
-      ok(F.accFbChip(mixed, 0) === '✓ tester-a · ✕ tester-b · 1 备注', '取不到 rev(老板子 / 没盖 rev 的行):全算,与 0.17.0 之前一致', F.accFbChip(mixed, 0))
+      ok(F.accFbChip(mixed, 2, '') === 'tester-b ✕ · 旧清单 2', '改版后:只算当版的行,旧账另起一段陈述', F.accFbChip(mixed, 2, ''))
+      ok(F.accFbChip(mixed, 1, '') === 'tester-a ✓ · 1 备注 · 旧清单 1', 'rev 1 那边同一把尺(反过来看也对)', F.accFbChip(mixed, 1, ''))
+      ok(F.accFbChip(mixed, 0, '') === 'tester-a ✓ · tester-b ✕ · 1 备注', '取不到 rev(老板子 / 没盖 rev 的行):全算,与 0.17.0 之前一致', F.accFbChip(mixed, 0, ''))
     }
     {
       // who 是测试人自己敲的字,拿它当普通对象的键 = 名字叫 __proto__ 时 chip 一行说两遍、
@@ -5410,7 +5429,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         '{"ts":"2026-09-10T12:00:00Z","pr":277,"item":"JJ3","who":"__proto__","verdict":"bad"}',
         '{"ts":"2026-09-10T12:01:00Z","pr":277,"item":"JJ3","who":"__proto__","verdict":"ok"}',
       ].join('\n')).rows)['277' + NUL + 'JJ3']
-      ok(F.accFbChip(proto, 2) === '✓ __proto__', 'who 叫 __proto__:也只是一个普通名字(不重复、不显示成 ✕)', F.accFbChip(proto, 2))
+      ok(F.accFbChip(proto, 2, '') === '__proto__ ✓', 'who 叫 __proto__:也只是一个普通名字(不重复、不显示成 ✕)', F.accFbChip(proto, 2, ''))
     }
     ok(F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg', 277, 'JJ3'), '服务端拼得出的名字:认')
     ok(!F.accFbShotOk('../../etc/passwd', 277, 'JJ3') && !F.accFbShotOk('acc-277-JJ3-20260910T120341.jpg/../x.jpg', 277, 'JJ3'),
@@ -5424,6 +5443,103 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       'slug 里的「.」不当通配符用(a.b 只配 a.b)')
     ok(F.accFbSlug('../x') === '.._x' && F.accFbSlug('') === '_', 'slug:路径分隔符与空串都落到安全字符')
   }
+
+  // ---- v0.17.1 判定即勾选:撤回 / 合并 / 我的判定 / 防误触 / 降级判据(纯函数,从产物里抠出来跑)----
+  {
+    const R = (ts, who, extra) => JSON.stringify(Object.assign({ ts, pr: 277, item: 'JJ3', who, rev: 2 }, extra))
+    {
+      const e = merge1([R('2026-09-11T10:00:00Z', 'tester-a', { verdict: 'ok' }),
+        R('2026-09-11T10:01:00Z', 'tester-b', { verdict: 'bad' }),
+        R('2026-09-11T10:02:00Z', 'tester-a', { verdict: 'none' })])
+      const v = F.accFbLive(e, 2)
+      ok(!('tester-a' in v.verdicts) && v.order.join(' ') === 'tester-b',
+        '撤回清除判定:那个人回到未判,名字也从摘要里退场(不是删行,行还在)', JSON.stringify(v.verdicts))
+      ok(F.accFbMineAt(e, 2, 'tester-a').v === '' && F.accFbMineAt(e, 2, 'tester-a').ts === '2026-09-11T10:02:00Z',
+        '我自己的最后一次表态 = 撤回:v 是空串,时刻仍取撤回那一条(要与本机那条比新旧)',
+        JSON.stringify(F.accFbMineAt(e, 2, 'tester-a')))
+      ok(F.accFbChip(e, 2, 'tester-b') === '', '撤回之后那条目一句话都不剩 = 摘要 chip 消失', F.accFbChip(e, 2, 'tester-b'))
+    }
+    {
+      const e = merge1([R('2026-09-11T10:00:00Z', 'tester-a', { verdict: 'ok' }),
+        R('2026-09-11T10:02:00Z', 'tester-a', { verdict: 'none' }),
+        R('2026-09-11T10:05:00Z', 'tester-a', { verdict: 'bad' })])
+      ok(F.accFbMineAt(e, 2, 'tester-a').v === 'bad' && F.accFbLive(e, 2).verdicts['tester-a'] === 'bad',
+        '撤回后再判:最后那条说了算(三行都还在账上)', JSON.stringify(F.accFbMineAt(e, 2, 'tester-a')))
+    }
+    {
+      const e = merge1([R('2026-09-11T10:00:00Z', 'tester-a', { note: '只有备注' }),
+        R('2026-09-11T10:01:00Z', 'tester-b', { shot: 'acc-277-JJ3-20260911T100100.jpg' })])
+      const v = F.accFbLive(e, 2)
+      ok(v.notes === 1 && v.shots === 1 && v.order.length === 0 && F.accFbMineAt(e, 2, 'tester-a').v === '',
+        'note-only / shot-only 的记录照旧:计进备注与图数,谁都没因此被算成判过', JSON.stringify(v.order))
+      ok(F.accFbChip(e, 2, 'tester-a') === '1 备注 · 1 图', '摘要里那两个数不看是谁留的(证据就是证据)', F.accFbChip(e, 2, 'tester-a'))
+    }
+    {
+      // 无写口时判定落本机,而账上可能还躺着我上一次(经写口)留下的那条 —— 取时刻新的那条
+      const e = merge1([R('2026-09-11T10:00:00Z', 'tester-a', { verdict: 'ok' })])
+      const mine = F.accFbMineAt(e, 2, 'tester-a')
+      ok(F.accFbPick(mine, null) === 'ok', '只有账上那条:听账上的')
+      ok(F.accFbPick(mine, { v: 'bad', ts: '2026-09-11T10:03:00Z' }) === 'bad', '本机那条更新:听本机的(无写口那条路)')
+      ok(F.accFbPick(mine, { v: 'bad', ts: '2026-09-11T09:00:00Z' }) === 'ok', '本机那条更旧:还是听账上的(换了台有写口的机器之后)')
+      ok(F.accFbPick(mine, { v: '', ts: '2026-09-11T10:03:00Z' }) === '' && F.accFbPick(null, null) === '',
+        '本机那条是撤回 / 两边都没有:都落到未判')
+    }
+    ok(F.accFbAct('', 'ok', 9e9) === 'ok' && F.accFbAct('ok', 'bad', 9e9) === 'bad' && F.accFbAct('bad', 'ok', 10) === 'ok',
+      '未判 → 判;✓ ↔ ✕ 直接互换(不经撤回,也不受 400ms 约束)')
+    ok(F.accFbAct('ok', 'ok', 9e9) === 'none', '点已选的那枚 = 撤回(POST verdict:none)')
+    ok(F.accFbAct('ok', 'ok', 399) === '' && F.accFbAct('ok', 'ok', 400) === 'none',
+      '400ms 内的第二下不算数(防误触双击),满 400ms 才当撤回')
+    ok(F.accFbSendable(false, false) === true && F.accFbSendable(false, true) === true,
+      '有写口:照发')
+    ok(F.accFbSendable(true, true) === false && F.accFbSendable(true, false) === true,
+      '认过没写口:这一页里不再发请求;但每次开页留一次试探,写口回来了自己接上')
+    ok(F.accFbNoWrite(404) && F.accFbNoWrite(501) && F.accFbNoWrite(405) && !F.accFbNoWrite(400) && !F.accFbNoWrite(403) && !F.accFbNoWrite(500),
+      '「这儿没有写口」只认 404 / 405 / 501 —— 400 / 403 / 500 是这一笔不合格,该回滚该说原话')
+    ok(F.accFbBadTail(0) === '' && F.accFbBadTail(3) === ' · 其中 3 条不对',
+      '进度那句的后半截:一条不对都没有时一个字不说')
+  }
+
+  // ---- 计数与文案改口(进度 / 分组 / 复制结果)----
+  ok(on.includes('已判 <b class="accdone">0</b>') && on.includes('<span class="accbadt"></span>')
+    && on.includes("p.querySelector('.accbadt').textContent = accFbBadTail(vb)"),
+    '进度改口「已判 N / M · 其中 K 条不对」(K 由运行期按我的判定算)')
+  ok(on.includes("v = fbVdOf(l, it.id, it.pr), on = v === 'ok', bd = v === 'bad', jd = on || bd")
+    && on.includes('if (jd) vd++; if (bd) vb++') && on.includes('if (jd) gc[it.g].d++')
+    && on.includes("a.classList.toggle('bad', c.b > 0)"),
+    '进度与分组计数全按我的判定算(判过就算已判,不对的另计一档)')
+  ok(on.includes('>复制结果<') && !on.includes('复制勾选结果')
+    && on.includes('JSON.stringify({ checked: checked, bad: bad, at: at })'),
+    '「复制勾选结果」改名「复制结果」,输出 {checked, bad, at} —— checked 键保持原形')
+  ok(on.includes("if (v === 'ok') checked.push(it.id)") && on.includes("else if (v === 'bad') bad.push(it.id)"),
+    '复制出来的两个数组读的是我的判定(不是本机勾选)')
+  ok(on.includes('<span class="accgot"') && on.includes('>已收</span>') && count(on, 'class="accgot"') === 1,
+    'manifest result.checked 里的条目:行上一枚只读的「已收」灰标(这块板上只有一条)', String(count(on, 'class="accgot"')))
+  ok(!on.includes("'htest_acc_' + l.k + '_r'") && !on.includes('function load(l)') && !on.includes('l.pre.forEach'),
+    '旧勾选键 <brand>_acc_<pr>_r<rev>:不读、不写、不迁移(那是私有痕迹,转成判定等于替人署名)')
+  ok(on.includes("function fbVdKey(l) { return 'htest_acc_v_' + l.k + '_r' + l.rev }"),
+    '无写口时判定存 <brand>_acc_v_<pr>_r<rev>(与旧勾选键各走各的)')
+  ok(off.includes("'htest_acc_' + l.k + '_r'") && off.includes('function load(l)'),
+    '关着的那档:旧勾选那套一个字节没动(冻结基线里它还在)')
+
+  // ---- 降级(无写口):控件形状不变,判定落本机,tab 顶一行灰字 ----
+  ok(on.includes('<p class="accdeg" data-accdeg hidden>') && on.includes('这台看板没有写口,判定只存在这台浏览器里'),
+    '无写口那行灰字烤成 hidden,降级时才亮(gen 期不知道有没有写口)')
+  ok(on.includes('if (!fbSendable()) { fbKeepLocal(l, row, k, vd); return }')
+    && on.includes("if (!fbSendable()) { fbSay(row, '这台看板没有写口,备注存不下来 —— 判定还在这台浏览器里'); return }"),
+    '降级路径不发请求:判定直接落本机,备注当场说清存不下来')
+  ok(on.includes("localStorage.setItem(FB_NOWRITE_KEY, '1')") && on.includes('localStorage.removeItem(FB_NOWRITE_KEY)'),
+    '「这台没有写口」记在浏览器里;写口回来了(换了新 serve.py)那个记号自己收走')
+
+  // ---- 时间线 / 缩略图 ----
+  ok(on.includes("fbEl('span', 'accfbvd none', '撤回判定')") && on.includes("var line = fbEl('div', 'accfbr' + (stale || beaten || none ? ' stale' : ''))"),
+    '时间线列全部记录,撤回那条用淡色渲染(不抹,只是淡)')
+  ok(!on.includes("fbEl('p', 'accfbe', '还没有反馈')") && !on.includes("'accfbe', '还没有反馈'"),
+    '空态不再占一行(「还没有反馈」那句删掉了)')
+  ok(on.includes("var av = fbEl('span', 'accfbav', Array.from(String(r.who))[0] || '?')"),
+    '一行一条:姓名首字圆点 · ✓/✕ · 时间 · 备注 · 缩略图')
+  ok(on.includes("function fbZoom(name, opener)") && on.includes("if (opener && document.body.contains(opener)) opener.focus()")
+    && on.includes("if (ev.key === 'Escape')") && !on.includes("a.href = 'shots/' + name"),
+    '缩略图点开就地放大:Esc / 点空白 / 关闭钮都能关,关后焦点回缩略图;不再新开标签页')
 
   // ---- acceptanceFeedback 开着但 acceptanceTab 关着:一行警告,产物照旧冻结 ----
   {
@@ -5611,6 +5727,27 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         const g = await req(srv.base, '/acceptance-feedback.jsonl')
         const p = F.accFbParse(g.text)
         ok(p.bad === 1 && p.rows.length === 10, '坏行只被跳过并计数,前面的账一条不丢', `${p.rows.length} / ${p.bad}`)
+      }
+      // v0.17.1 撤回:判 → 撤回 → 再判,三条记录俱在,合并结果是最后那一次
+      {
+        const before = F.accFbParse(readFileSync(jsonlP, 'utf8')).rows.length // 上一段那条坏行不算
+        const v1 = await mark({ pr: 277, item: 'JJ3', who: 'tester-c', verdict: 'ok' })
+        const v2 = await mark({ pr: 277, item: 'JJ3', who: 'tester-c', verdict: 'none' })
+        const v3 = await mark({ pr: 277, item: 'JJ3', who: 'tester-c', verdict: 'bad' })
+        ok(v2.status === 200 && v2.json.verdict === 'none',
+          'verdict:"none" 单独成一条就被收下(撤回本身就是内容,不必再搭一句备注)', `${v2.status} ${v2.text.slice(0, 120)}`)
+        ok((await mark({ pr: 277, item: 'JJ3', who: 'tester-c' })).status === 400,
+          '空 payload 照旧被拒(verdict / note / shot 至少要有一样 —— 这条门没被 none 放宽)')
+        const g = await req(srv.base, '/acceptance-feedback.jsonl')
+        const p = F.accFbParse(g.text)
+        ok(p.rows.length === before + 3 && v1.status === 200 && v3.status === 200,
+          '三条记录俱在:撤回是追加,不是抹(两个人同时验时看得见对方刚才判过)', `${before} → ${p.rows.length}`)
+        const e = F.accFbMerge(p.rows)['277' + String.fromCharCode(0) + 'JJ3']
+        ok(F.accFbLive(e, 2).verdicts['tester-c'] === 'bad' && F.accFbMineAt(e, 2, 'tester-c').v === 'bad',
+          '合并取最新:撤回之后再判,读回来就是最后那一次', JSON.stringify(F.accFbLive(e, 2).verdicts))
+        const only = await mark({ pr: 277, item: 'A"1', who: 'tester-c', verdict: 'none' })
+        ok(only.status === 200 && F.accFbLive(F.accFbMerge(F.accFbParse(only.text).rows)['277' + String.fromCharCode(0) + 'A"1'], 2).verdicts['tester-c'] === undefined,
+          '没判过就撤回:也收得下(账上多一条「我不再判它」),合并出来仍是未判', `${only.status} ${only.text.slice(0, 120)}`)
       }
       // 跨站门:别人的网页替你的浏览器来写,一行都不许落。
       // (排在最后:这一段自己也真写一行,不打扰上面那几条按行数点数的断言)

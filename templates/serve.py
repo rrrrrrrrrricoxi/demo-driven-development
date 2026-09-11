@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ddd-serve v2
+# ddd-serve v3
 # 看板静态服(零依赖,no-cache,线程化 + gzip)。
 #
 #   用法:  python3 app/kanban/serve.py [PORT]
@@ -22,6 +22,9 @@
 #   写盘走 O_APPEND 单次 write + fsync —— 两个人同时点也不会把对方的行截断。
 #   写口还有一道跨站门(Sec-Fetch-Site / Origin)+ mark 认死 application/json:信任边界是
 #   「连得到这个端口的人都能写」,但别人网页上的一行 fetch 不该算在这个边界里(见 README)。
+#
+# v0.17.1 判定即勾选:verdict 枚举多一个 "none"(撤回判定)—— 撤回不是删行,是再追加一条,
+#   两条都留着。账只增不删这条口径没变,别的校验、跨站门、截图规则一个字没动。
 
 import functools
 import gzip
@@ -278,8 +281,10 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         verdict = data.get("verdict")
         if verdict is None:
             verdict = ""
-        if verdict not in ("", "ok", "bad"):
-            raise Rejected("verdict 只能是 ok / bad(或省略)")
+        # "none" = 撤回判定(v0.17.1):不是删除,是再追加一条「我不再判它」。它本身就是一条内容,
+        # 所以下面那道「verdict / note / shot 至少要有一样」对它放行 —— 靠的就是它是个非空串。
+        if verdict not in ("", "ok", "bad", "none"):
+            raise Rejected("verdict 只能是 ok / bad / none(或省略)")
         note = data.get("note")
         note = "" if note is None else note
         if not isinstance(note, str):

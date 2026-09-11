@@ -839,10 +839,11 @@ if (ACC) {
   catch (e) { throw new Error(GS.accManifestMissing(e.message)) }
 }
 const accWarn = (msg) => console.warn(`[gen] ⚠ acceptance-manifest:${msg}`)
-// ———— 验收反馈共享(v0.17.0,config.acceptanceFeedback:布尔,默认关)————
-// 开 = 验收行长出「反馈 ▸」入口:勾/备注/截图经 serve.py 的两个追加口落 acceptance-feedback.jsonl,
-// 页面轮询同一份文件,两个人各自的浏览器上看见的是同一份账。gen 仍不读时钟、不联网:
-// 烤进产物的只有入口与那段运行时,数据一律运行期取。关(缺省)= 下面每个注入点都是空串,逐字节冻结。
+// ———— 验收反馈共享(v0.17.0;v0.17.1「判定即勾选」,config.acceptanceFeedback:布尔,默认关)————
+// 开 = 验收行左栏的勾选框换成 ✓ / ✕ 两枚判定钮:判定/备注/截图经 serve.py 的两个追加口落
+// acceptance-feedback.jsonl,页面轮询同一份文件,两个人各自的浏览器上看见的是同一份账。
+// 这一行的样子与所有计数跟着「我的判定」走(0.17.0 那只私有勾选框就此退场)。gen 仍不读时钟、不联网:
+// 烤进产物的只有控件与那段运行时,数据一律运行期取。关(缺省)= 下面每个注入点都是空串,逐字节冻结。
 const AFB = ACC && cfg.acceptanceFeedback === true
 if (cfg.acceptanceFeedback === true && !ACC) console.warn(`[gen] ⚠ ${GS.accFeedbackNeedsTab()}`)
 // 清单规整:pr 串(锚与 localStorage 键)、revision(改动即作废旧勾选)、分组/条目/数据块。
@@ -865,7 +866,8 @@ const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
     for (const k of it.data || []) if (!data[k]) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的数据块「${k}」`)
     return { ...it, id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
   })
-  return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [] }
+  // preSet:清单 result.checked 里的条目(v0.17.1 起在行上渲成只读的「已收」灰标,不计入谁的判定)
+  return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [], preSet: new Set((((l.result || {}).checked) || []).map(String)) }
 })
 { // 同一 PR 出现在两份清单 = 勾选进度会分家,提醒
   const owner = new Map()
@@ -2607,14 +2609,26 @@ const accItemHtml = (l, it) => {
   const rd = l.rounds.find((r) => String(r.id) === it.round)
   const tags = (it.key ? '<span class="acckey">核心</span>' : '') +
     (rd ? `<span class="acctag">${esc(rd.label || rd.id)}</span>` : '') +
-    (l.nums.length > 1 ? `<span class="acctag">#${it.pr}</span>` : '')
-  // 反馈入口:同行右端一枚灰钮,有反馈时钮面换成摘要(「✓ 甲 · ✕ 乙 · 2 图」,运行期填)。
+    (l.nums.length > 1 ? `<span class="acctag">#${it.pr}</span>` : '') +
+    // 既往已收(清单 result.checked):只读的灰标,不冒充谁的判定,也不进进度(v0.17.1)
+    (AFB && l.preSet.has(it.id) ? '<span class="accgot" title="这条在清单的 result 里收过账了(只读,不算进我的判定)">已收</span>' : '')
+  // 左栏判定(v0.17.1「判定即勾选」):✓ / ✕ 两枚钮,点一下即 POST,点已选的那枚 = 撤回。
+  // 关着时这里仍是 0.17.0 那只勾选框,一个字节不动。
+  const vd = !AFB ? `
+              <input type="checkbox" data-accck="${esc(it.id)}" aria-label="${esc(it.id)} 已试">` : `
+              <span class="accvd">
+                <button type="button" class="accv ok" data-accv="ok" aria-pressed="false" aria-label="${esc(it.id)} 通过" title="通过">✓</button>
+                <button type="button" class="accv bad" data-accv="bad" aria-pressed="false" aria-label="${esc(it.id)} 不对" title="不对(顺手写一句哪里不对)">✕</button>
+              </span>`
+  // 行末:摘要 chip(别人说过话才现,运行期填)+ 右下角常驻的「＋ 备注 / 图」。
   // 展开区不烤进产物 —— 一份清单几十上百条,每条烤一套表单是白搭的字节;点开时现建一个。
   const fb = !AFB ? '' : `
-              <button type="button" class="accfb" data-accfb="${esc(it.id)}" aria-expanded="false"><span class="accfbt">反馈 ▸</span></button>`
+              <div class="accfoot">
+                <button type="button" class="accfb" data-accfb="${esc(it.id)}" aria-expanded="false" hidden><span class="accfbt"></span></button>
+                <button type="button" class="accadd" data-accadd="${esc(it.id)}" aria-expanded="false">＋ 备注 / 图</button>
+              </div>`
   return `
-            <div class="accitem" data-accid="${esc(it.id)}" data-accpr="${it.pr}" data-accround="${esc(it.round)}"${!AFB ? '' : ` data-accrev="${l.rev}"`}>
-              <input type="checkbox" data-accck="${esc(it.id)}" aria-label="${esc(it.id)} 已试">
+            <div class="accitem" data-accid="${esc(it.id)}" data-accpr="${it.pr}" data-accround="${esc(it.round)}"${!AFB ? '' : ` data-accrev="${l.rev}"`}>${vd}
               <span class="accno">${esc(it.id)}</span>
               <div class="accib">
                 <p class="accit">${esc(it.title)}${tags}</p>
@@ -2668,9 +2682,9 @@ const accCurHtml = (() => {
     <div class="accenv">${row('地址', env.url ? `<a href="${esc(safeHref(env.url))}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
     </div>
     <div class="accprog" data-accprog="${esc(l.key)}">
-      <span class="acctxt">已试 <b class="accdone">0</b> / <span class="acctot">${l.items.length}</span></span>
+      <span class="acctxt">${!AFB ? '已试' : '已判'} <b class="accdone">0</b> / <span class="acctot">${l.items.length}</span>${!AFB ? '' : '<span class="accbadt"></span>'}</span>
       <span class="accbar"><i></i></span>
-      <button type="button" class="accbtn" data-acccopy="${esc(l.key)}">复制勾选结果</button>
+      <button type="button" class="accbtn" data-acccopy="${esc(l.key)}">${!AFB ? '复制勾选结果' : '复制结果'}</button>
     </div>${cards.length ? `
     <div class="accrel"><span class="acclbl">关联卡</span>${cards.map((c) => `<a class="acccard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}${c.st ? ` · ${esc(c.st)}` : ''}</a>`).join('')}</div>` : ''}${docs.length ? `
     <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(safeHref(d.href))}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
@@ -2681,19 +2695,22 @@ const accCurHtml = (() => {
 // 身份芯片(反馈共享开着时):「我是 甲 · 换人」。名字存这台浏览器,gen 期一个字都不知道。
 const ACC_ME_CHIP = !AFB ? '' : `
     <span class="accme" data-accme hidden><span class="accmen"></span><button type="button" class="accmeb" data-accwho>换人</button></span>`
-const ACC_FB_SESS = !AFB ? '' : ' · 反馈(✓/✕、备注、截图)经本机的 <code>serve.py</code> 共享给同看板的人'
+const ACC_FB_SESS = !AFB ? '' : ' · 判定(✓/✕)、备注与截图经本机的 <code>serve.py</code> 共享给同看板的人'
+// 无写口时那一行灰字(运行期才知道有没有写口,所以烤成 hidden,降级时才亮)
+const ACC_DEG = !AFB ? '' : `
+  <p class="accdeg" data-accdeg hidden>这台看板没有写口,判定只存在这台浏览器里 —— 要两人互见,请经 <code>serve.py</code>(0.17.0 起)打开。</p>`
 const acceptancePane = !ACC ? '' : `
   <div class="topbar">
     <h1>${esc(BRAND)} · 验收</h1>
-    <span class="sess">清单源 <code>acceptance-manifest.json</code> · 勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)${ACC_FB_SESS}</span>${ACC_ME_CHIP}
-  </div>${accCurHtml}${ACC_CUR ? accListHtml(ACC_CUR) : ''}${accQueueLists.length ? `
+    <span class="sess">清单源 <code>acceptance-manifest.json</code> · ${!AFB ? '勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定存 <code>acceptance-feedback.jsonl</code>(改 <code>revision</code> 即作废旧账)'}${ACC_FB_SESS}</span>${ACC_ME_CHIP}
+  </div>${ACC_DEG}${accCurHtml}${ACC_CUR ? accListHtml(ACC_CUR) : ''}${accQueueLists.length ? `
   <details class="accfold"><summary>排队中 <span class="mut">${accQueueLists.length} 份清单</span></summary>${accQueueLists.map(accListHtml).join('')}
   </details>` : ''}${accDoneLists.length ? `
   <details class="accfold"><summary>已验收 <span class="mut">${accDoneLists.length} 份清单${accDoneLists.some((l) => l.result && l.result.at) ? ` · 最近 ${esc(accDoneLists.map((l) => (l.result || {}).at || '').sort().pop())}` : ''}</span></summary>${accDoneLists.map(accListHtml).join('')}
   </details>` : ''}${accNoListPrs.length ? `
   <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(safeHref(p.u))}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
   </div>` : ''}
-  <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code> — 条目正文改完重跑生成;勾选进度只在这台浏览器,「复制勾选结果」产出的 JSON 贴回清单的 <code>result</code> 才进 git。</p>`
+  <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code> — 条目正文改完重跑生成;${!AFB ? '勾选进度只在这台浏览器,「复制勾选结果」产出的 JSON 贴回清单的 <code>result</code> 才进 git' : '判定与备注只增不删地记在 <code>acceptance-feedback.jsonl</code>(随 git 走),「复制结果」产出的 JSON 贴回清单的 <code>result</code> 才是收账'}。</p>`
 
 // ———— 验收:门控注入片(ACC 关时全为空串)————
 const ACC_TAB = !ACC ? '' : `\n    <button class="tab" data-pane="acceptance">验收${ACC_CUR ? ` · ${ACC_CUR.items.length}` : ''}</button>`
@@ -2724,44 +2741,75 @@ const PRCHIP_CSS = !HAS_PR ? '' : `
   .prchip { gap: 4px; font-weight: 600; text-decoration: none; color: var(--accent); background: var(--accent-soft); }
   .prchip:hover { color: var(--accent-deep); }
   .prchip .prst { font-weight: 400; color: var(--mut); }`
-// 反馈共享的样式(v0.17.0):安静在数据右侧,展开区整行铺开、不遮条目正文。
-// 关着时是空串,ACC_CSS 逐字节回到 0.16.2。
+// 反馈共享的样式(v0.17.0;v0.17.1 判定即勾选):左栏两枚判定钮,行末一排安静的入口,
+// 展开区整行铺开、不遮条目正文。关着时是空串,ACC_CSS 逐字节回到 0.16.2。
 const ACC_FB_CSS = !AFB ? '' : `
-  /* ---- 验收反馈共享(v0.17.0,config.acceptanceFeedback)---- */
-  .accitem { flex-wrap: wrap; } /* 展开区是行内第四个 flex 项,占满一行落在正文下面 */
-  /* 正文列改成从 0 起长:条目里嵌了宽表格(.accsc 那种)时,auto 基准会把入口挤到下一行去 ——
-     入口就该待在这一行的右端,而不是在数据下面另起一行。 */
+  /* ---- 验收反馈共享(v0.17.0;v0.17.1 起左栏就是判定)---- */
+  .accitem { flex-wrap: wrap; } /* 行末那排与展开区各占满一行,落在正文下面 */
+  /* 正文列改成从 0 起长:条目里嵌了宽表格(.accsc 那种)时,auto 基准会把右边那几件挤走 */
   .accitem > .accib { flex: 1 1 0; }
-  .accfb { flex: none; align-self: flex-start; appearance: none; font: inherit; font-size: 11px; line-height: 18px;
+  /* 左栏两枚判定钮(取代勾选框):未判是淡描边,判了是实心 */
+  .accvd { flex: none; display: flex; gap: 4px; padding-top: 1px; }
+  .accv { appearance: none; width: 23px; height: 23px; padding: 0; font: inherit; font-size: 12px; line-height: 21px;
+     text-align: center; border-radius: 6px; cursor: pointer; border: 1px solid var(--line-strong);
+     background: var(--card); color: var(--faint); }
+  .accv:hover { border-color: var(--accent); color: var(--accent); }
+  .accv.ok[aria-pressed="true"] { background: ${tk('ok-ink')}; border-color: ${tk('ok-ink')}; color: #fff; }
+  .accv.bad[aria-pressed="true"] { background: #d44c47; border-color: #d44c47; color: #fff; }
+  .accv.just { box-shadow: 0 0 0 3px ${tk('flash-glow')}; } /* 「已记下」那下微闪 */
+  /* ✓ = 变淡(沿用 .accitem.done);✕ = 不变淡,左缘一道红边,再补 1px 内缩以免正文横移 */
+  .accitem.bad { border-left: 2px solid #d44c47; padding-left: 11px; }
+  .accfoot { flex: 1 1 100%; display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; margin-top: 3px; }
+  .accjust { font-size: 11px; color: var(--mut); }
+  .accadd { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-size: 11px;
+     color: var(--faint); cursor: pointer; white-space: nowrap; }
+  .accadd:hover { color: var(--accent); }
+  .accgot { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 9.5px;
+     font-weight: 600; vertical-align: 1px; white-space: nowrap; background: ${tk('seg-bg')}; color: var(--faint); }
+  .accdeg { margin: 0 0 14px; font-size: 11.5px; line-height: 1.7; color: var(--faint); }
+  .accfb { flex: none; appearance: none; font: inherit; font-size: 11px; line-height: 18px;
      padding: 0 8px; border-radius: 99px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
-     color: var(--faint); white-space: nowrap; }
+     color: var(--mut); white-space: nowrap; }
   .accfb:hover { border-color: var(--accent); color: var(--accent); }
-  .accfb.has { color: var(--mut); border-color: var(--line-strong); background: ${tk('faint-bg')}; }
   .accfbx { flex: 1 1 100%; margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--line); }
-  .accfbf { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .accfbv, .accfbb { appearance: none; font: inherit; font-size: 11.5px; line-height: 20px; padding: 0 10px;
-     border-radius: 7px; cursor: pointer; border: 1px solid var(--line-strong); background: var(--card); color: var(--mut); }
-  .accfbv:hover, .accfbb:hover { border-color: var(--accent); color: var(--accent); }
-  .accfbv.on[data-accfbv="ok"] { color: ${tk('ok-ink')}; border-color: ${tk('ok-ink')}; font-weight: 600; }
-  .accfbv.on[data-accfbv="bad"] { color: #d44c47; border-color: #d44c47; font-weight: 600; }
-  .accfbb.send { color: var(--brand); border-color: var(--brand); }
-  .accfbn { flex: 1 1 220px; min-width: 140px; font: inherit; font-size: 12px; line-height: 20px; padding: 0 8px;
+  .accfbed { display: flex; align-items: center; gap: 6px; }
+  .accfbnw { position: relative; flex: 1 1 240px; min-width: 140px; display: flex; }
+  .accfbn { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; line-height: 20px; padding: 2px 64px 2px 8px;
      border: 1px solid var(--line-strong); border-radius: 7px; background: var(--card); color: var(--ink); }
-  .accfbm { margin: 6px 0 0; font-size: 11px; color: var(--faint); min-height: 14px; }
-  .accfbl { margin-top: 6px; }
+  /* 贴图提示只在输入框聚焦时出现在框内右缘 —— 常驻的话每行都在喊一句这会儿用不上的话 */
+  .accfbhint { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 10.5px;
+     color: var(--faint); pointer-events: none; opacity: 0; }
+  .accfbnw:focus-within .accfbhint { opacity: 1; }
+  .accfbclip { flex: none; appearance: none; border: 1px solid var(--line-strong); background: var(--card);
+     font: inherit; font-size: 12px; line-height: 20px; padding: 2px 8px; border-radius: 7px; cursor: pointer;
+     color: var(--mut); }
+  .accfbclip:hover { border-color: var(--accent); }
+  .accfbm { margin: 7px 0 0; font-size: 11px; color: var(--faint); }
+  .accfbm:empty { display: none; } /* 没话说时不占一行 */
+  .accfbl { margin-top: 7px; }
   .accfbr { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--mut);
      padding: 3px 0; line-height: 1.6; }
   .accfbr.stale { opacity: .55; }
-  .accfbr b { color: var(--ink); font-weight: 600; }
+  .accfbav { flex: none; align-self: center; width: 18px; height: 18px; border-radius: 99px; background: ${tk('seg-bg')};
+     color: var(--mut); font-size: 10px; line-height: 18px; text-align: center; }
   .accfbvd.ok { color: ${tk('ok-ink')}; }
   .accfbvd.bad { color: #d44c47; }
+  .accfbvd.none { font-size: 11px; color: var(--faint); }
   .accfbts { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
   .accfbnt { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
   .accfbst { font-size: 10.5px; font-style: normal; color: var(--faint); }
+  .accnav a.bad .accgc { color: #d44c47; } /* 这一组里有判「不对」的:计数不点绿 */
   .accfbe { margin: 4px 0 0; font-size: 11.5px; color: var(--faint); }
   /* 缩略图不跟着基线走:一张 76px 高的图去对齐文字基线,会把那行字压到图的底边上 */
-  .accfbimg { flex: none; display: block; align-self: flex-start; }
+  .accfbimg { flex: none; display: block; align-self: flex-start; appearance: none; border: 0; background: none;
+     padding: 0; cursor: zoom-in; }
   .accfbimg img { display: block; max-height: 76px; border: 1px solid var(--line); border-radius: 6px; }
+  /* 点缩略图就地放大:铺满视口的遮罩 + 居中原图(不再新开一个标签页) */
+  .accfbzoom { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
+     background: rgba(0, 0, 0, .62); }
+  .accfbzoom img { max-width: 92vw; max-height: 88vh; border-radius: 6px; }
+  .accfbzx { position: absolute; top: 12px; right: 16px; appearance: none; border: 0; background: none;
+     font-size: 24px; line-height: 1; color: #fff; cursor: pointer; }
   .accme { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--mut); }
   .accmeb { appearance: none; border: 0; background: none; font: inherit; font-size: 11px; padding: 0;
      color: var(--accent); cursor: pointer; }`
@@ -2861,7 +2909,8 @@ const ACC_CSS = !ACC ? '' : `
   .accnr { margin: 2px 0; font-size: 12px; color: var(--mut); }
   .accnr a { font-weight: 600; color: var(--accent); text-decoration: none; font-variant-numeric: tabular-nums; }
   @media (max-width: 820px) { .accwrap { grid-template-columns: 1fr; } .accnav { position: static; } }${ACC_FB_CSS}`
-// 运行期:勾选(localStorage)/ 筛选 / 进度 / 目录 / 复制 TSV / 复制勾选结果 / 卡头分子。
+// 运行期:勾选(localStorage;开了 acceptanceFeedback 就换成判定)/ 筛选 / 进度 / 目录 /
+// 复制 TSV / 复制结果 / 卡头分子。
 // 数据烤入,分子全在浏览器算(gen 零时间);<  逃逸照 LAZY_PANE_OF 做法。
 const accJson = (x) => JSON.stringify(x).replace(/</g, '\\u003c')
 // 总览「在验收」那行的迷你进度条:分子分母已由上面那圈算好写进 [data-acc],这里只把它换算成宽度 ——
@@ -2897,13 +2946,13 @@ const ACC_OPEN = !ACC ? '' : (!ACC_LAZY
     var __ad = JSON.parse(root.querySelector('#acc-data').textContent)
     var LISTS = __ad.LISTS, TSV = __ad.TSV, OF_PR = __ad.OF_PR`)
 const ACC_CLOSE = !ACC ? '' : (!ACC_LAZY ? `})();` : `}`)
-// ———— 验收反馈共享的运行时(v0.17.0)————
-// 真源是 serve.py 追加的 acceptance-feedback.jsonl:本地勾选与「复制勾选结果」一个字节都没动,
-// 这里只加「别人怎么说」。所有外来文本(备注 / 名字)一律 textContent 落地,截图名过与服务端同款的
+// ———— 验收反馈共享的运行时(v0.17.0;v0.17.1 判定即勾选)————
+// 真源是 serve.py 追加的 acceptance-feedback.jsonl:判定是这块账的一等公民(撤回也是追加一条,不抹),
+// 本机只在没有写口时兜一份判定。所有外来文本(备注 / 名字)一律 textContent 落地,截图名过与服务端同款的
 // 正则才敢拼进 src —— 这两条是这块代码唯一的安全承诺,别绕。关着时全为空串,ACC_JS 逐字节回 0.16.2。
 const ACC_FB_SYNC = !AFB ? '' : `; fbSync()`
 const ACC_FB_JS = !AFB ? '' : `
-    /* ======== 验收反馈共享(v0.17.0,config.acceptanceFeedback)======== */
+    /* ======== 验收反馈共享(v0.17.0;v0.17.1 判定即勾选)======== */
     /* ---- 纯函数区:测试从产物里原样抠出来跑,不必开浏览器 ---- */
     function accFbSlug(s) { return String(s == null ? '' : s).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 40) || '_' }
     function accFbShotOk(name, pr, item) { // 截图名只认服务端拼得出的那一种(与 serve.py 同一把尺)
@@ -2943,20 +2992,53 @@ const ACC_FB_JS = !AFB ? '' : `
         if (r.verdict === 'ok' || r.verdict === 'bad') {
           if (!(r.who in v.verdicts)) v.order.push(r.who) // 无原型对象:名字叫 __proto__ 也只是个普通键
           v.verdicts[r.who] = r.verdict
+        } else if (r.verdict === 'none' && (r.who in v.verdicts)) { // 撤回(v0.17.1):回到未判,不是删行
+          delete v.verdicts[r.who]
+          var i = v.order.indexOf(r.who)
+          if (i >= 0) v.order.splice(i, 1)
         }
         if (r.note) v.notes++
         if (r.shot) v.shots++
       })
       return v
     }
-    function accFbChip(e, rev) { // 入口摘要:「✓ 甲 · ✕ 乙 · 2 图」;没有反馈 = 空串(入口保持原样)
+    function accFbMineAt(e, rev, who) { // 我对这条目最后一次表态(含撤回):{ v, ts };v 为空串 = 未判
+      var out = { v: '', ts: '' }
+      if (!who) return out
+      var rows = (e && e.rows) || []
+      rows.forEach(function (r) {
+        if (accFbStale(r, rev) || String(r.who) !== String(who)) return
+        if (r.verdict === 'ok' || r.verdict === 'bad') out = { v: r.verdict, ts: String(r.ts || '') }
+        else if (r.verdict === 'none') out = { v: '', ts: String(r.ts || '') }
+      })
+      return out
+    }
+    function accFbPick(mine, local) { // 账上那条与本机那条(无写口时才有)取时刻新的;时刻同写法,可直接比
+      if (!local || !local.ts) return (mine && mine.v) || ''
+      if (!mine || !mine.ts) return local.v || ''
+      return (String(local.ts) > String(mine.ts) ? local.v : mine.v) || ''
+    }
+    function accFbAct(cur, want, since) { // 点下这一枚要写什么:'ok' / 'bad' / 'none'(撤回)/ ''(当没点)
+      if (cur !== want) return want        // 未判 → 判;✓ ↔ ✕ 直接互换,不经撤回
+      if (since < 400) return ''           // 刚点完那一下的回弹:400ms 内的第二下不算数(防误触双击)
+      return 'none'
+    }
+    function accFbSendable(nowrite, probed) { // 无写口那条路不发请求 —— 但每次开页留一次试探,写口回来了就自己接上
+      return !nowrite || !probed
+    }
+    function accFbNoWrite(status) { // 这个状态码是不是「这儿根本没有写口」(而不是这一笔不合格)
+      return status === 404 || status === 405 || status === 501
+    }
+    function accFbChip(e, rev, me) { // 行末摘要:「乙 ✕ · 1 图」;没人说过话 = 空串(那儿什么都不出现)
       var v = accFbLive(e, rev)
-      var parts = v.order.map(function (w) { return (v.verdicts[w] === 'ok' ? '✓ ' : '✕ ') + w })
+      var parts = v.order.filter(function (w) { return String(w) !== String(me == null ? '' : me) })
+        .map(function (w) { return w + ' ' + (v.verdicts[w] === 'ok' ? '✓' : '✕') }) // 我的判定左栏已经写着了,不重复
       if (v.notes) parts.push(v.notes + ' 备注')
       if (v.shots) parts.push(v.shots + ' 图')
       if (v.old) parts.push('旧清单 ' + v.old) // 陈述事实:改版前的账,不冒充「这条通过了」
       return parts.join(' · ')
     }
+    function accFbBadTail(k) { return k ? ' · 其中 ' + k + ' 条不对' : '' } // 进度那句的后半截
     function accFbTime(ts, now) { // jsonl 里记的是 UTC,读的人看自己的钟;不是今天就把日子说出来
       var d = new Date(String(ts == null ? '' : ts))
       if (isNaN(d.getTime())) return ''
@@ -2991,10 +3073,13 @@ const ACC_FB_JS = !AFB ? '' : `
       return '写不进去(' + status + ')'
     }
     /* ---- 运行期 ---- */
-    var FB = {}, FB_BAD = 0, FB_WHO = '', FB_STAGE = {}, fbPasteRow = null
+    var FB = {}, FB_BAD = 0, FB_WHO = '', FB_OPT = {}, FB_AT = {}, FB_LOC = {}, FB_NOWRITE = false, FB_PROBED = false, fbPasteRow = null
     var FB_WHO_KEY = '${LS_PREFIX}_acc_who'
+    var FB_NOWRITE_KEY = '${LS_PREFIX}_acc_nowrite'
     try { FB_WHO = localStorage.getItem(FB_WHO_KEY) || '' } catch (e) {}
+    try { FB_NOWRITE = localStorage.getItem(FB_NOWRITE_KEY) === '1' } catch (e) {}
     function fbKey(row) { return row.dataset.accpr + '\\u0000' + row.dataset.accid }
+    function fbListOf(row) { var s = row.closest('.acclist'); return s ? byKey[s.dataset.acck] : null }
     function fbEl(tag, cls, text) {
       var e = document.createElement(tag)
       if (tag === 'button') e.type = 'button'
@@ -3002,7 +3087,41 @@ const ACC_FB_JS = !AFB ? '' : `
       if (text != null) e.textContent = text
       return e
     }
-    function fbMsg(box, t) { var m = box.querySelector('.accfbm'); if (m) m.textContent = t || '' }
+    function fbErr(msg, nowrite) { var e = new Error(msg); e.nowrite = Boolean(nowrite); return e }
+    function fbNowTs() { return new Date().toISOString().replace(/\\.\\d+Z$/, 'Z') } // 与服务端同一种写法,好比新旧
+    /* ---- 无写口时的本机判定(v0.17.1 §6:控件形状不变,判定只落在这台浏览器)---- */
+    function fbVdKey(l) { return '${LS_PREFIX}_acc_v_' + l.k + '_r' + l.rev }
+    function fbLocal(l) {
+      if (FB_LOC[l.k]) return FB_LOC[l.k]
+      var v = null
+      try { var raw = localStorage.getItem(fbVdKey(l)); if (raw) v = JSON.parse(raw) } catch (e) {}
+      if (!v || typeof v !== 'object') v = {}
+      FB_LOC[l.k] = v
+      return v
+    }
+    function fbLocalSet(l, id, vd) {
+      var m = fbLocal(l)
+      m[id] = { v: vd || '', ts: fbNowTs() } // 撤回也记时刻:与账上那条比新旧要用得上
+      try { localStorage.setItem(fbVdKey(l), JSON.stringify(m)) } catch (e) {}
+    }
+    function fbVdOf(l, id, pr) { // 我对这条目的判定:'ok' / 'bad' / ''(乐观值 > 账上与本机里新的那条)
+      var k = pr + '\\u0000' + id
+      if (k in FB_OPT) return FB_OPT[k]
+      return accFbPick(accFbMineAt(FB[k], l.rev, FB_WHO), fbLocal(l)[id])
+    }
+    function fbVdRow(row) { var l = fbListOf(row); return l ? fbVdOf(l, row.dataset.accid, row.dataset.accpr) : '' }
+    function fbSendable() { return accFbSendable(FB_NOWRITE, FB_PROBED) }
+    function fbDegrade() { // 认清这台没有写口:记下来,tab 顶上那行灰字亮起来
+      if (!FB_NOWRITE) { FB_NOWRITE = true; try { localStorage.setItem(FB_NOWRITE_KEY, '1') } catch (e) {} }
+      fbDegLine()
+    }
+    function fbUpgrade() { // 写口又在了(换了新 serve.py / 开关拨回来):那行灰字自己收走
+      if (!FB_NOWRITE) return
+      FB_NOWRITE = false
+      try { localStorage.removeItem(FB_NOWRITE_KEY) } catch (e) {}
+      fbDegLine()
+    }
+    function fbDegLine() { var p = document.querySelector('[data-accdeg]'); if (p) p.hidden = !FB_NOWRITE }
     function fbWhoChip() {
       var chip = document.querySelector('[data-accme]')
       if (!chip) return
@@ -3010,7 +3129,7 @@ const ACC_FB_JS = !AFB ? '' : `
       chip.querySelector('.accmen').textContent = FB_WHO ? '我是 ' + FB_WHO : '未署名'
       chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'
     }
-    function fbAskWho() { // 第一次「记下」/「贴图」时问一次,之后记在这台浏览器里
+    function fbAskWho() { // 第一次判 / 写备注 / 贴图时问一次,之后记在这台浏览器里
       var v = window.prompt('我是(1–20 字,记进验收反馈里)', FB_WHO || '')
       if (v == null) return FB_WHO
       // 按码点切,不按 UTF-16 格:第 20 格正好落在一个 emoji 的代理对中间时,slice 会切出半个字,
@@ -3025,43 +3144,61 @@ const ACC_FB_JS = !AFB ? '' : `
     function fbFetch() {
       return fetch('acceptance-feedback.jsonl', { cache: 'no-store' })
         .then(function (r) { if (r.ok) return r.text(); if (r.status === 404) return ''; throw new Error(String(r.status)) })
-        .then(function (t) { var p = accFbParse(t); FB = accFbMerge(p.rows); FB_BAD = p.bad; fbSync() })
+        .then(function (t) { var p = accFbParse(t); FB = accFbMerge(p.rows); FB_BAD = p.bad; window.accSync() })
         .catch(function () {}) // 静默:验收进行中,弹一句「拉取失败」比缺一行更碍事,20s 后自己再来
     }
     function fbTick() {
       var p = document.getElementById('pane-acceptance')
       if (p && p.classList.contains('pane-active') && document.visibilityState !== 'hidden') fbFetch()
     }
-    function fbImg(name, cls) { // 缩略图一处拼:名字过了 accFbShotOk(或刚由服务端给回)才敢进 src
-      var a = fbEl('a', cls)
-      a.href = 'shots/' + name; a.target = '_blank'; a.rel = 'noopener'
+    function fbThumb(name) { // 缩略图一处拼:名字过了 accFbShotOk(或刚由服务端给回)才敢进 src
+      var b = fbEl('button', 'accfbimg')
+      b.dataset.accshot = name
+      b.title = '点开看大图'
       var im = document.createElement('img')
       im.src = 'shots/' + name; im.alt = name; im.loading = 'lazy'
-      a.appendChild(im)
-      return a
+      b.appendChild(im)
+      return b
     }
-    function fbThumb(box, name) { // 待提交的那张:换一张就顶掉前一张;不给名字 = 撤掉
-      var old = box.querySelector('.accfbtb')
-      if (old) old.remove()
-      if (name) box.querySelector('.accfbf').appendChild(fbImg(name, 'accfbimg accfbtb'))
+    function fbZoom(name, opener) { // 就地放大:铺满视口的遮罩 + 居中原图;点空白 / Esc / 关闭钮都能关
+      var ov = fbEl('div', 'accfbzoom')
+      var im = document.createElement('img')
+      im.src = 'shots/' + name; im.alt = name
+      var x = fbEl('button', 'accfbzx', '×')
+      x.setAttribute('aria-label', '关闭')
+      ov.append(im, x)
+      var onKey = function (ev) { if (ev.key === 'Escape') { ev.preventDefault(); close() } }
+      var close = function () {
+        document.removeEventListener('keydown', onKey)
+        ov.remove()
+        if (opener && document.body.contains(opener)) opener.focus() // 关了把焦点还给那张缩略图
+      }
+      ov.addEventListener('click', function (ev) { if (ev.target === ov || ev.target === x) close() })
+      document.addEventListener('keydown', onKey)
+      document.body.appendChild(ov)
+      x.focus()
     }
-    function fbBox(row) { // 展开区现建(点开才有):一份清单上百条,烤一百套表单是白搭的字节
+    function fbBox(row) { // 展开区现建(要用才有):一份清单上百条,烤一百套表单是白搭的字节
       var box = row.querySelector('.accfbx')
       if (box) return box
       box = fbEl('div', 'accfbx')
       box.hidden = true
-      var f = fbEl('div', 'accfbf')
-      var ok = fbEl('button', 'accfbv', '✓ 通过'); ok.dataset.accfbv = 'ok'
-      var bad = fbEl('button', 'accfbv', '✕ 不对'); bad.dataset.accfbv = 'bad'
+      var ed = fbEl('div', 'accfbed')
+      ed.hidden = true
+      var nw = fbEl('div', 'accfbnw')
       var note = document.createElement('input')
       note.type = 'text'; note.className = 'accfbn'; note.maxLength = 2000; note.placeholder = '一行备注(可留空)'
-      var paste = fbEl('button', 'accfbb', '贴图'); paste.dataset.accfbpaste = '1'
-      var pick = fbEl('button', 'accfbb', '选图'); pick.dataset.accfbpick = '1'
+      nw.append(note, fbEl('span', 'accfbhint', '⌘V 贴图'))
+      var clip = fbEl('button', 'accfbclip', '📎')
+      clip.dataset.accfbpick = '1'; clip.title = '选一张图(手机用)'; clip.setAttribute('aria-label', '选图')
       var file = document.createElement('input')
       file.type = 'file'; file.accept = 'image/*'; file.className = 'accfbfile'; file.hidden = true
-      var send = fbEl('button', 'accfbb send', '记下'); send.dataset.accfbsend = '1'
-      f.append(ok, bad, note, paste, pick, file, send)
-      box.append(f, fbEl('p', 'accfbm', ''), fbEl('div', 'accfbl'))
+      ed.append(nw, clip, file)
+      var list = fbEl('div', 'accfbl')
+      list.hidden = true
+      box.append(fbEl('p', 'accfbm', ''), ed, list)
+      note.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); fbNoteSave(row) } })
+      note.addEventListener('blur', function () { fbNoteSave(row) }) // 回车或失焦即存;空着离开不产生记录
       file.addEventListener('change', function () {
         if (file.files && file.files[0]) fbUpload(row, file.files[0])
         file.value = ''
@@ -3069,46 +3206,186 @@ const ACC_FB_JS = !AFB ? '' : `
       row.appendChild(box)
       return box
     }
-    function fbList(box, row) { // 该条目的全部反馈:备注一律 textContent 落地(外来正文不进 innerHTML)
-      var list = box.querySelector('.accfbl')
+    function fbSay(row, t) { // 一行原因 / 一句状态,落在该行下面
+      var box = t ? fbBox(row) : row.querySelector('.accfbx')
+      if (!box) return
+      var m = box.querySelector('.accfbm')
+      if (m) m.textContent = t || ''
+      fbOpen(row)
+    }
+    function fbOpen(row) { // 三块(原因 / 输入 / 时间线)都收着时,整个展开区一起收走
+      var box = row.querySelector('.accfbx')
+      if (!box) return
+      var m = box.querySelector('.accfbm'), ed = box.querySelector('.accfbed'), ls = box.querySelector('.accfbl')
+      box.hidden = !(m.textContent || !ed.hidden || !ls.hidden)
+    }
+    function fbEdit(row, open, ph) { // 备注输入:点开一行输入框并聚焦
+      var box = fbBox(row)
+      var ed = box.querySelector('.accfbed')
+      ed.hidden = !open
+      var add = row.querySelector('[data-accadd]')
+      if (add) add.setAttribute('aria-expanded', open ? 'true' : 'false')
+      if (open) {
+        var n = ed.querySelector('.accfbn')
+        n.placeholder = ph || '一行备注(可留空)'
+        fbPasteRow = row
+        n.focus()
+      } else if (fbPasteRow === row) fbPasteRow = null // 收起来就把贴图的指针交回去
+      fbOpen(row)
+    }
+    function fbTimeline(row, open) {
+      var box = fbBox(row)
+      var ls = box.querySelector('.accfbl')
+      ls.hidden = !open
+      var chip = row.querySelector('[data-accfb]')
+      if (chip) chip.setAttribute('aria-expanded', open ? 'true' : 'false')
+      if (open) { fbList(ls, row); fbFetch() }
+      fbOpen(row)
+    }
+    function fbList(list, row) { // 该条目的全部记录(含我自己的):备注一律 textContent 落地
       var e = FB[fbKey(row)]
       var rows = (e && e.rows) || []
-      list.textContent = ''
-      if (!rows.length) { list.appendChild(fbEl('p', 'accfbe', '还没有反馈')); return }
       var rev = Number(row.dataset.accrev || 0)
       // 「先记 ✕、查清楚了再记 ✓」是设计内的正常动作(不提供删除,改错就再追加)。
       // 两行长得一样时,读的人得先知道「后写覆盖先写」这条口径才敢判上面那条已经作废 ——
       // 把作废那几条自己说出来,别让第三个人靠猜。
       var latest = accFbLive(e, rev).verdicts
+      list.textContent = ''
       rows.forEach(function (r) {
         var stale = accFbStale(r, rev)
-        var beaten = !stale && (r.verdict === 'ok' || r.verdict === 'bad') && latest[r.who] && latest[r.who] !== r.verdict
-        var line = fbEl('div', 'accfbr' + (stale || beaten ? ' stale' : ''))
-        line.appendChild(fbEl('b', '', String(r.who)))
-        if (r.verdict === 'ok' || r.verdict === 'bad') line.appendChild(fbEl('span', 'accfbvd ' + r.verdict, r.verdict === 'ok' ? '✓' : '✕'))
+        var none = r.verdict === 'none'
+        var beaten = !stale && !none && (r.verdict === 'ok' || r.verdict === 'bad') && latest[r.who] !== r.verdict
+        var line = fbEl('div', 'accfbr' + (stale || beaten || none ? ' stale' : '')) // 撤回记录用淡色
+        var av = fbEl('span', 'accfbav', Array.from(String(r.who))[0] || '?')
+        av.title = String(r.who)
+        line.appendChild(av)
+        if (none) line.appendChild(fbEl('span', 'accfbvd none', '撤回判定'))
+        else if (r.verdict === 'ok' || r.verdict === 'bad') line.appendChild(fbEl('span', 'accfbvd ' + r.verdict, r.verdict === 'ok' ? '✓' : '✕'))
         var t = accFbTime(r.ts)
         if (t) line.appendChild(fbEl('span', 'accfbts', t))
         if (r.note) line.appendChild(fbEl('span', 'accfbnt', String(r.note)))
         if (stale) line.appendChild(fbEl('i', 'accfbst', '清单已改(rev ' + r.rev + ')'))
-        else if (beaten) line.appendChild(fbEl('i', 'accfbst', '后来改成 ' + (latest[r.who] === 'ok' ? '✓' : '✕')))
-        if (r.shot && accFbShotOk(r.shot, row.dataset.accpr, row.dataset.accid)) line.appendChild(fbImg(String(r.shot), 'accfbimg'))
+        else if (beaten) line.appendChild(fbEl('i', 'accfbst', latest[r.who] ? ('后来改成 ' + (latest[r.who] === 'ok' ? '✓' : '✕')) : '后来撤回了'))
+        if (r.shot && accFbShotOk(r.shot, row.dataset.accpr, row.dataset.accid)) line.appendChild(fbThumb(String(r.shot)))
         list.appendChild(line)
       })
+      var l = fbListOf(row), loc = l ? fbLocal(l)[row.dataset.accid] : null
+      if (loc && loc.ts && loc.v) { // 无写口时判的那条:它不在账上,但确实是我按的 —— 说清它只在这台
+        var ln = fbEl('div', 'accfbr')
+        ln.appendChild(fbEl('span', 'accfbav', Array.from(String(FB_WHO || '我'))[0]))
+        ln.appendChild(fbEl('span', 'accfbvd ' + loc.v, loc.v === 'ok' ? '✓' : '✕'))
+        var lt = accFbTime(loc.ts)
+        if (lt) ln.appendChild(fbEl('span', 'accfbts', lt))
+        ln.appendChild(fbEl('i', 'accfbst', '只在这台浏览器'))
+        list.appendChild(ln)
+      }
       if (FB_BAD) list.appendChild(fbEl('p', 'accfbe', FB_BAD + ' 行读不懂,已跳过'))
     }
-    function fbSync() { // 入口摘要 + 展开着的那几行;accSync 每次都顺手带上它
+    function fbPaint(row, vd) { // 这一行的样子:✓ 变淡 / ✕ 左缘红边 / 未判常态
+      row.classList.toggle('done', vd === 'ok')
+      row.classList.toggle('bad', vd === 'bad')
+      row.querySelectorAll('[data-accv]').forEach(function (b) {
+        b.setAttribute('aria-pressed', b.dataset.accv === vd ? 'true' : 'false')
+      })
+    }
+    function fbFlash(row, vd) { // 「已记下」微闪 ~900ms
+      var foot = row.querySelector('.accfoot')
+      if (!foot) return
+      var f = foot.querySelector('.accjust')
+      if (!f) { f = fbEl('span', 'accjust', ''); foot.insertBefore(f, foot.firstChild) }
+      f.textContent = vd ? '已记下' : '已撤回'
+      f.hidden = false
+      clearTimeout(f.fbT)
+      f.fbT = setTimeout(function () { f.hidden = true }, 900)
+      var b = vd ? row.querySelector('[data-accv="' + vd + '"]') : null
+      if (!b) return
+      b.classList.add('just')
+      setTimeout(function () { b.classList.remove('just') }, 900)
+    }
+    function fbSync() { // 行末摘要 + 展开着的那几条时间线;accSync 每次都顺手带上它
       var pane = document.getElementById('pane-acceptance')
       if (!pane) return
       fbWhoChip()
+      fbDegLine()
       pane.querySelectorAll('.accitem').forEach(function (row) {
         var t = row.querySelector('.accfbt')
         if (t) {
-          var txt = accFbChip(FB[fbKey(row)], Number(row.dataset.accrev || 0))
-          t.textContent = txt || '反馈 ▸'
-          t.parentElement.classList.toggle('has', Boolean(txt))
+          var txt = accFbChip(FB[fbKey(row)], Number(row.dataset.accrev || 0), FB_WHO)
+          t.textContent = txt
+          t.parentElement.hidden = !txt // 没人说过话时那儿什么都没有
         }
-        var box = row.querySelector('.accfbx')
-        if (box && !box.hidden) fbList(box, row)
+        var ls = row.querySelector('.accfbl')
+        if (ls && !ls.hidden) fbList(ls, row)
+      })
+    }
+    function fbMark(row, body) { // 三条路(判定 / 备注 / 图)共用的一次写:成功即并进本地视图
+      body.pr = Number(row.dataset.accpr); body.item = row.dataset.accid
+      FB_PROBED = true
+      return fetch('api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) {
+          return r.text().then(function (t) {
+            if (!r.ok) throw fbErr(fbHttpMsg(r.status, t), accFbNoWrite(r.status))
+            fbUpgrade()
+            var j = fbJson(t)
+            if (j && j.item != null) { var k = fbKey(row), e = FB[k] || (FB[k] = { rows: [] }); e.rows.push(j) }
+            return j
+          })
+        }, function () { // fetch 自己挂了(没有服务、断网):当没有写口,判定落本机不丢
+          throw fbErr('连不上写口 —— 看板要经 serve.py(v0.17.0 起的那版)打开才有写口', true)
+        })
+    }
+    function fbKeepLocal(l, row, k, vd) { // 无写口:判定存这台浏览器,颜色不回滚
+      fbLocalSet(l, row.dataset.accid, vd)
+      delete FB_OPT[k]
+      fbFlash(row, vd)
+      window.accSync()
+    }
+    function fbVerdict(row, want) { // 点一下即存:乐观上色 → POST → 失败回滚并在行下出一行原因
+      var l = fbListOf(row)
+      if (!l) return
+      var k = fbKey(row), act = accFbAct(fbVdOf(l, row.dataset.accid, row.dataset.accpr), want, Date.now() - (FB_AT[k] || 0))
+      if (!act) return // 400ms 内的第二下:防误触,当没点
+      var who = FB_WHO || fbAskWho()
+      if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
+      FB_AT[k] = Date.now()
+      var vd = act === 'none' ? '' : act
+      FB_OPT[k] = vd
+      fbPaint(row, vd)
+      fbSay(row, '')
+      if (act === 'bad') fbEdit(row, true, '哪里不对?(可留空)') // 判「不对」自动展开并聚焦
+      if (!fbSendable()) { fbKeepLocal(l, row, k, vd); return }
+      fbMark(row, { who: who, verdict: act }).then(function () {
+        delete FB_OPT[k]
+        fbFlash(row, vd)
+        window.accSync()
+        fbFetch()
+      }, function (e) {
+        if (e && e.nowrite) { fbDegrade(); fbKeepLocal(l, row, k, vd); return }
+        delete FB_OPT[k]
+        window.accSync() // 回滚:重画成账上原来的样子
+        fbSay(row, String((e && e.message) || e))
+      })
+    }
+    function fbNoteSave(row) { // 回车或失焦即存;空着不产生记录
+      var box = row.querySelector('.accfbx')
+      if (!box) return
+      var n = box.querySelector('.accfbn')
+      var note = n.value.trim()
+      if (!note) return
+      var who = FB_WHO || fbAskWho()
+      if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
+      n.value = '' // 先清空:回车存过一次,随后的失焦就不会再存一遍
+      if (!fbSendable()) { fbSay(row, '这台看板没有写口,备注存不下来 —— 判定还在这台浏览器里'); return }
+      fbSay(row, '记下中…')
+      fbMark(row, { who: who, note: note }).then(function () {
+        fbSay(row, '')
+        fbTimeline(row, true) // 存进去了就让人当场看见
+        window.accSync()
+        fbFetch()
+      }, function (e) {
+        if (e && e.nowrite) fbDegrade()
+        n.value = note // 没写进去,把那句话还给人,别让它凭空消失
+        fbSay(row, String((e && e.message) || e))
       })
     }
     function fbShrink(file) { // 上传前压:长边 ≤ 1280、JPEG 0.8 —— 手机直出那种 4MB 图也进得来
@@ -3128,92 +3405,69 @@ const ACC_FB_JS = !AFB ? '' : `
         img.src = url
       })
     }
-    function fbUpload(row, file) {
-      var box = fbBox(row)
+    function fbUpload(row, file) { // 上传成功即存,不等别的动作
       var who = FB_WHO || fbAskWho()
-      if (!who) { fbMsg(box, '先署个名(1–20 字)'); return }
-      fbMsg(box, '压缩中…')
+      if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
+      if (!fbSendable()) { fbSay(row, '这台看板没有写口,图传不上去 —— 判定还在这台浏览器里'); return }
+      fbSay(row, '压缩中…')
       fbShrink(file).then(function (blob) {
-        fbMsg(box, '上传中…')
+        fbSay(row, '上传中…')
         return fetch('api/acceptance/shot?pr=' + encodeURIComponent(row.dataset.accpr) +
           '&item=' + encodeURIComponent(row.dataset.accid) + '&who=' + encodeURIComponent(who),
           { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
       }).then(function (r) {
         return r.text().then(function (t) {
-          if (!r.ok) throw new Error(fbHttpMsg(r.status, t))
+          if (!r.ok) throw fbErr(fbHttpMsg(r.status, t), accFbNoWrite(r.status))
           var j = fbJson(t)
-          if (!j || !accFbShotOk(j.shot, row.dataset.accpr, row.dataset.accid)) throw new Error('服务端回的文件名不认得,这张先不挂')
+          if (!j || !accFbShotOk(j.shot, row.dataset.accpr, row.dataset.accid)) throw fbErr('服务端回的文件名不认得,这张先不挂')
           return j.shot
         })
       }).then(function (name) {
-        FB_STAGE[fbKey(row)] = name
-        fbThumb(box, name)
-        fbMsg(box, '图已上传 —— 点「记下」才进账')
-      }).catch(function (e) { fbMsg(box, String((e && e.message) || e)) })
-    }
-    function fbSend(row) {
-      var box = fbBox(row)
-      var who = FB_WHO || fbAskWho()
-      if (!who) { fbMsg(box, '先署个名(1–20 字)'); return }
-      var v = box.querySelector('.accfbv.on')
-      var note = box.querySelector('.accfbn').value.trim()
-      var shot = FB_STAGE[fbKey(row)] || ''
-      if (!v && !note && !shot) { fbMsg(box, '选 ✓ / ✕、写句备注、或贴张图,至少一样'); return }
-      var body = { pr: Number(row.dataset.accpr), item: row.dataset.accid, who: who }
-      if (v) body.verdict = v.dataset.accfbv
-      if (note) body.note = note
-      if (shot) body.shot = shot
-      fbMsg(box, '记下中…')
-      fetch('api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-        .then(function (r) { return r.text().then(function (t) {
-          if (!r.ok) { fbMsg(box, fbHttpMsg(r.status, t)); return }
-          delete FB_STAGE[fbKey(row)]
-          box.querySelector('.accfbn').value = ''
-          box.querySelectorAll('.accfbv.on').forEach(function (b) { b.classList.remove('on') })
-          fbThumb(box, '') // 待提交的那张已经进账,撤掉
-          fbMsg(box, '已记下')
-          fbFetch()
-        }) })
-        .catch(function () { fbMsg(box, '写不进去 —— 看板要经 serve.py(v0.17.0 起的那版)打开才有写口') })
+        return fbMark(row, { who: who, shot: name })
+      }).then(function () {
+        fbSay(row, '')
+        fbTimeline(row, true)
+        window.accSync()
+        fbFetch()
+      }).catch(function (e) {
+        if (e && e.nowrite) fbDegrade()
+        fbSay(row, String((e && e.message) || e))
+      })
     }
     if (pane) {
       pane.addEventListener('click', function (ev) {
         var t = ev.target
         if (!t || !t.closest) return
-        // 多个展开区同开时,贴图落在「最后碰过的那个」上:点备注框、点 ✓✕、点贴图都算碰过
+        // 多个展开区同开时,贴图落在「最后碰过的那个」上:点备注框、点判定、点入口都算碰过
         var inBox = t.closest('.accfbx')
         if (inBox) { var ir = inBox.closest('.accitem'); if (ir) fbPasteRow = ir }
+        var vb = t.closest('[data-accv]')
+        if (vb) { fbVerdict(vb.closest('.accitem'), vb.dataset.accv); return }
         var entry = t.closest('[data-accfb]')
         if (entry) {
-          var row = entry.closest('.accitem')
-          var box = fbBox(row)
-          box.hidden = !box.hidden
-          entry.setAttribute('aria-expanded', box.hidden ? 'false' : 'true')
-          if (!box.hidden) { fbList(box, row); fbPasteRow = row; fbFetch() }
-          else if (fbPasteRow === row) fbPasteRow = null // 收起来就把指针交回去,别让图落到看不见的行上
+          var erow = entry.closest('.accitem')
+          fbTimeline(erow, erow.querySelector('.accfbl') ? erow.querySelector('.accfbl').hidden : true)
           return
         }
-        var v = t.closest('[data-accfbv]')
-        if (v) { // 二选一,再点一下取消(只留备注或图也是合法的一条)
-          var was = v.classList.contains('on')
-          v.parentElement.querySelectorAll('[data-accfbv]').forEach(function (b) { b.classList.remove('on') })
-          if (!was) v.classList.add('on')
+        var add = t.closest('[data-accadd]')
+        if (add) {
+          var arow = add.closest('.accitem')
+          var abox = arow.querySelector('.accfbx')
+          fbEdit(arow, !abox || abox.querySelector('.accfbed').hidden)
           return
         }
-        var ps = t.closest('[data-accfbpaste]')
-        if (ps) { fbMsg(fbBox(ps.closest('.accitem')), '按 ⌘V / Ctrl+V 贴图(手机用「选图」)'); return } // 指针上面那句已经落好
+        var sh = t.closest('[data-accshot]')
+        if (sh) { fbZoom(sh.dataset.accshot, sh); return }
         var pk = t.closest('[data-accfbpick]')
         if (pk) { pk.closest('.accitem').querySelector('.accfbfile').click(); return }
-        var sd = t.closest('[data-accfbsend]')
-        if (sd) { fbSend(sd.closest('.accitem')); return }
         if (t.closest('[data-accwho]')) fbAskWho()
       })
-      document.addEventListener('paste', function (ev) { // 展开区开着才接剪贴板里的图
+      document.addEventListener('paste', function (ev) { // 备注框开着才接剪贴板里的图
         // 行永远在 DOM 里(gen 期就烤好了,筛选只是隐藏),所以「还在页面上」这条判断从来不为假 ——
         // 真正的问题是那个框还开着没有:收起来了还接,图照传照落盘,而「图已上传」那句写进一个
         // 看不见的框里,人只会以为按了没反应,再贴一次、再多一张孤儿图。
         if (!fbPasteRow || !document.body.contains(fbPasteRow)) return
-        var pbox = fbPasteRow.querySelector('.accfbx')
+        var pbox = fbPasteRow.querySelector('.accfbed')
         if (!pbox || pbox.hidden) return
         var tgt = ev.target
         var f = accFbPasteFile(ev.clipboardData, Boolean(tgt && tgt.closest && tgt.closest('input, textarea, [contenteditable]')))
@@ -3227,7 +3481,7 @@ const ACC_FB_JS = !AFB ? '' : `
     }`
 const ACC_JS = !ACC ? '' : `
   ${ACC_OPEN}
-    var byKey = {}, ck = {}, view = {}
+    var byKey = {}, ${!AFB ? 'ck = {}, ' : ''}view = {}${!AFB ? `
     function lsKey(l) { return '${LS_PREFIX}_acc_' + l.k + '_r' + l.rev }
     function load(l) {
       var v = null
@@ -3239,7 +3493,9 @@ const ACC_JS = !ACC ? '' : `
       }
       return v
     }
-    function save(l, v) { try { localStorage.setItem(lsKey(l), JSON.stringify(v)) } catch (e) {} }
+    function save(l, v) { try { localStorage.setItem(lsKey(l), JSON.stringify(v)) } catch (e) {} }` : `
+    // v0.17.1:本机旧勾选键 <brand>_acc_<pr>_r<rev> 是私有痕迹,读到即忽略、不再写、不转成判定
+    // (转过去等于替人署名发布);既往 result.checked 在行上渲成只读的「已收」灰标,不计入判定。`}
     function visible(l, it) {
       var w = view[l.k]
       return (w.round === 'all' || it.rd === w.round) && (w.pr === 'all' || String(it.pr) === w.pr)
@@ -3268,31 +3524,33 @@ const ACC_JS = !ACC ? '' : `
       // querySelector 当场抛 —— 验收与发布进度共用一个 <script>,一抛后面整块都不跑了。
       var rowsById = new Map()
       sec.querySelectorAll('[data-accid]').forEach(function (r) { rowsById.set(r.dataset.accid, r) })
-      var mine = ck[l.k], vt = 0, vd = 0, gc = {}
+      var ${!AFB ? 'mine = ck[l.k], ' : ''}vt = 0, vd = 0, ${!AFB ? '' : 'vb = 0, '}gc = {}
       l.items.forEach(function (it) {
-        var on = Boolean(mine[it.id]), shown = visible(l, it)
+        var ${!AFB ? 'on = Boolean(mine[it.id])' : "v = fbVdOf(l, it.id, it.pr), on = v === 'ok', bd = v === 'bad', jd = on || bd"}, shown = visible(l, it)
         var row = rowsById.get(it.id)
         if (row) {
           row.style.display = shown ? '' : 'none'
-          row.classList.toggle('done', on)
+          ${!AFB ? `row.classList.toggle('done', on)
           var box = row.querySelector('input')
-          if (box) box.checked = on
+          if (box) box.checked = on` : 'fbPaint(row, v)'}
         }
-        if (shown) { vt++; if (on) vd++ }
-        gc[it.g] = gc[it.g] || { t: 0, d: 0, v: 0 }
-        gc[it.g].t++; if (on) gc[it.g].d++; if (shown) gc[it.g].v++
+        if (shown) { vt++; if (${!AFB ? 'on' : 'jd'}) vd++${!AFB ? '' : '; if (bd) vb++'} }
+        gc[it.g] = gc[it.g] || { t: 0, d: 0, v: 0${!AFB ? '' : ', b: 0'} }
+        gc[it.g].t++; if (${!AFB ? 'on' : 'jd'}) gc[it.g].d++; if (shown) gc[it.g].v++${!AFB ? '' : '; if (bd) gc[it.g].b++'}
       })
       sec.querySelectorAll('.accgrp').forEach(function (g) { g.style.display = (gc[g.dataset.accg] || {}).v ? '' : 'none' })
       sec.querySelectorAll('[data-accgl]').forEach(function (a) {
-        var c = gc[a.dataset.accgl] || { t: 0, d: 0, v: 0 }
+        var c = gc[a.dataset.accgl] || { t: 0, d: 0, v: 0${!AFB ? '' : ', b: 0'} }
         var n = a.querySelector('.accgc'); if (n) n.textContent = c.d + '/' + c.t
-        a.classList.toggle('done', c.t > 0 && c.d === c.t)
+        a.classList.toggle('done', c.t > 0 && c.d === c.t${!AFB ? '' : ' && !c.b'})${!AFB ? '' : `
+        a.classList.toggle('bad', c.b > 0) // 这一组里有判「不对」的:计数不点绿,免得「全判完」读成「全通过」`}
         a.style.display = c.v ? '' : 'none'
       })
       var p = document.querySelector('[data-accprog="' + l.k + '"]')
-      if (p) { // 进度 = 当前筛选可见条目里的已勾数(筛了轮次就只算那一轮)
+      if (p) { // 进度 = 当前筛选可见条目里${!AFB ? '的已勾数' : '我判过的条数'}(筛了轮次就只算那一轮)
         p.querySelector('.accdone').textContent = vd
-        p.querySelector('.acctot').textContent = vt
+        p.querySelector('.acctot').textContent = vt${!AFB ? '' : `
+        p.querySelector('.accbadt').textContent = accFbBadTail(vb)`}
         p.querySelector('.accbar i').style.width = (vt ? vd / vt * 100 : 0) + '%'
       }
     }
@@ -3300,8 +3558,8 @@ const ACC_JS = !ACC ? '' : `
       document.querySelectorAll('[data-acc]').forEach(function (s) {
         var l = byKey[OF_PR[s.dataset.acc]]
         if (!l) return
-        var mine = ck[l.k], d = 0
-        l.items.forEach(function (it) { if (mine[it.id]) d++ })
+        var ${!AFB ? 'mine = ck[l.k], ' : ''}d = 0
+        l.items.forEach(function (it) { if (${!AFB ? 'mine[it.id]' : 'fbVdOf(l, it.id, it.pr)'}) d++ })
         s.textContent = d + '/' + l.items.length
       })${OV_ACC_BAR}
     }
@@ -3333,13 +3591,19 @@ const ACC_JS = !ACC ? '' : `
         if (t) { copyText(TSV[t.closest('.acclist').dataset.acck][t.dataset.acctsv], t); return }
         var c = ev.target.closest('[data-acccopy]')
         if (c) {
-          var cl = byKey[c.dataset.acccopy], mine = ck[cl.k]
-          var checked = cl.items.filter(function (it) { return mine[it.id] }).map(function (it) { return it.id })
+          var cl = byKey[c.dataset.acccopy]${!AFB ? ', mine = ck[cl.k]' : ''}
+          ${!AFB ? `var checked = cl.items.filter(function (it) { return mine[it.id] }).map(function (it) { return it.id })` : `// checked 键保持原形(贴回 manifest result 的老路不断),不对的另起一个 bad
+          var checked = [], bad = []
+          cl.items.forEach(function (it) {
+            var v = fbVdOf(cl, it.id, it.pr)
+            if (v === 'ok') checked.push(it.id)
+            else if (v === 'bad') bad.push(it.id)
+          })`}
           var d = new Date()
           var at = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
-          copyText(JSON.stringify({ checked: checked, at: at }), c, '已复制 · 贴回清单的 result')
+          copyText(JSON.stringify({ checked: checked, ${!AFB ? '' : 'bad: bad, '}at: at }), c, '已复制 · 贴回清单的 result')
         }
-      })
+      })${!AFB ? `
       pane.addEventListener('change', function (ev) {
         var box = ev.target.closest('[data-accck]')
         if (!box) return
@@ -3347,7 +3611,7 @@ const ACC_JS = !ACC ? '' : `
         if (box.checked) ck[l.k][box.dataset.accck] = true
         else delete ck[l.k][box.dataset.accck]
         save(l, ck[l.k]); syncList(l); syncChips()
-      })
+      })` : ''}
     }${ACC_FB_JS}
     function accRoute() { // #acc-230 深链:目标可能折在 <details> 里,先展开再滚
       var id = decodeURIComponent(location.hash.slice(1))
@@ -3358,7 +3622,7 @@ const ACC_JS = !ACC ? '' : `
       window.accSync()
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
-    LISTS.forEach(function (l) { byKey[l.k] = l; ck[l.k] = load(l); view[l.k] = { round: 'all', pr: 'all' } })
+    LISTS.forEach(function (l) { byKey[l.k] = l; ${!AFB ? 'ck[l.k] = load(l); ' : ''}view[l.k] = { round: 'all', pr: 'all' } })
     window.addEventListener('scroll', spy, { passive: true })
     window.addEventListener('hashchange', accRoute)
     window.accSync()

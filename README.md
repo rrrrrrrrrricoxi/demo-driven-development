@@ -110,9 +110,10 @@ per pull request (or per group of them), with the environment under test, items
 built from *what to do / what to expect / what is wrong / why*, data blocks
 rendered as tables and copyable as TSV, and round and pull-request filters.
 Ticks live in `localStorage`, keyed by the checklist's `revision` — bump it and
-the previous round's ticks retire. A "copy result" button produces the JSON to
-paste back into the manifest's `result`, so a finished round of acceptance lands
-in git instead of in one browser. Cards whose pull request has a checklist gain a
+the previous round's ticks retire (switch on `acceptanceFeedback`, below, and
+the tick becomes a shared ✓ / ✕ verdict instead). A "copy result" button produces
+the JSON to paste back into the manifest's `result`, so a finished round of
+acceptance lands in git instead of in one browser. Cards whose pull request has a checklist gain a
 link to it and a live `n/N` counter. Left unset, output is byte-identical to a
 board without the feature; turning it on without the manifest is a hard error.
 
@@ -121,14 +122,28 @@ board without the feature; turning it on without the manifest is a hard error.
 A static board keeps every tick in the browser that made it, which is fine while
 one person is testing and useless the moment two are: the other tester's ticks,
 their notes and their screenshots live somewhere you cannot see. Set
-`config.acceptanceFeedback` to `true` (on top of `acceptanceTab`) and every
-checklist row grows a quiet **反馈 ▸** entry on its right. Open it inline and you
-can mark the row ✓ / ✕, leave one line of notes, and paste or pick a screenshot;
-"记下" posts it. Once there is feedback the entry itself becomes the summary —
-`✓ 甲 · ✕ 乙 · 2 图` — and the expanded row lists every mark underneath,
-thumbnails included. Testers name themselves once (stored as
-`<brand>_acc_who` in that browser) and the tab header carries a `我是 … · 换人`
-chip.
+`config.acceptanceFeedback` to `true` (on top of `acceptanceTab`) and the
+checkbox at the left of every checklist row is replaced by the verdict itself:
+two quiet **✓ / ✕** buttons. One click posts it and colours the row optimistically
+(a failure rolls the colour back and prints the reason under that row); ✓ fades
+the row, ✕ leaves it at full strength with a red left edge. Clicking the button
+that is already on retracts the verdict — an appended `verdict: "none"` record,
+not an erasure, so the other tester never sees a mark quietly vanish (a second
+click within 400ms is ignored, and ✓ ↔ ✕ swap directly without a retraction).
+The progress line and the group counts follow **my** verdicts:
+`已判 N / M · 其中 K 条不对`.
+
+Each row also carries a quiet `＋ 备注 / 图` at its bottom right — always there,
+not on hover. It opens one focused input: Enter or blur saves it, leaving it
+empty records nothing, and judging ✕ opens it automatically asking 哪里不对?.
+The paste hint sits inside the right edge of that input while it has focus, the
+paperclip opens a file picker for phones, and an uploaded image records itself
+immediately. A summary chip appears at the end of the row only when somebody
+else has spoken (`乙 ✕ · 1 图`); opening it lists every record for that item,
+mine included, one line each — an initial-dot, ✓ / ✕, the time, the note and the
+thumbnail, which opens in place over a dimmed viewport rather than in a new tab.
+Testers name themselves once (stored as `<brand>_acc_who` in that browser) and
+the tab header carries a `我是 … · 换人` chip.
 
 The shared source of truth is `app/kanban/acceptance-feedback.jsonl`, one JSON
 object per line, written by two append-only `POST` endpoints in the bundled
@@ -140,13 +155,25 @@ same (person, item) verdict; notes and screenshots accumulate; a malformed line
 is skipped and counted, never fatal. Bump a checklist's `revision` and the older
 marks stay visible but stop counting: the expanded row greys them with
 「清单已改(rev N)」 and the summary reports them as `旧清单 N`, so a ✓ from
-before the rewrite never reads as a ✓ on the text that replaced it. Local ticks and the "copy result" button are
-untouched — they remain your own progress; this only adds what other people said.
+before the rewrite never reads as a ✓ on the text that replaced it. The
+`复制结果` button reads your verdicts and emits
+`{"checked":[…], "bad":[…], "at":"…"}` — the `checked` key keeps its shape, so
+pasting it back into the checklist's `result` still works, and items already in
+that `result` show a read-only 已收 tag instead of pretending to be somebody's
+verdict. The private tick key from 0.17.0 (`<brand>_acc_<pr>_r<rev>`) is ignored
+and never written again: it recorded what one person had tried, and promoting it
+to a published verdict would sign their name to a claim they never made.
+
+Without a write endpoint — a `serve.py` older than 0.17.0, or a plain static
+server — the controls keep their shape and behaviour, the verdict is stored in
+`<brand>_acc_v_<pr>_r<rev>` in that browser, and a grey line at the top of the
+tab says exactly that. Each page load still probes once, so the board reconnects
+itself as soon as the endpoint is there.
 
 Everything is validated server-side even though the board is on a trusted
 network: the pull request must be in the checklist, the item must belong to it,
-`who` is 1–20 characters with no control characters, `verdict` is `ok` / `bad` or
-absent, `note` caps at 2000 characters, an upload must be JPEG or PNG by magic
+`who` is 1–20 characters with no control characters, `verdict` is `ok` / `bad` /
+`none` (the retraction) or absent, `note` caps at 2000 characters, an upload must be JPEG or PNG by magic
 number and content type and stay under 2 MB, and **the filename is composed by
 the server** (`acc-<pr>-<item>-<UTC timestamp>.jpg`) — a client-supplied name is
 never trusted. Writes are a single `O_APPEND` write plus `fsync`, so two people
@@ -175,7 +202,8 @@ of who said what survives the images. The Stop guard says one line when the
 jsonl has uncommitted lines, and another when ten or more shots are prunable —
 it never commits or deletes anything itself.
 
-The endpoints only exist in the `serve.py` shipped with 0.17.0 and later. Boards
+The endpoints only exist in the `serve.py` shipped with 0.17.0 and later, and
+retractions (`verdict: "none"`) need the 0.17.1 one (`# ddd-serve v3`). Boards
 seeded by an earlier version keep the copy they have (the plugin never overwrites
 a file you may have edited); `kanban-init` prints a line when yours is behind, and
 upgrading is a copy of `templates/serve.py` plus a restart of the server. Until
