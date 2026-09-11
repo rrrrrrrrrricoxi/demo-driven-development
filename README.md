@@ -207,8 +207,11 @@ retractions (`verdict: "none"`) need the 0.17.1 one (`# ddd-serve v3`). Boards
 seeded by an earlier version keep the copy they have (the plugin never overwrites
 a file you may have edited); `kanban-init` prints a line when yours is behind, and
 upgrading is a copy of `templates/serve.py` plus a restart of the server. Until
-then the board says so where it happens: an older `serve.py` answers a write with
-501, and the row shows that sentence rather than the status code.
+then the board says so where it happens, and it says which of the two it is: a
+`serve.py` with no write endpoint at all answers 501, and the row prints that
+sentence instead of the status code; a `ddd-serve v2` refuses only the retraction
+with a 400 about the `verdict` enum, and the row keeps the server's own sentence
+and appends the fix — overwrite `serve.py` from the plugin and restart.
 
 ## Release progress (optional)
 

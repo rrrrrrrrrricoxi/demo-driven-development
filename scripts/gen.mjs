@@ -2759,10 +2759,17 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accv.just { box-shadow: 0 0 0 3px ${tk('flash-glow')}; } /* 「已记下」那下微闪 */
   /* ✓ = 变淡(沿用 .accitem.done);✕ = 不变淡,左缘一道红边,再补 1px 内缩以免正文横移 */
   .accitem.bad { border-left: 2px solid #d44c47; padding-left: 11px; }
+  /* 「变淡」落在条目正文上,不落在这一行的控件上:整行 .66 之后,右下角那枚「＋ 备注 / 图」
+     只剩 2.05:1 的 11px 灰字 —— 与 §2 明令不做的「悬停才现」是一个量级,而判「通过」之后
+     想补一句备注,走的正好是这一行。opacity 在祖先上成组,后代退不出来,只能不给整行加 */
+  .accitem.done { opacity: 1; }
+  .accitem.done > .accib, .accitem.done > .accno { opacity: .66; }
   .accfoot { flex: 1 1 100%; display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; margin-top: 3px; }
   .accjust { font-size: 11px; color: var(--mut); }
+  /* 常驻的入口不能靠「淡到看不见」来安静:--faint 这一档在 11px 上只有 3.5:1(判过的行上更低),
+     --mut 是这一行正文自己的颜色,够得着 AA 又不跟数据抢戏 */
   .accadd { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-size: 11px;
-     color: var(--faint); cursor: pointer; white-space: nowrap; }
+     color: var(--mut); cursor: pointer; white-space: nowrap; }
   .accadd:hover { color: var(--accent); }
   .accgot { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 9.5px;
      font-weight: 600; vertical-align: 1px; white-space: nowrap; background: ${tk('seg-bg')}; color: var(--faint); }
@@ -2773,9 +2780,15 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accfb:hover { border-color: var(--accent); color: var(--accent); }
   .accfbx { flex: 1 1 100%; margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--line); }
   .accfbed { display: flex; align-items: center; gap: 6px; }
+  /* 作者样式的 display 压得过 UA 的 [hidden]{display:none} —— 少了这条,ed.hidden = true 收不走
+     这一行:只点行末 chip 看时间线,备注框与回形针也跟着冒出来(§2 说点开才有那一行) */
+  .accfbed[hidden] { display: none; }
   .accfbnw { position: relative; flex: 1 1 240px; min-width: 140px; display: flex; }
   .accfbn { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; line-height: 20px; padding: 2px 64px 2px 8px;
      border: 1px solid var(--line-strong); border-radius: 7px; background: var(--card); color: var(--ink); }
+  /* .accitem input(0.17.0 给那只勾选框写的 15×15)特指度比 .accfbn 高一档,会把这只备注框
+     压成 0 像素可写宽 —— 勾选框在「判定即勾选」里已经退场,这儿把尺寸要回来 */
+  .accitem input.accfbn { flex: 1 1 auto; width: auto; height: auto; margin: 0; }
   /* 贴图提示只在输入框聚焦时出现在框内右缘 —— 常驻的话每行都在喊一句这会儿用不上的话 */
   .accfbhint { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 10.5px;
      color: var(--faint); pointer-events: none; opacity: 0; }
@@ -2799,6 +2812,8 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accfbnt { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
   .accfbst { font-size: 10.5px; font-style: normal; color: var(--faint); }
   .accnav a.bad .accgc { color: #d44c47; } /* 这一组里有判「不对」的:计数不点绿 */
+  /* 同一条口径给页顶那根条:全判「不对」时它照样满格品牌绿,远看/截图里先到眼睛的就是这根条 */
+  .accbar i.bad { background: #d44c47; }
   .accfbe { margin: 4px 0 0; font-size: 11.5px; color: var(--faint); }
   /* 缩略图不跟着基线走:一张 76px 高的图去对齐文字基线,会把那行字压到图的底边上 */
   .accfbimg { flex: none; display: block; align-self: flex-start; appearance: none; border: 0; background: none;
@@ -3013,10 +3028,16 @@ const ACC_FB_JS = !AFB ? '' : `
       })
       return out
     }
-    function accFbPick(mine, local) { // 账上那条与本机那条(无写口时才有)取时刻新的;时刻同写法,可直接比
-      if (!local || !local.ts) return (mine && mine.v) || ''
-      if (!mine || !mine.ts) return local.v || ''
-      return (String(local.ts) > String(mine.ts) ? local.v : mine.v) || ''
+    function accFbMine(loc, me) { // 本机那条是谁按的:键里没有 who(换人不换键),值里有 —— 不是我的就当没有
+      return (loc && String(loc.who == null ? '' : loc.who) === String(me == null ? '' : me)) ? loc : null
+    }
+    function accFbPick(mine, local) { // 账上那条与本机那条(无写口时才有)哪个作数
+      var mv = (mine && mine.v) || '', mts = (mine && mine.ts) || ''
+      if (!local || !local.ts) return mv
+      // 两个时刻出自两只钟(本机的 vs 服务端的),比大小会判错:手机快几分钟,它就把刚写进账的
+      // 判定顶回旧的;慢几分钟,刚按下的那一下当场失效。改比「我按本机那条时,账上我的最后一条是哪一条」
+      // —— 账上还是那一条 = 本机这条是我后按的,听它的;账上又动了 = 那是更新的,听账上的
+      return String(local.base == null ? '' : local.base) === mts ? (local.v || '') : mv
     }
     function accFbAct(cur, want, since) { // 点下这一枚要写什么:'ok' / 'bad' / 'none'(撤回)/ ''(当没点)
       if (cur !== want) return want        // 未判 → 判;✓ ↔ ✕ 直接互换,不经撤回
@@ -3029,6 +3050,19 @@ const ACC_FB_JS = !AFB ? '' : `
     function accFbNoWrite(status) { // 这个状态码是不是「这儿根本没有写口」(而不是这一笔不合格)
       return status === 404 || status === 405 || status === 501
     }
+    function accFbNetErr(proto) { // fetch 自己挂了(一个状态码都没拿到):这台没有写口,还是这一下没送出去
+      // file:// 是真没有写口(§6 的主用例,双击 index.html 打开);http(s) 下多半是 serve.py 正在重启、
+      // 网抖了一下 —— 把它当「没有写口」闩上,整页剩下的判定就再也不发请求了,而那一闩没有解锁的路
+      return String(proto) === 'file:'
+        ? { nowrite: true, msg: '连不上写口 —— 看板要经 serve.py(v0.17.0 起的那版)打开才有写口' }
+        : { nowrite: false, msg: '这一下没送出去(连不上写口)—— serve.py 可能正在重启,过一下再点一次' }
+    }
+    function accFbFresh(at, wrote) { // 这发 GET 值不值得采信:比最后一次写成功还早出发的,读到的是写之前的文件
+      return !(Number(at) < Number(wrote))
+    }
+    function accFbChain(prev, run) { // 同一条目的两发写排成一列:上一发落定了再发下一发(落盘次序 = 点击次序)
+      return (prev || Promise.resolve()).then(run, run)
+    }
     function accFbChip(e, rev, me) { // 行末摘要:「乙 ✕ · 1 图」;没人说过话 = 空串(那儿什么都不出现)
       var v = accFbLive(e, rev)
       var parts = v.order.filter(function (w) { return String(w) !== String(me == null ? '' : me) })
@@ -3037,6 +3071,15 @@ const ACC_FB_JS = !AFB ? '' : `
       if (v.shots) parts.push(v.shots + ' 图')
       if (v.old) parts.push('旧清单 ' + v.old) // 陈述事实:改版前的账,不冒充「这条通过了」
       return parts.join(' · ')
+    }
+    function accFbChipText(e, rev, me) { // chip 上写什么(空串 = 那儿什么都不出现)
+      var txt = accFbChip(e, rev, me)
+      if (txt) return txt
+      // 只有我自己的记录时:一条就是左栏那枚钮写着的那个判定,不必再说一遍(每行都挂一枚 = 0.17.0 那排
+      // 「反馈 ▸」)。两条以上是有来龙去脉的(判了又撤、撤了又判)—— 那是 §3 承诺「含我自己的」那几条,
+      // 而 chip 是时间线唯一的开关:没有它,自己的那段账点不开;别人撤回后它一消失,摊开的时间线也收不掉
+      var n = ((e && e.rows) || []).length
+      return n > 1 ? '记录 ' + n + ' 条' : ''
     }
     function accFbBadTail(k) { return k ? ' · 其中 ' + k + ' 条不对' : '' } // 进度那句的后半截
     function accFbTime(ts, now) { // jsonl 里记的是 UTC,读的人看自己的钟;不是今天就把日子说出来
@@ -3064,8 +3107,14 @@ const ACC_FB_JS = !AFB ? '' : `
       return null
     }
     function fbJson(t) { try { return JSON.parse(t) } catch (e) { return null } } // 两个写口的回应都这么读
-    function fbHttpMsg(status, t) { // 写口答了非 2xx:服务端说得出话就用它的原话,说不出话的两种自己解释
+    function fbHttpMsg(status, t, vd) { // 写口答了非 2xx:服务端说得出话就用它的原话,说不出话的两种自己解释
       var j = fbJson(t)
+      // 撤回撞上 400 + 一句说 verdict 枚举的原话 = 宿主那份 serve.py 还是 ddd-serve v2(枚举里没有 none)。
+      // serve.py 是种入件、init 从不覆盖,所以升到 0.17.1 之后这是默认态;而那句原话读起来像「你点错了」,
+      // 人最可能改点另一枚,在共享账上留下一条自己并不想要的判定
+      if (status === 400 && vd === 'none' && j && j.error && String(j.error).indexOf('verdict') >= 0) {
+        return j.error + ' —— 这台的 serve.py 还不认「撤回」(要 v0.17.1 的 ddd-serve v3):用 plugin 的 templates/serve.py 覆盖 app/kanban/serve.py,重启 serve 再刷新'
+      }
       if (j && j.error) return j.error
       // 501 = 这台的 serve.py 还没有 do_POST(宿主的 serve.py 是 writeOnce 的种子,init 不覆盖)——
       // 最可能的首跑状态,也是最不该只给一个裸状态码的那个
@@ -3074,6 +3123,8 @@ const ACC_FB_JS = !AFB ? '' : `
     }
     /* ---- 运行期 ---- */
     var FB = {}, FB_BAD = 0, FB_WHO = '', FB_OPT = {}, FB_AT = {}, FB_LOC = {}, FB_NOWRITE = false, FB_PROBED = false, fbPasteRow = null
+    var FB_WROTE = 0 // 最后一次写成功的时刻:比它先出发的那几发 GET 读到的是写之前的文件
+    var FB_Q = {}    // 每条目一条写队列:✕→✓ 连点两下,落盘次序必须等于点击次序
     var FB_WHO_KEY = '${LS_PREFIX}_acc_who'
     var FB_NOWRITE_KEY = '${LS_PREFIX}_acc_nowrite'
     try { FB_WHO = localStorage.getItem(FB_WHO_KEY) || '' } catch (e) {}
@@ -3099,15 +3150,25 @@ const ACC_FB_JS = !AFB ? '' : `
       FB_LOC[l.k] = v
       return v
     }
-    function fbLocalSet(l, id, vd) {
+    function fbLocalSave(l, m) { try { localStorage.setItem(fbVdKey(l), JSON.stringify(m)) } catch (e) {} }
+    function fbLocalSet(l, id, vd, base) {
       var m = fbLocal(l)
-      m[id] = { v: vd || '', ts: fbNowTs() } // 撤回也记时刻:与账上那条比新旧要用得上
-      try { localStorage.setItem(fbVdKey(l), JSON.stringify(m)) } catch (e) {}
+      // who:键里没有它(换个人验不换键),值里不记就成了「甲判的算到乙头上」,连时间线的名字圆点一起改姓。
+      // base:写这条时账上「我」的最后一条时刻 —— 两只钟没法比大小,只能比「我盖的是哪一条」
+      m[id] = { who: FB_WHO, v: vd || '', ts: fbNowTs(), base: base || '' }
+      fbLocalSave(l, m)
     }
-    function fbVdOf(l, id, pr) { // 我对这条目的判定:'ok' / 'bad' / ''(乐观值 > 账上与本机里新的那条)
+    function fbLocalClear(l, id) { // 写进账了:本机那条是它的影子,留着会在时间线末尾多一行、又拿两只钟去顶账上的新判定
+      var m = fbLocal(l)
+      if (!(id in m)) return
+      delete m[id]
+      fbLocalSave(l, m)
+    }
+    function fbMineAt(l, id, pr) { return accFbMineAt(FB[pr + '\\u0000' + id], l.rev, FB_WHO) }
+    function fbVdOf(l, id, pr) { // 我对这条目的判定:'ok' / 'bad' / ''(乐观值 > 账上与本机里作数的那条)
       var k = pr + '\\u0000' + id
       if (k in FB_OPT) return FB_OPT[k]
-      return accFbPick(accFbMineAt(FB[k], l.rev, FB_WHO), fbLocal(l)[id])
+      return accFbPick(accFbMineAt(FB[k], l.rev, FB_WHO), accFbMine(fbLocal(l)[id], FB_WHO))
     }
     function fbSendable() { return accFbSendable(FB_NOWRITE, FB_PROBED) }
     function fbSetNoWrite(v) { // 认清这台有没有写口:记在浏览器里,tab 顶上那行灰字跟着亮 / 收
@@ -3131,15 +3192,27 @@ const ACC_FB_JS = !AFB ? '' : `
       // 服务端 json.dumps().encode('utf-8') 上炸掉,连接被掐,页面还误报成「你的 serve.py 太旧」
       v = Array.from(String(v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')
       if (!v) return FB_WHO
+      var was = FB_WHO
       FB_WHO = v
       try { localStorage.setItem(FB_WHO_KEY, v) } catch (e) {}
       fbWhoChip()
+      // 换了个人就当场重画:左栏、进度、分组、摘要 chip 全按「我的判定」算,而「我」刚刚变了 ——
+      // 不重画的话,接手的那个人有 20 秒(下一轮轮询)看着前一个人的判定当成自己的
+      if (was !== v) window.accSync()
       return v
     }
     function fbFetch() {
+      // 出发时刻要记下来:20s 轮询那一发在弱链路上飘几百毫秒是常态,而它读到的文件是发出那一刻的样子
+      // (jsonl 走 gzip 分支,服务端整读整压成 body,随后追加的字节进不了这一发)。
+      // 回来晚了就整包盖掉刚写成功的那一行 —— 人看完「已记下」微闪,判定当场退回未判,再点一下
+      // 不是撤回而是又追一条 ok。所以:比最后一次写成功还早出发的,整发丢掉,下一轮自己会带回来
+      var at = Date.now()
       return fetch('acceptance-feedback.jsonl', { cache: 'no-store' })
         .then(function (r) { if (r.ok) return r.text(); if (r.status === 404) return ''; throw new Error(String(r.status)) })
-        .then(function (t) { var p = accFbParse(t); FB = accFbMerge(p.rows); FB_BAD = p.bad; window.accSync() })
+        .then(function (t) {
+          if (!accFbFresh(at, FB_WROTE)) return
+          var p = accFbParse(t); FB = accFbMerge(p.rows); FB_BAD = p.bad; window.accSync()
+        })
         .catch(function () {}) // 静默:验收进行中,弹一句「拉取失败」比缺一行更碍事,20s 后自己再来
     }
     function fbTick() {
@@ -3156,17 +3229,32 @@ const ACC_FB_JS = !AFB ? '' : `
       b.appendChild(im)
       return b
     }
+    function fbBackTo(row, name) { // 时间线每轮询一次就整片重建,手里那枚缩略图会成游离节点 —— 按名字在该行里重新找
+      var found = null
+      ;(row || document).querySelectorAll('[data-accshot]').forEach(function (b) { if (!found && b.dataset.accshot === name) found = b })
+      return found // 不拿名字去拼选择器:那是服务端拼的文件名,但这块板上「不拼选择器」是一条通例
+    }
     function fbZoom(name, opener) { // 就地放大:铺满视口的遮罩 + 居中原图;点空白 / Esc / 关闭钮都能关
       var ov = fbEl('div', 'accfbzoom')
+      ov.setAttribute('role', 'dialog')
+      ov.setAttribute('aria-modal', 'true')
+      ov.setAttribute('aria-label', name)
+      var back = opener && opener.closest ? opener.closest('.accitem') : null // 趁它还在 DOM 上把行记下来
       var im = fbShotImg(name)
       var x = fbEl('button', 'accfbzx', '×')
       x.setAttribute('aria-label', '关闭')
       ov.append(im, x)
-      var onKey = function (ev) { if (ev.key === 'Escape') { ev.preventDefault(); close() } }
+      var onKey = function (ev) {
+        if (ev.key === 'Escape') { ev.preventDefault(); close(); return }
+        // 遮罩里只有关闭钮一个可聚焦的,背后那一屏既没 inert 也没拦 Tab:焦点一出去就落在被遮住的
+        // ✓ / ✕ 上,一个回车就往共享账里写一条自己根本看不见的判定
+        if (ev.key === 'Tab') { ev.preventDefault(); x.focus() }
+      }
       var close = function () {
         document.removeEventListener('keydown', onKey)
         ov.remove()
-        if (opener && document.body.contains(opener)) opener.focus() // 关了把焦点还给那张缩略图
+        var b = opener && document.body.contains(opener) ? opener : fbBackTo(back, name)
+        if (b && document.body.contains(b)) b.focus() // 关了把焦点还给那张缩略图(哪怕它已被重建过)
       }
       ov.addEventListener('click', function (ev) { if (ev.target === ov || ev.target === x) close() })
       document.addEventListener('keydown', onKey)
@@ -3221,13 +3309,16 @@ const ACC_FB_JS = !AFB ? '' : `
       ed.hidden = !open
       var add = row.querySelector('[data-accadd]')
       if (add) add.setAttribute('aria-expanded', open ? 'true' : 'false')
+      // 先把展开区放开再聚焦:display:none 的子树里 focus() 一律不作数 —— 原来的次序让 §2 那两条
+      // 「自动展开并聚焦」在首开那一下从来没生效过,判完 ✕ 直接打字,字落在那枚刚获焦的 ✕ 钮上
+      // (再敲个空格就等于又按一次它 = 把刚判的那条静默撤回)
+      fbOpen(row)
       if (open) {
         var n = ed.querySelector('.accfbn')
         n.placeholder = ph || '一行备注(可留空)'
         fbPasteRow = row
         n.focus()
       } else if (fbPasteRow === row) fbPasteRow = null // 收起来就把贴图的指针交回去
-      fbOpen(row)
     }
     function fbTimeline(row, open) {
       var box = fbBox(row)
@@ -3265,10 +3356,10 @@ const ACC_FB_JS = !AFB ? '' : `
         if (r.shot && accFbShotOk(r.shot, row.dataset.accpr, row.dataset.accid)) line.appendChild(fbThumb(String(r.shot)))
         list.appendChild(line)
       })
-      var l = fbListOf(row), loc = l ? fbLocal(l)[row.dataset.accid] : null
+      var l = fbListOf(row), loc = accFbMine(l ? fbLocal(l)[row.dataset.accid] : null, FB_WHO)
       if (loc && loc.ts && loc.v) { // 无写口时判的那条:它不在账上,但确实是我按的 —— 说清它只在这台
         var ln = fbEl('div', 'accfbr')
-        ln.appendChild(fbEl('span', 'accfbav', Array.from(String(FB_WHO || '我'))[0]))
+        ln.appendChild(fbEl('span', 'accfbav', Array.from(String(loc.who || '我'))[0]))
         ln.appendChild(fbEl('span', 'accfbvd ' + loc.v, loc.v === 'ok' ? '✓' : '✕'))
         var lt = accFbTime(loc.ts)
         if (lt) ln.appendChild(fbEl('span', 'accfbts', lt))
@@ -3304,37 +3395,44 @@ const ACC_FB_JS = !AFB ? '' : `
       fbWhoChip()
       fbDegLine()
       pane.querySelectorAll('.accitem').forEach(function (row) {
+        var ls = row.querySelector('.accfbl')
+        var open = Boolean(ls && !ls.hidden)
         var t = row.querySelector('.accfbt')
         if (t) {
-          var txt = accFbChip(FB[fbKey(row)], Number(row.dataset.accrev || 0), FB_WHO)
-          t.textContent = txt
-          t.parentElement.hidden = !txt // 没人说过话时那儿什么都没有
+          var txt = accFbChipText(FB[fbKey(row)], Number(row.dataset.accrev || 0), FB_WHO)
+          // chip 是时间线唯一的开关:它一消失,摊开着的时间线就再没有控件能收起来(只能刷新)
+          t.textContent = txt || (open ? '收起' : '')
+          t.parentElement.hidden = !txt && !open // 没人说过话时那儿什么都没有
         }
-        var ls = row.querySelector('.accfbl')
-        if (ls && !ls.hidden) fbList(ls, row)
+        if (open) fbList(ls, row)
       })
     }
     function fbMark(row, body) { // 三条路(判定 / 备注 / 图)共用的一次写:成功即并进本地视图
       body.pr = Number(row.dataset.accpr); body.item = row.dataset.accid
-      FB_PROBED = true
       return fetch('api/acceptance/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) {
+          // 试探过了 = 收到过回应,不是「发出去过」:发出去就置位的话,serve.py 重启那两秒里按下的
+          // 那一枚会把整页闩死在本机模式(解闩的 fbSetNoWrite(false) 长在写成功分支里,而三条写路
+          // 都先过 fbSendable() 这道门 —— 门一关就再也走不到解闩那句)
+          FB_PROBED = true
           return r.text().then(function (t) {
-            if (!r.ok) throw fbErr(fbHttpMsg(r.status, t), accFbNoWrite(r.status))
+            if (!r.ok) throw fbErr(fbHttpMsg(r.status, t, body.verdict), accFbNoWrite(r.status))
             fbSetNoWrite(false) // 写口又在了(换了新 serve.py / 开关拨回来):那行灰字自己收走
             var j = fbJson(t)
+            FB_WROTE = Date.now() // 在飞的那几发 GET 读的是这一行落盘之前的文件,别让它们盖回去
             if (j && j.item != null) { var k = fbKey(row), e = FB[k] || (FB[k] = { rows: [] }); e.rows.push(j) }
             return j
           })
-        }, function () { // fetch 自己挂了(没有服务、断网):当没有写口,判定落本机不丢
-          throw fbErr('连不上写口 —— 看板要经 serve.py(v0.17.0 起的那版)打开才有写口', true)
+        }, function () { // fetch 自己挂了(一个状态码都没拿到)
+          var n = accFbNetErr(location.protocol)
+          throw fbErr(n.msg, n.nowrite)
         })
     }
     // 备注 / 图那两条路写完的收尾一样:清掉状态那句、把时间线摊开让人当场看见、重算计数、再拉一次账
     function fbSaved(row) { fbSay(row, ''); fbTimeline(row, true); window.accSync(); fbFetch() }
     function fbFail(row, e) { if (e && e.nowrite) fbSetNoWrite(true); fbSay(row, String((e && e.message) || e)) } // 写不进去:该降级的降级,原话落在行下
     function fbKeepLocal(l, row, k, vd) { // 无写口:判定存这台浏览器,颜色不回滚
-      fbLocalSet(l, row.dataset.accid, vd)
+      fbLocalSet(l, row.dataset.accid, vd, fbMineAt(l, row.dataset.accid, row.dataset.accpr).ts)
       delete FB_OPT[k]
       fbFlash(row, vd)
       window.accSync()
@@ -3353,16 +3451,22 @@ const ACC_FB_JS = !AFB ? '' : `
       fbSay(row, '')
       if (act === 'bad') fbEdit(row, true, '哪里不对?(可留空)') // 判「不对」自动展开并聚焦
       if (!fbSendable()) { fbKeepLocal(l, row, k, vd); return }
-      fbMark(row, { who: who, verdict: act }).then(function () {
-        delete FB_OPT[k]
-        fbFlash(row, vd)
-        window.accSync()
-        fbFetch()
-      }, function (e) {
-        if (e && e.nowrite) { fbSetNoWrite(true); fbKeepLocal(l, row, k, vd); return }
-        delete FB_OPT[k]
-        window.accSync() // 回滚:重画成账上原来的样子
-        fbSay(row, String((e && e.message) || e))
+      // 同一条目排队发:✕ 看错了、100ms 内改点 ✓ 是 §1 允许的正常动作,而两发裸 fetch 各走一条连接
+      // (serve.py 是 HTTP/1.0 无 keep-alive + 每连接一线程),第一发在路上卡一下就反序落盘 ——
+      // 账上最后一行成了 ✕,20s 后轮询把它涂回红的,看起来像「板子自己改了我的判定」
+      FB_Q[k] = accFbChain(FB_Q[k], function () {
+        return fbMark(row, { who: who, verdict: act }).then(function () {
+          fbLocalClear(l, row.dataset.accid) // 这条进账了,本机那条影子留着只会跟账打架
+          delete FB_OPT[k]
+          fbFlash(row, vd)
+          window.accSync()
+          fbFetch()
+        }, function (e) {
+          if (e && e.nowrite) { fbSetNoWrite(true); fbKeepLocal(l, row, k, vd); return }
+          delete FB_OPT[k]
+          window.accSync() // 回滚:重画成账上原来的样子
+          fbSay(row, String((e && e.message) || e))
+        })
       })
     }
     function fbNoteSave(row) { // 回车或失焦即存;空着不产生记录
@@ -3373,8 +3477,11 @@ const ACC_FB_JS = !AFB ? '' : `
       if (!note) return
       var who = FB_WHO || fbAskWho()
       if (!who) { fbSay(row, '先署个名(1–20 字)'); return }
-      n.value = '' // 先清空:回车存过一次,随后的失焦就不会再存一遍
+      // 清空排在「真要发」之后:无写口这条路原来先清后拒,人打的那句话既不在账上也不在框里,
+      // 连复制重试都做不到(同一函数下面的失败分支还特意把话还给人)。留着文字,随后的失焦
+      // 只会再说一遍这句灰字、不发请求也不产生记录
       if (!fbSendable()) { fbSay(row, '这台看板没有写口,备注存不下来 —— 判定还在这台浏览器里'); return }
+      n.value = '' // 清空:回车存过一次,随后的失焦就不会再存一遍
       fbSay(row, '记下中…')
       fbMark(row, { who: who, note: note }).then(function () { fbSaved(row) }, function (e) {
         n.value = note // 没写进去,把那句话还给人,别让它凭空消失
@@ -3526,7 +3633,10 @@ const ACC_JS = !ACC ? '' : `
       if (p) { // 进度 = 当前筛选可见条目里${!AFB ? '的已勾数' : '我判过的条数'}(筛了轮次就只算那一轮)
         p.querySelector('.accdone').textContent = vd
         p.querySelector('.acctot').textContent = vt${!AFB ? '' : `
-        p.querySelector('.accbadt').textContent = accFbBadTail(vb)`}
+        p.querySelector('.accbadt').textContent = accFbBadTail(vb)
+        // 与分组计数同一把尺:这一屏里有判「不对」的,条子就不点绿 —— 满格绿条是远看时先到眼睛的
+        // 那个信号,数字是后到的,「6 / 6 · 其中 6 条不对」配一根满格品牌绿读起来就是「全过了」
+        p.querySelector('.accbar i').classList.toggle('bad', vb > 0)`}
         p.querySelector('.accbar i').style.width = (vt ? vd / vt * 100 : 0) + '%'
       }
     }

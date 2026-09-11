@@ -69,6 +69,67 @@ Generated output and served responses stay byte-identical to 0.17.0 unless
   cross-site gate, the `no-store` on the jsonl and the screenshot rules are
   untouched; an empty payload is still refused.
 
+### Fixed
+Review of the change above, on a weak link and with two testers on the same
+list, turned up a set of races and dead ends. All of them only exist when
+`acceptanceFeedback` is on.
+
+- **A slow poll no longer swallows a verdict you just wrote.** The 20-second
+  `GET` of the jsonl reads the file as it was when the request left; over a
+  slow link one can still be in flight when a `POST` lands, and the stale body
+  used to replace the whole ledger — the row went back to unjudged seconds after
+  it turned green, and the next click appended a second identical verdict
+  instead of retracting. A fetch that left before the last successful write is
+  now discarded.
+- **One dropped request no longer locks the page into local-only mode.** Any
+  `fetch` rejection (a `serve.py` restart, a network blip) was treated as "this
+  board has no write endpoint", and the flag that says so could only be cleared
+  by a successful write — which the flag itself prevented. Every later verdict
+  then went to `localStorage` only, while the row still went green and the
+  progress still counted it: the other tester saw an empty ledger. Only
+  `file://` (where there is no status code to be had) now counts as having no
+  endpoint; over http(s) a dropped request rolls the colour back, says so under
+  the row, and the next click tries again.
+- **Two clicks on one item keep their order.** `✕` then `✓` 150ms later posted
+  two independent requests over two connections; if the first was held up, the
+  ledger ended with the `✕`. Writes for one item are now chained.
+- **A verdict left on a browser with no write endpoint no longer changes hands.**
+  The local key has no name in it, so after `换人` the previous tester's marks
+  were rendered, counted and copied out as the new one's. The record now carries
+  who made it, and the board repaints the moment the name changes.
+- **A local verdict stops fighting the ledger once it is on it.** It is dropped
+  after the verdict is written, and while it exists it is compared by *what it
+  supersedes* rather than by timestamp — the two clocks belong to two machines,
+  and a phone running a few minutes fast used to overrule the record it had just
+  written.
+- **A retraction against an old `serve.py` now points at the fix.** `ddd-serve v2`
+  answers `verdict: "none"` with a 400 about the enum, which reads as "you
+  clicked the wrong thing"; the row now keeps that sentence and adds which
+  `serve.py` is needed and how to replace it.
+- **The note you typed is no longer thrown away** when the board has no write
+  endpoint: the input was cleared before the check that refuses to send, so the
+  sentence was in neither the ledger nor the box.
+- **`判「不对」` really does focus the note box.** It was focused while its
+  container was still `display: none`, which the browser ignores, so the keys
+  that followed went to the `✕` button — and a space among them counted as a
+  second press and retracted the verdict.
+- **The note box is visible again.** The 15×15 rule written for 0.17.0's
+  checkbox still matched it, leaving 0px of writable width.
+- **The zoomed screenshot is a real modal**: Tab stays inside it (it used to
+  land on the `✓`/`✕` buttons hidden behind the backdrop, where Enter wrote a
+  verdict nobody could see), and closing it returns focus to the thumbnail even
+  after a poll has rebuilt the timeline.
+- **The summary chip no longer disappears out from under an open timeline** —
+  it is the only control that closes it — and an item where only I have spoken
+  more than once now has one, so the timeline promised in the release notes is
+  reachable at all.
+- **The progress bar stops reading as "all clear" when nothing passed.** It now
+  turns red whenever the visible items include a `✕`, matching what the group
+  counts already did.
+- **`＋ 备注 / 图` is legible on a row that passed.** The fade for a passed row
+  now applies to the item text rather than the whole row, so the one control the
+  release notes tell you to use is not the dimmest thing on the page.
+
 ### Removed
 - The local tick key `<brand>_acc_<pr>_r<rev>` is no longer read, written or
   migrated when `acceptanceFeedback` is on. It was a private trace of what
