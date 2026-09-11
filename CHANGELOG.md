@@ -68,6 +68,17 @@ Generated output and served responses stay byte-identical to 0.17.0 unless
   content, so a retraction can stand as its own record. Every other check, the
   cross-site gate, the `no-store` on the jsonl and the screenshot rules are
   untouched; an empty payload is still refused.
+- **The release-progress timeline now says which PR is being accepted.** The
+  table beside it has tagged `acceptance-manifest.json`'s `current` with a
+  验收中 badge for several releases; the timeline drew that PR like every other
+  one, so a `dev` band held several identical-looking glyphs. The glyph now
+  carries a non-displacing accent ring in all three zoom tiers (square, capped
+  bar, and day-cell chip — the chip keeps its number and adds 验收中 beside it
+  only where both fit), and the band that PR is drawn in appends `· 验收中 #NNN` to
+  its sub-line, which reads at any zoom and is never truncated away. If the PR
+  falls outside the current window, or its band is filtered out, nothing is
+  claimed. Boards with no acceptance manifest, or with no `current`, carry no
+  such key on any timeline row.
 
 ### Fixed
 Review of the change above, on a weak link and with two testers on the same

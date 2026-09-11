@@ -3816,9 +3816,13 @@ const REL_GROUPS = !REL ? [] : (() => {
 const REL_GEOM_SRC = !REL ? '' : readFileSync(new URL('./relgeom.mjs', import.meta.url), 'utf8')
   .replace(/^export /gm, '').replace(/^(?!$)/gm, '    ')
 
+// 「正在验收的那一条 PR」只认这一处(v0.17.1):表格那一行的「验收中」标与时间线的描边
+// 从前各写各的判据 —— 表格标了、时间线没标,同一件事两个视图说两样话。
+const relIsCur = (n) => ACC && Number(acm.current) === n
+
 const relRowHtml = (r) => {
   const p = r.p
-  const cur = ACC && Number(acm.current) === r.n
+  const cur = relIsCur(r.n)
   return `
             <tr class="relr" id="pr-${r.n}" data-relnum="${r.n}">
               <td class="rc-n"><a href="${esc(safeHref(p.url || prUrl({ repo: PR_REPO, num: r.n })))}" target="_blank" rel="noopener">#${r.n}</a></td>
@@ -4303,9 +4307,14 @@ const REL_CSS = !REL ? '' : `
   .relbt { flex: 1 1 auto; min-width: 0; line-height: 1.15; }
   /* 两行:带名一行、「N PR · 起→止」一行 —— 挤在一行里就是 0.13.0 那个被截成「155 PR · 05-10→…」的样子。
      省略号只是宿主写了超长 label 时的兜底,正常数据在 --relgut 那点宽里放得下。 */
-  .relbn, .relbm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .relbn, .relbi { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .relbn { font-size: 12px; font-weight: 600; color: var(--ink); }
-  .relbm { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  /* 副行拆成「可挤的那截 .relbi + 不许挤的验收标 .relbw」(v0.17.1):搜索命中数、窗口内 N
+     都会把前半截撑长,左栏就那么宽,先被省略号吃掉的该是日期范围(轴上本来就有),
+     不是那句「验收中 #N」—— 它是三档缩放下唯一一定读得到的那一半,吃掉就等于没说 */
+  .relbm { display: flex; align-items: baseline; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .relbi { min-width: 0; }
+  .relbw { flex: none; color: var(--accent); font-weight: 600; }
   .relsub { position: absolute; left: 0; width: var(--relgut); padding: 0 9px; font-size: 9.5px; line-height: 13px; color: var(--faint); }
   .relrg { position: absolute; height: 3px; border-radius: 2px; }
   .relsp { position: absolute; border-radius: 1px; }
@@ -4325,6 +4334,13 @@ const REL_CSS = !REL ? '' : `
   .relpb.dim { opacity: .16; }
   .relpb:hover { outline: 1.5px solid var(--ink); z-index: 2; }
   .relpb.hit { outline: 1.5px solid ${tk('gold-ink')}; z-index: 2; }
+  /* 正在验收的那一条(v0.17.1):一圈 accent 描边,三档字形共用一个类。
+     用 box-shadow 不用 border/outline-offset —— 描边一旦占位,同一格里的邻居就被挤走了;
+     先垫 1px 底色再上 accent:带色本身可能就是 accent(test 段),贴着画等于没画 */
+  .relpb.relcur { box-shadow: 0 0 0 1px var(--card), 0 0 0 3px var(--accent); z-index: 2; }
+  /* 两端帽那一档:圈画在帽上,不圈住中间那截只有一条细线的虚长轨 */
+  .relpb.relcb.relcur { box-shadow: none; }
+  .relpb.relcb.relcur .relcp { box-shadow: 0 0 0 1px var(--card), 0 0 0 3px var(--accent); }
   /* ——— 放大之后的字形(v0.15.11)——— 日宽 < 40px 时下面这些类一个都不出现,窄窗口的产物一字不变。
      骨架照旧是那一层 <a class="relpb">:类 / href / data-relpk / tabindex 一字不差,
      所以点击去 GitHub、悬停出卡、键盘聚焦、搜索命中的描边,三档共用同一套,不必各写一遍 */
@@ -4378,6 +4394,9 @@ const REL_D_ROWS = !REL ? [] : REL_ROWS.map((r) => ({
   c: String(r.p.createdAt || ''), m: String(r.p.mergedAt || ''), x: String(r.p.closedAt || ''),
   d: relDate(r), st: r.sg.id, tag: r.sg.tag, gp: relGid(r.sg), k: r.cards.map((c) => c.id),
   q: `${r.n} ${r.p.title || ''} ${r.p.branch || ''} ${r.cards.map((c) => c.id).join(' ')}`.toLowerCase(),
+  // 正在验收的那一条才长这个键(v0.17.1)。写成 cur: 0 会让每一行都多背一个字段,
+  // 而没有验收清单 / 没有 current 的板本就没有「验收中」这回事 —— 它们的 D 因此一字不差
+  ...(relIsCur(r.n) ? { cur: 1 } : {}),
 }))
 const REL_D_RELS = !REL ? [] : relSorted.map((r) => ({ tag: String(r.tag), at: String(r.at) }))
 // 数据搬家(v0.15.0):懒模式下四份表随 part 走;几何算子是代码不是数据,照旧留在壳里。
@@ -4481,8 +4500,16 @@ const REL_JS = !REL ? '' : `
     var bOpen = { dev: true }, bSnap = null // 默认只展开 dev:在做的那条
     function hitsOf(g) { var out = [], k; for (k = 0; k < D.length; k++) if (D[k].gp === g.g && pass(D[k])) out.push(D[k]); return out }
     function href(n) { var a = rows[n] && rows[n].querySelector('.rc-n a'); return a ? a.getAttribute('href') : '' }
+    // 正在验收的那一条:三档字形共用这一个类(CSS 里是一圈不占位的 box-shadow)。
+    // 判据不在这里算 —— gen 已经把 cur 烤进 D 了,表格那一行的「验收中」标认的是同一个号。
+    function curCls(d) { return d && d.cur ? ' relcur' : '' }
+    // 芯片档的字:号永远留着 —— 号是数据,「验收中」只是标注,标注不许把数据顶掉
+    // (副行那句「· 验收中 #N」已经说了这件事,真正只有芯片才有的信息恰恰是号)。
+    // 只有同一个芯片宽同时放得下两者才并排写;放不下就只留描边。
+    // 36 = 「 验收中」那一空格加三个汉字的墨宽,12 = relChipW 留的左右内边距,号按它同一套 7.5px/字算
+    function curTxt(d, cw) { var s = '#' + d.n; return d.cur && cw >= 12 + 7.5 * s.length + 36 ? s + ' 验收中' : s }
     function tlBar(bb, g, top, q, lbl) { // 条与泳道位共用 relPack 算好的那一份 x / w,不另算
-      var d = bb.item.d, cls = 'relpb relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '')
+      var d = bb.item.d, cls = 'relpb relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '') + curCls(d)
       if (q) cls += pass(d) ? ' hit' : ' dim'
       var txt = !lbl ? '' : bb.w >= 84 ? '#' + d.n + ' ' + d.t.slice(0, Math.floor((bb.w - 30) / 9)) : bb.w >= 26 ? '#' + d.n : ''
       // 原生 title 撤了(v0.15.2):它截断长标题、要等一秒才出、还与自绘 peek 变成两层浮层。
@@ -4495,7 +4522,7 @@ const REL_JS = !REL ? '' : `
     // 骨架一律是同一层 <a class="relpb">:类 / href / data-relpk / tabindex 一字不差,所以
     // 点击去 GitHub、悬停出卡、键盘聚焦、搜索命中的描边三档共用同一套 —— 不为放大另开一条交互路径。
     function tlA(d, g, q, cls, style, txt) {
-      var c = cls + ' relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '')
+      var c = cls + ' relc s-' + g.sg + ' q' + g.q + (d.s === 'open' ? ' open' : '') + curCls(d)
       if (q) c += pass(d) ? ' hit' : ' dim'
       return '<a class="' + c + '" href="' + xe(href(d.n)) + '" target="_blank" rel="noopener" tabindex="0"'
         + ' data-relpk="' + d.n + '" style="' + style + '">' + txt + '</a>'
@@ -4513,7 +4540,7 @@ const REL_JS = !REL ? '' : `
         + '<i class="relcp" style="left:' + (c.b - bb.x) + 'px;width:' + c.bw + 'px"></i>')
     }
     function tlChip(it, g, x, y, q, cw) { // 号直接写在图上:不用悬停也不用点就知道是谁
-      return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', '#' + it.d.n)
+      return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', curTxt(it.d, cw))
     }
     // 放不下的收进一枚 +N。它不是某一条 PR,挂不上 data-relpk;改挂折叠带那副「带 + 那一天」的钩子。
     // 被收起来的号一并烤在 data-relfold 上(v0.15.15):+N 问的是「没展开的是谁」,答那一整天等于没答 ——
@@ -4645,7 +4672,7 @@ const REL_JS = !REL ? '' : `
       var q = (qbox.value || '').trim().length > 0
       for (k = 0; k < vis.length; k++) {
         g = vis[k]
-        var list = byG[g.g] || [], multi = [], byDay = {}, inwin = 0, hit = 0
+        var list = byG[g.g] || [], multi = [], byDay = {}, inwin = 0, hit = 0, curN = 0
         for (j = 0; j < list.length; j++) {
           var d = list[j], s0 = String(d.c).slice(0, 10), e0 = d.m || d.x ? String(d.m || d.x).slice(0, 10) : today
           if (e0 > today) e0 = today // 合并时刻比这台机器的「今天」还新(时区 / 时钟):当天算
@@ -4655,7 +4682,9 @@ const REL_JS = !REL ? '' : `
           // 数的是「这一条画不画得出来」(与 relBar 同一个判据:跨度与窗口有交集),不是锚点日落没落在窗口里。
           // 两者对已合的 PR 一致(锚点就是结束日),对窗口之前建的、还开着的 PR 不一致 —— 带里画着 3 条,
           // 表头却写「窗口内 0」,而它下面那行副标题正说着「跨天 3 个」。
-          if (e0 >= ax.t0 && s0 <= ax.t1) inwin++
+          // 验收中的那一条落在这条带、又真的落进了窗口,带头才敢说它(v0.17.1)。
+          // 窗口把它切掉了就一个字不提 —— 让人照着带头去找、却找不到,比不说更糟
+          if (e0 >= ax.t0 && s0 <= ax.t1) { inwin++; if (d.cur) curN = d.n }
           if (q && pass(d)) hit++
         }
         var op = !!bOpen[g.g]
@@ -4673,10 +4702,12 @@ const REL_JS = !REL ? '' : `
           + '" data-relbd="' + xe(g.g) + '" title="' + xe(g.sf || '') + '" style="height:' + H + 'px">'
           + '<span class="relbh">'
           + '<span class="relbc">' + (op ? '▾' : '▸') + '</span><span class="relbt">'
-          + '<b class="relbn">' + xe(g.nm) + '</b><span class="relbm">' + (q ? hit + ' / ' + g.n : g.n) + ' PR'
+          + '<b class="relbn">' + xe(g.nm) + '</b><span class="relbm"><span class="relbi">' + (q ? hit + ' / ' + g.n : g.n) + ' PR'
           + (g.lo ? ' · ' + md(g.lo) + '→' + md(g.hi) : '')
           // 窗口切掉一部分时说清楚,别让人以为「这条带就这些」
-          + (inwin < g.n ? ' · 窗口内 ' + inwin : '') + '</span></span></span>']
+          + (inwin < g.n ? ' · 窗口内 ' + inwin : '') + '</span>'
+          // 描边在折叠 / 压成几像素时读不出来,这一句读得出:哪条带上有一条正在验收,以及是哪个号
+          + (curN ? '<b class="relbw"> · 验收中 #' + curN + '</b>' : '') + '</span></span></span>']
         if (!op && g.lo) { // 折叠态:一条跨度条 + 每天一个小竖标(横向也用起来)
           var rg = relBar(ax, g.lo < ax.t0 ? ax.t0 : g.lo, g.hi > ax.t1 ? ax.t1 : g.hi, 4)
           if (rg) body.push('<div class="relrg relc s-' + g.sg + ' q' + g.q + '" style="left:' + rg.x0 + 'px;width:' + rg.w + 'px;top:24px"></div>')

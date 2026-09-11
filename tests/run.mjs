@@ -1012,6 +1012,7 @@ const REL_MANIFEST = {
   ok(on.includes('data-relsync="2026-08-26T02:00:00Z"') && !/new Date\(\)/.test(on.split('<script>')[0]), 'syncedAt 烤成 ISO 原文(换算成本地时间是浏览器的事)')
   ok(on.includes('<a class="relcard" href="#BL-1"'), 'links 兼容反查命中:只挂了 /pull/230 链接的卡进了关联卡列')
   ok(on.includes('<span class="relnil">—</span>'), '没有关联卡 / 没有验收清单的格子是一条破折号,不是空白')
+  const relOnlySha = sha(idxP) // 只开发布进度、没有验收清单的那一份:下面加完验收再撤掉,要退回到它
   // 两个 tab 同开:验收列长出 n/N 与「验收中」标
   cfg.acceptanceTab = true
   wr(cfgP, cfg)
@@ -1021,11 +1022,95 @@ const REL_MANIFEST = {
   const both = readFileSync(idxP, 'utf8')
   ok(both.includes('<a class="acclink" href="#acc-230"><span data-acc="230">0/4</span></a>'), '验收列 = n/N 链到清单锚(分母烤入,分子运行期)')
   ok(/id="pr-230"[\s\S]{0,400}?<span class="relnow">验收中<\/span>/.test(both), 'current 那行打「验收中」标')
+  // ———— 时间线也认这一条(v0.17.1):从前只有表格打标,图里几条 PR 长得一模一样 ————
+  const D230 = (() => {
+    const D0 = JSON.parse(both.match(/\n {4}var D = (\[[\s\S]*?\])\n/)[1])
+    const withCur = D0.filter((x) => 'cur' in x)
+    ok(withCur.length === 1 && withCur[0].n === 230 && withCur[0].cur === 1,
+      '两视图共用的 D 里,只有 current 那一行带 cur: 1', JSON.stringify(withCur))
+    ok(D0.filter((x) => x.n !== 230).every((x) => !('cur' in x)),
+      '其余行连这个键都不写(不是 cur: 0)—— 没有验收清单的板因此一个字节都不多')
+    return withCur[0]
+  })()
+  { // 三档字形共用同一个 relcur:把壳里那几只画字形的函数原样抠出来跑,不是对着源码猜
+    const { relCaps } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+    const b0 = both.indexOf('function curCls(d)')
+    const b1 = both.indexOf('// 放不下的收进一枚 +N', b0)
+    ok(b0 > 0 && b1 > b0, '壳里有 curCls / curTxt / tlBar / tlA / tlSq / tlCap / tlChip 这一段')
+    const mk = new Function('xe', 'href', 'pass', 'relCaps', 'TL', both.slice(b0, b1)
+      + '\nreturn { curCls: curCls, curTxt: curTxt, tlBar: tlBar, tlSq: tlSq, tlCap: tlCap, tlChip: tlChip }')
+    const F = mk((s) => String(s), () => '', () => true, relCaps, { row: 13 })
+    const G1 = { sg: 'dev', q: 4, g: 'dev', nm: 'dev' }
+    const OTH = { n: 232, t: '同带的乙', s: 'merged' } // 同一条带里的另一条 PR:它不许长出描边
+    const bar = (d) => ({ item: { d, s: '2026-08-20' }, x: 40, w: 200, lane: 0 })
+    ok(F.curCls(D230) === ' relcur' && F.curCls(OTH) === '' && F.curCls(null) === '',
+      'curCls 只认 D 上那个 cur 键(没有 D 行也不抛)')
+    const t0 = F.tlBar(bar(D230), G1, 30, false, true)
+    ok(/class="relpb relc s-dev q4 open relcur"/.test(t0) && !/class="[^"]*relcur/.test(F.tlBar(bar(OTH), G1, 30, false, true)),
+      '方块档(< 40px/天):验收中那条挂 relcur,同带的别条不挂', (t0.match(/class="[^"]*"/) || [])[0])
+    const t1 = F.tlSq({ item: { d: D230 }, x: 40, lane: 0 }, G1, 30, false, 24, 20)
+    ok(/class="relpb relc s-dev q4 open relcur"/.test(t1) && /width:20px;height:20px/.test(t1),
+      'A 档的方块:relcur 挂上了,边长照旧由 relSqSize 那一档给', (t1.match(/class="[^"]*"/) || [])[0])
+    const t1c = F.tlCap(bar(D230), G1, 30, false, 16, false)
+    ok(/class="relpb relcb relc s-dev q4 open relcur"/.test(t1c) && t1c.includes('class="relcp"'),
+      'A 档的两端端帽横杠:壳上挂 relcur(CSS 把圈画在帽上,不圈住中间那截虚长的轨)', (t1c.match(/class="[^"]*"/) || [])[0])
+    const t2 = F.tlChip({ d: D230 }, G1, 40, 30, false, 42)
+    ok(/class="relpb relchip relc s-dev q4 open relcur"/.test(t2) && t2.endsWith('>#230</a>'),
+      'B 档日格芯片:relcur 挂上了,号原样留着(42px 写不下「验收中」,就只留描边)', t2.slice(-24))
+    const t2w = F.tlChip({ d: D230 }, G1, 40, 30, false, 96)
+    ok(t2w.endsWith('>#230 验收中</a>'), '宽到同时放得下号与标注才并排写,号在前', t2w.slice(-28))
+    ok(F.curTxt(D230, 42) === '#230' && F.curTxt(D230, 96) === '#230 验收中' && F.curTxt(OTH, 96) === '#232',
+      '号是数据、「验收中」是标注:标注永远不许把号顶掉,放不下就只写号')
+  }
+  { // 副行:那条 PR 画得出来才说,画不出来一个字都不说
+    const g0 = both.indexOf('var body = [], gut = [')
+    const tail = "'</span></span></span>']"
+    const g1 = both.indexOf(tail, g0)
+    ok(g0 > 0 && g1 > g0, '壳里有带头那一段')
+    const mkGut = new Function('g', 'op', 'H', 'q', 'hit', 'inwin', 'curN', 'xe', 'md',
+      both.slice(g0, g1 + tail.length) + '\nreturn gut[0]')
+    const G1 = { g: 'dev', nm: 'dev', sf: '', n: 5, lo: '2026-09-01', hi: '2026-09-09' }
+    const xe0 = (s) => String(s), md0 = (s) => String(s).slice(5, 10)
+    const yes = mkGut(G1, true, 60, false, 0, 5, 230, xe0, md0)
+    const no = mkGut(G1, true, 60, false, 0, 5, 0, xe0, md0)
+    ok(yes.includes('<span class="relbi">5 PR · 09-01→09-09</span><b class="relbw"> · 验收中 #230</b>'),
+      '画得出来:那条泳道的副行补一句「· 验收中 #230」', (yes.match(/<span class="relbm">[\s\S]*?<\/span><\/span>/) || [])[0])
+    ok(no.includes('<span class="relbi">5 PR · 09-01→09-09</span></span>') && !no.includes('relbw') && !no.includes('验收中'),
+      '窗口/筛选把它切掉了:副行原样,一个字都不加(不谎称)', (no.match(/<span class="relbm">[\s\S]*?<\/span>/) || [])[0])
+    const long = mkGut(G1, true, 60, true, 3, 2, 230, xe0, md0)
+    ok(/<span class="relbi">3 \/ 5 PR · 09-01→09-09 · 窗口内 2<\/span><b class="relbw"> · 验收中 #230<\/b>/.test(long),
+      '搜索命中数 + 窗口内 N 把前半截撑长时,验收标仍在 .relbw 里(flex: none,先被省略号吃掉的是日期范围)',
+      (long.match(/<span class="relbm">[\s\S]*?<\/span><\/span>/) || [])[0])
+  }
+  { // 描边不占位:box-shadow,不是 border / outline-offset —— 一占位就把同格的邻居挤走了
+    const rule = (both.match(/\.relpb\.relcur \{[^}]*\}/) || [])[0] || ''
+    ok(/box-shadow:/.test(rule) && rule.includes('var(--accent)') && !/border|padding|outline|width/.test(rule),
+      '.relpb.relcur 只用 box-shadow + 既有的 --accent,不碰任何占位属性', rule)
+    ok(both.includes('.relpb.relcb.relcur { box-shadow: none; }')
+      && /\.relpb\.relcb\.relcur \.relcp \{ box-shadow:[^}]*var\(--accent\)/.test(both),
+      'A 档的横杠:圈改画在两端帽上(壳本身是透明的,圈在壳上等于圈住一条几乎空的轨)')
+    ok(/\.relbw \{ flex: none;[^}]*var\(--accent\)/.test(both) && /\.relbi \{ min-width: 0; \}/.test(both),
+      '副行那半句也用同一个 --accent,且 flex: none 不许被挤掉')
+  }
   { // 整壳 <script> 编译级断言:发布进度运行时与验收运行时在同一块里
     const sc = both.match(/<script>([\s\S]*?)<\/script>/g).map((s) => s.replace(/^<script>/, '').replace(/<\/script>$/, ''))
     let compiled = true
     for (const body of sc) { try { new Function(body) } catch (e) { compiled = false } }
     ok(compiled, 'ON 壳内联 JS 可编译(new Function 不抛)')
+  }
+  { // 撤掉验收清单、发布进度照旧开着:产物退回加清单之前那一份 —— cur 键与「验收中 #N」都没漏出去
+    delete cfg.acceptanceTab
+    wr(cfgP, cfg)
+    rmSync(accP)
+    runGen(NEW_SCRIPTS, fx31.kb)
+    ok(sha(idxP) === relOnlySha, '没有验收清单的板:releaseTab 照旧开着,产物与加清单之前逐字节相同')
+    const noAcc = readFileSync(idxP, 'utf8')
+    const D1 = JSON.parse(noAcc.match(/\n {4}var D = (\[[\s\S]*?\])\n/)[1])
+    ok(D1.length === 7 && D1.every((x) => !('cur' in x)), '时间线的每一行都不带 cur 键(没有 current 可认)', JSON.stringify(D1.map((x) => x.n)))
+    cfg.acceptanceTab = true // 还原,把收尾那一步交回给下面那段
+    wr(cfgP, cfg)
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [ACC_LIST] }))
+    runGen(NEW_SCRIPTS, fx31.kb)
   }
   delete cfg.acceptanceTab
   cfg.releaseTab = false
@@ -2182,8 +2267,10 @@ console.log('T41 时间线重做')
   }
   ok(!on.includes('reltlsvg') && !on.includes('rect.relb') && !on.includes('id="reltip"'),
     '旧时间线的 SVG 与浮层一个不留(死代码不留在产物里)')
-  ok(on.includes('if (e0 >= ax.t0 && s0 <= ax.t1) inwin++'),
+  ok(on.includes('if (e0 >= ax.t0 && s0 <= ax.t1) { inwin++'),
     '带头那句「窗口内 N」数的是「画不画得出来」(与 relBar 同一个判据),不是锚点日落没落在窗口里 —— 窗口之前建的、还开着的 PR 会画出来,锚点却在窗口外')
+  ok(/if \(e0 >= ax\.t0 && s0 <= ax\.t1\) \{ inwin\+\+; if \(d\.cur\) curN = d\.n \}/.test(on),
+    '带头那句「验收中 #N」与「窗口内 N」同一个判据同一处算:窗口画不出它,就一个字都不说(v0.17.1)')
   ok(count(on, 'function relChipPitch') === 1 && !on.includes('cw + 6'),
     '芯片步距在产物里只有一处定义:tlWhisk 与 packer 都调 relChipPitch,不再各写一个 6(改一处漏一处,芯片就探出预留块)',
     `relChipPitch×${count(on, 'function relChipPitch')} / cw+6×${count(on, 'cw + 6')}`)
