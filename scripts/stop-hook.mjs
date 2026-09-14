@@ -151,7 +151,7 @@ const ON_MAIN = Boolean(BRANCH.skip) || BRANCH.scanned === 0
 
 // ---- 审计一次跑完(v0.17.5:实现全在 audits.mjs,`ddd.mjs audit` 调的是同一份)----
 // 跑在重跑 gen 之前:审计全是只读的,而卡文件那几条正是会让那趟 gen 失败的东西,消息得先备好。
-const CTX = makeCtx(KANBAN, { scriptsDir: SELF_DIR })
+const CTX = makeCtx(KANBAN)
 const AUDIT = collect(CTX, S, { branch: BRANCH, gen: GEN })
 // 阻断项(孤儿 demo / 新卡长正文):每项两副面孔 —— block 是拦下来时说的,warn 是同一次收工已经
 // 拦过一次时(stop_hook_active)降级放行说的。多项合成一条 reason,免得一次只报得出一个。

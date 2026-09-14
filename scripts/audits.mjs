@@ -34,9 +34,6 @@ export const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifes
  */
 export const CHORE_KEYS = ['longText', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'wip']
 
-/** 阻断两项的固定次序:孤儿 demo 排最前 —— 它是最老、也最容易一步补掉的那条规矩 */
-export const BLOCK_KEYS = ['orphan', 'richLongNew']
-
 /** 卡文件审计那几条:gen 会栽在它们上,所以守卫要赶在重跑 gen 之前就把话备好 */
 export const CARD_FILE_KEYS = new Set(['cardsDirMissing', 'cardIdBad', 'cardParseBad'])
 
@@ -47,9 +44,8 @@ const hasTok = (v, want) => String(v || '').split(/\s+/).filter(Boolean).include
  * 建一次、下面各段共读 —— 每段自己读一遍卡目录的话,一次审计要把整块板读七八遍。
  * @param session 只收窄「按线分的家务」到这个 session 标签(`ddd audit --line dev`;见下面 cardsOf);
  *                空 = 全板。守卫恒为空。
- * @param scriptsDir 本份 plugin 的 scripts 目录 —— 一行里那条命令要把路径填实,不让人猜。
  */
-export function makeCtx(kanbanDir, { session = '', scriptsDir = '' } = {}) {
+export function makeCtx(kanbanDir, { session = '' } = {}) {
   const KANBAN = kanbanDir
   let cfg = {}
   try { cfg = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8')) } catch {}
@@ -169,7 +165,7 @@ export function makeCtx(kanbanDir, { session = '', scriptsDir = '' } = {}) {
 
   return {
     dir: KANBAN, cfg, cardsDir: CARDS_DIR, cardScan, cardWatch, manifests, demos, rlm: RLM,
-    today: TODAY, session: SESSION, scriptsDir,
+    today: TODAY, session: SESSION,
     rawCardsOf, cardsOf, inLine, gitq, committedCards, cardUpdAll, depCtx, isFreshCard,
   }
 }

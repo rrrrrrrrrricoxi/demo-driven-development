@@ -60,11 +60,11 @@ not by how stern they sound:
   full, the same prose the guard used to print, including the command that deals
   with each. It never runs `gen` and never writes a file. `--json` gives the
   structured form (`dir`, `session`, `summary`, `block`, `broken`, `chore`, each
-  entry carrying its key, count and text). `--line <session tag>` (also spelled
-  `--session`, the name the card field and `card list` use) narrows the per-line
-  chores — long prose on older cards, cards to settle, cards settled early,
-  settle holds due, prerequisites cleared — to the cards carrying that tag.
-  Everything else keeps the whole board in view: the blocking and broken levels,
+  entry carrying its key, count and text). `--session <session tag>` narrows the
+  per-line chores — long prose on older cards, cards to settle, cards settled
+  early, settle holds due, prerequisites cleared — to the cards carrying that
+  tag (`--line` is accepted too, as a synonym). Everything else keeps the whole
+  board in view: the blocking and broken levels,
   because the guard blocks regardless of line and a narrowed "nothing to deal
   with" would be a lie; the backlog count, whose `config.wip.hard` threshold is a
   whole-board number that a narrowed numerator cannot be read against; and
