@@ -6420,6 +6420,265 @@ console.log('T75 发布表格行高 / 上下居中')
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
 }
 
+
+// ============ T76 生成物只在主线上生成、只由机器碰(0.17.4 §1–§4)============
+console.log('T76 生成物只在主线上生成 / 合并前硬闸')
+{
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const setM = (p, sec) => utimesSync(p, sec, sec)
+  const stale = (p) => setM(p, Date.now() / 1000 + 5) // 比产物新 → 守卫「本来会重渲」
+  const old = (p) => setM(p, Date.now() / 1000 - 600) // 退回产物之前 → 新鲜度判定说不用重渲
+
+  { // ---- ① 分支三态:main 重渲 / feat 与游离 HEAD 跳过重渲(产物一个字节不动),审计照跑 ----
+    const fx = mkFixture('fx76a', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('checkout', '-q', '-B', 'main')
+    const mP = join(kb, 'manifest.json'), blP = join(kb, 'backlog-manifest.json'), idxP = join(kb, 'index.html')
+    for (const p of [mP, blP, join(kb, 'decisions-manifest.json')]) { const o = rd(p); o.instance.branch = 'main'; wr(p, o) }
+    runGen(NEW_SCRIPTS, kb)
+    g('add', '-A'); g('commit', '-qm', 'init')
+
+    stale(mP)
+    const beforeMain = statSync(idxP).mtimeMs
+    const onMain = runStop(NEW_SCRIPTS, root)
+    ok(onMain.status === 0 && !/未重渲/.test(onMain.stdout) && statSync(idxP).mtimeMs !== beforeMain,
+      '主线上照旧重渲:产物被重写,且一个字不说', `${onMain.status} ${onMain.stdout.slice(0, 200)}`)
+
+    g('checkout', '-q', '-b', 'feat/x')
+    stale(mP)
+    const idxSha = sha(idxP), idxAt = statSync(idxP).mtimeMs
+    const onFeat = runStop(NEW_SCRIPTS, root)
+    ok(/非主线分支 feat\/x/.test(onFeat.stdout) && /产物只在 main 上生成/.test(onFeat.stdout),
+      '非主线:出一行「非主线分支 feat/x,看板未重渲(产物只在 main 上生成)」', onFeat.stdout.slice(0, 260))
+    ok(sha(idxP) === idxSha && statSync(idxP).mtimeMs === idxAt,
+      '跳过重渲后产物 mtime 与内容都没动 —— 一个字节都没碰')
+
+    writeFileSync(join(kb, 'demos', 'orphan.html'), demoHtml('orphan'))
+    const audit = runStop(NEW_SCRIPTS, root)
+    ok(/"decision":"block"/.test(audit.stdout) && /orphan\.html/.test(audit.stdout),
+      '非主线上审计照跑:孤儿 demo 照样阻断(审计只读源文件,与重不重渲无关)', audit.stdout.slice(0, 200))
+    ok(sha(idxP) === idxSha, '审计跑过之后产物仍逐字节没动')
+    rmSync(join(kb, 'demos', 'orphan.html'))
+
+    g('checkout', '-q', '--detach', 'HEAD')
+    stale(mP)
+    const det = runStop(NEW_SCRIPTS, root)
+    ok(/游离 HEAD/.test(det.stdout) && /未重渲/.test(det.stdout) && sha(idxP) === idxSha,
+      '游离 HEAD 同样跳过重渲,并说清自己是游离的(不冒充「你在主线上」)', det.stdout.slice(0, 200))
+    g('checkout', '-q', 'feat/x')
+
+    const manual = runGen(NEW_SCRIPTS, kb)
+    ok(manual.status === 0 && statSync(idxP).mtimeMs !== idxAt,
+      '人手跑 gen.mjs 在分支上照旧能跑(人手 = 明确意图,不受此限)', manual.stderr)
+    old(mP)
+    const quiet = runStop(NEW_SCRIPTS, root)
+    ok(quiet.status === 0 && !/未重渲/.test(quiet.stdout),
+      '产物不过期的分支上一个字不说 —— 那一行只在「本来会重渲」时才出', quiet.stdout.slice(0, 200))
+
+    // ---- ② 分支上已有的脏产物:一行点名 + 一行解法 ----
+    writeFileSync(idxP, readFileSync(idxP, 'utf8') + '\n<!-- 手改 -->\n')
+    const dirty = runStop(NEW_SCRIPTS, root)
+    ok(/生成物改动/.test(dirty.stdout) && /app\/kanban\/index\.html/.test(dirty.stdout),
+      '分支工作区里的脏产物被点名到文件', dirty.stdout.slice(0, 300))
+    ok(/git checkout main -- app\/kanban\/index\.html/.test(dirty.stdout),
+      '解法那一行把主线名与路径都填实,不让人猜', (dirty.stdout.match(/git checkout[^\\"]*/) || [''])[0])
+    g('checkout', '-q', '--', '.')
+
+    // ---- ③ .gitattributes 写了 merge=ours 而驱动没配 → 一行提醒;配上就闭嘴 ----
+    const attrP = join(root, '.gitattributes')
+    writeFileSync(attrP, '# ddd 看板生成物\napp/kanban/index.html  -diff merge=ours linguist-generated=true\n')
+    const noDriver = runStop(NEW_SCRIPTS, root)
+    ok(/merge=ours/.test(noDriver.stdout) && /git config merge\.ours\.driver true/.test(noDriver.stdout),
+      '属性写了而驱动没定义:一行提醒,给出那条命令', noDriver.stdout.slice(0, 300))
+    g('config', 'merge.ours.driver', 'true')
+    const withDriver = runStop(NEW_SCRIPTS, root)
+    ok(!/merge\.ours\.driver/.test(withDriver.stdout), '驱动配上之后这条自己闭嘴(零命中不说话)')
+    rmSync(attrP)
+
+    // ---- ④ 生成物处在冲突状态:一行机械解法,路径与主线名都填实 ----
+    g('checkout', '-q', 'main')
+    writeFileSync(idxP, '<!doctype html>\n<!-- ddd-gen v0.0.0 -->\n<p>main</p>\n')
+    g('add', 'app/kanban/index.html'); g('commit', '-qm', 'main side')
+    g('checkout', '-q', '-b', 'feat/conflict', 'HEAD~1')
+    writeFileSync(idxP, '<!doctype html>\n<!-- ddd-gen v0.0.0 -->\n<p>branch</p>\n')
+    g('add', 'app/kanban/index.html'); g('commit', '-qm', 'branch side')
+    const mg = g('merge', 'main')
+    ok(mg.status !== 0, '前置:真造出一次生成物冲突', String(mg.status))
+    const conf = runStop(NEW_SCRIPTS, root)
+    ok(/冲突状态/.test(conf.stdout) && /git checkout main -- app\/kanban\/index\.html/.test(conf.stdout),
+      '冲突提醒点名到文件,并给「取主线那份」的那条命令', conf.stdout.slice(0, 400))
+    ok(/node [^\\"]*gen\.mjs --dir /.test(conf.stdout),
+      '同一行接着给重新生成的命令 —— 取主线 + 重渲,零阅读', (conf.stdout.match(/node [^\\"]*gen\.mjs --dir [^\\"]*/) || [''])[0].slice(0, 160))
+    g('merge', '--abort')
+    g('checkout', '-q', 'main'); g('checkout', '-q', '--', '.')
+
+    // ---- ⑤ 主线 + 产物新鲜 + 无冲突 + 无脏产物:四条新提醒一条都不出,守卫一个字节都不输出 ----
+    runGen(NEW_SCRIPTS, kb)
+    const cleanRun = runStop(NEW_SCRIPTS, root)
+    ok(cleanRun.status === 0 && cleanRun.stdout === '',
+      '§1–§4 触发条件都不满足时守卫零输出(与 0.17.3 同)', JSON.stringify(cleanRun.stdout.slice(0, 200)))
+    const idxText = readFileSync(idxP, 'utf8')
+    ok(!idxText.includes('未重渲') && !idxText.includes('merge=ours') && !idxText.includes('diff-filter=U'),
+      '§1–§4 一个字节都没落进产物(gen.mjs 本版一字不动)')
+  }
+
+  { // ---- ⑥ 口径复用:主线名与「什么算生成物」都不许有第二份实现 ----
+    const hookSrc = readFileSync(join(NEW_SCRIPTS, 'stop-hook.mjs'), 'utf8')
+    const gateSrc = readFileSync(join(NEW_SCRIPTS, 'merge-gate.mjs'), 'utf8')
+    ok(count(hookSrc, 'boardBranchCheck(KANBAN, S)') === 1 && !/instance[^\n]*\.branch/.test(hookSrc) && !hookSrc.includes('--abbrev-ref'),
+      '守卫只调一次 boardBranchCheck,不另写一份主线解析 / HEAD 解析')
+    ok(gateSrc.includes('boardBranchCheck(KANBAN, S,') && !/instance[^\n]*\.branch/.test(gateSrc) && !gateSrc.includes('--abbrev-ref'),
+      '合并闸走同一份口径,也不写第二份')
+    ok(/import \{[^}]*GEN_RE[^}]*\} from '\.\/board-branch-check\.mjs'/.test(hookSrc) && !/GEN_RE\s*=/.test(hookSrc),
+      '「什么算生成物」只有 board-branch-check 的 GEN_RE 一份,守卫是 import 来的')
+    ok(readFileSync(join(NEW_SCRIPTS, 'init.mjs'), 'utf8').includes("genAttrPaths") &&
+      !readFileSync(join(NEW_SCRIPTS, 'init.mjs'), 'utf8').includes("'app/kanban/index.html'"),
+      '.gitattributes 那四条路径也由同一份 genAttrPaths 拼,不写死 app/kanban')
+  }
+
+  { // ---- ⑦ kanban-init:幂等写 .gitattributes(路径按解析出的看板目录拼)+ 设本地 merge.ours 驱动 ----
+    const repo = join(WORK, 'fx76init')
+    mkdirSync(join(repo, 'pkg'), { recursive: true })
+    const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' })
+    g('init', '-q', '.'); g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('commit', '-q', '--allow-empty', '-m', 'root')
+    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), ...extra, '--dir', join(repo, 'pkg')],
+      { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS } })
+    const p1 = runInit('plan', '--brand', 'XT', '--port', '8999')
+    ok(/pkg\/app\/kanban\/index\.html\s+-diff merge=ours linguist-generated=true/.test(p1.stdout) &&
+      /pkg\/app\/kanban\/refs\/\*\*/.test(p1.stdout),
+      '路径按解析出的看板目录相对仓根拼(仓根在项目根之上时是 pkg/app/kanban/…,不写死 app/kanban)',
+      (p1.stdout.match(/\+ [^\n]*index\.html[^\n]*/) || [''])[0])
+    ok(/将设仓库本地 `git config merge\.ours\.driver true`/.test(p1.stdout), '驱动没配时 plan 说要设')
+    const a1 = runInit('apply', '--yes', '--brand', 'XT', '--port', '8999')
+    const attr = readFileSync(join(repo, '.gitattributes'), 'utf8')
+    ok(a1.status === 0 && attr.split('\n').filter((l) => l.includes('merge=ours')).length === 4 &&
+      attr.includes('parts/**') && attr.includes('shots.html'),
+      'apply 把四条写进仓库根 .gitattributes', `${a1.status} ${(a1.stderr || '').slice(0, 300)}`)
+    ok((g('config', '--get', 'merge.ours.driver').stdout || '').trim() === 'true',
+      'merge=ours 的驱动在这个克隆里定义好了(仓库本地)')
+    ok(/± [^\n]*\.gitattributes/.test(a1.stdout) && /git config merge\.ours\.driver true/.test(a1.stdout),
+      'apply 把做过的两件事都打印出来')
+    ok((g('status', '--porcelain', '--', '.gitattributes').stdout || '').trim() === '',
+      '.gitattributes 随本次 apply 一起提交了(不是留在工作区)')
+    const before = readFileSync(join(repo, '.gitattributes'), 'utf8')
+    const a2 = runInit('apply', '--yes', '--port', '8999')
+    ok(a2.status === 0 && readFileSync(join(repo, '.gitattributes'), 'utf8') === before,
+      '幂等:重跑 apply 一行都不重复追加', `${a2.status} ${(a2.stderr || '').slice(0, 200)}`)
+    ok(/看板生成物那几行已在,跳过/.test(runInit('plan', '--port', '8999').stdout) &&
+      /merge\.ours\.driver 已配,跳过/.test(runInit('plan', '--port', '8999').stdout),
+      '幂等:plan 两条都说「跳过」')
+    ok(readFileSync(join(repo, 'pkg', 'CLAUDE.md'), 'utf8').includes('冲突了不要手解'),
+      'CLAUDE.md 看板段落带上同一句机械解法(每个会话开场就知道)')
+  }
+
+  { // ---- ⑧ 合并前硬闸:四种输入的决策 JSON ----
+    const fx = mkFixture('fx76b', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('checkout', '-q', '-B', 'main')
+    const blP = join(kb, 'backlog-manifest.json')
+    const bl = rd(blP)
+    bl.instance.branch = 'main'
+    bl.tiers = { 1: '核心' }
+    bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', problem: 'p', approach: 'a', area: 'x', source: 's' }]
+    wr(blP, bl)
+    g('add', '-A'); g('commit', '-qm', 'init')
+    g('checkout', '-q', '-b', 'feat/clean')
+    writeFileSync(join(root, 'README.md'), 'x\n')
+    g('add', '-A'); g('commit', '-qm', 'no board change')
+    g('checkout', '-q', 'main')
+    g('checkout', '-q', '-b', 'feat/board')
+    const bl2 = rd(blP); bl2.items.push({ ...bl.items[0], id: 'BL-2', title: '乙' }); wr(blP, bl2)
+    g('add', 'app/kanban/backlog-manifest.json'); g('commit', '-qm', 'board change on a branch')
+    g('checkout', '-q', 'main')
+
+    const ghDir = join(WORK, 'fakegh76')
+    mkdirSync(ghDir, { recursive: true })
+    writeFileSync(join(ghDir, 'gh'), `#!/bin/sh
+case "$1 $2 $3" in
+"pr view 12") echo '{"headRefName":"feat/board"}' ;;
+"pr view 14") echo '{"headRefName":"feat/clean"}' ;;
+*) echo 'could not resolve to a PullRequest' >&2; exit 1 ;;
+esac
+`)
+    chmodSync(join(ghDir, 'gh'), 0o755)
+    // 真 gh 可能就在 PATH 上:把假的排在最前面顶掉它;git 还得找得到,所以不清空 PATH
+    const GATE_ENV = { CLAUDE_PROJECT_DIR: root, PATH: `${ghDir}:${process.env.PATH}` }
+    const runGate = (command) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'merge-gate.mjs')], {
+      encoding: 'utf8',
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }),
+      env: { ...process.env, ...GATE_ENV },
+    })
+
+    const hit = runGate('gh pr merge 12 --squash --delete-branch')
+    let j = null
+    try { j = JSON.parse(hit.stdout) } catch {}
+    ok(hit.status === 0 && j && j.hookSpecificOutput && j.hookSpecificOutput.hookEventName === 'PreToolUse' &&
+      j.hookSpecificOutput.permissionDecision === 'deny',
+      'gh pr merge 12 命中 → 决策 JSON 就是 PreToolUse 契约那一份(hookSpecificOutput.permissionDecision = deny)',
+      hit.stdout.slice(0, 200))
+    const why = (j && j.hookSpecificOutput && j.hookSpecificOutput.permissionDecisionReason) || ''
+    ok(/feat\/board/.test(why) && /backlog-manifest\.json/.test(why) && /git checkout main -- app\/kanban\//.test(why),
+      'deny 的理由列出头分支、命中的文件与一行解法', why.slice(0, 300))
+
+    const clean = runGate('gh pr merge 14')
+    ok(clean.status === 0 && clean.stdout === '', '头分支干净 → 放行,一个字不出', JSON.stringify(clean.stdout.slice(0, 200)))
+
+    g('checkout', '-q', 'feat/board')
+    const noNum = runGate('gh pr merge --squash')
+    let jn = null
+    try { jn = JSON.parse(noNum.stdout) } catch {}
+    ok(jn && jn.hookSpecificOutput.permissionDecision === 'deny' && /feat\/board/.test(jn.hookSpecificOutput.permissionDecisionReason),
+      '没给 PR 号 → 按当前分支判,照样拦得住', noNum.stdout.slice(0, 200))
+    g('checkout', '-q', 'main')
+
+    for (const cmd of ['git status', 'gh pr view 12', 'npm test && gh pr merge 12']) {
+      const off = runGate(cmd)
+      ok(off.status === 0 && off.stdout === '', `非 \`gh pr merge …\` 命令零输出:${cmd}`, JSON.stringify(off.stdout.slice(0, 120)))
+    }
+
+    const bad = runGate('gh pr merge 13')
+    let jb = null
+    try { jb = JSON.parse(bad.stdout) } catch {}
+    ok(bad.status === 0 && jb && jb.systemMessage && !jb.hookSpecificOutput,
+      'gh 查不到分支 → 放行(不作决定)并一行说明:闸只拦确定的违规,不拦工具故障', bad.stdout.slice(0, 200))
+    ok(/不拦工具故障/.test(jb.systemMessage) && /#13/.test(jb.systemMessage),
+      '那一行说清是哪个 PR、为什么没拦', (jb.systemMessage || '').slice(0, 200))
+    ok(![hit.stdout, clean.stdout, noNum.stdout, bad.stdout].some((s) => s.includes('"permissionDecision":"allow"')),
+      '放行那一档从不返回 allow —— allow 会替人跳过权限确认,把闸变成自动批准')
+  }
+
+  { // ---- ⑨ 与 0.17.3 的逐字节对照(参照树取自 tag;浅克隆 / 没取 tag 时整组不比,如实说明)----
+    const TAG = 'demo-driven-development--v0.17.3'
+    const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+    if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.3 逐字节对照本次不比`)
+    else {
+      const oldRoot = join(WORK, 'v0173')
+      mkdirSync(oldRoot, { recursive: true })
+      const tar = join(WORK, 'v0173.tar')
+      spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+      spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+      const oldScripts = join(oldRoot, 'scripts')
+      const a = mkFixture('fx76z-old', { 's.html': demoHtml('s') })
+      const b = mkFixture('fx76z-new', { 's.html': demoHtml('s') })
+      runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
+      const norm = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+      ok(norm(join(a.kb, 'index.html')) === norm(join(b.kb, 'index.html')),
+        '归一化版本戳后,产物与 0.17.3 逐字节相同(acceptanceFeedback 关着)')
+      const oa = spawnSync(process.execPath, [join(oldScripts, 'stop-hook.mjs')],
+        { encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: a.root } })
+      const ob = runStop(NEW_SCRIPTS, b.root)
+      ok(oa.stdout === ob.stdout && (oa.status ?? 0) === (ob.status ?? 0),
+        '§1–§4 触发条件都不满足时,守卫输出与 0.17.3 逐字节相同', JSON.stringify([oa.stdout.slice(0, 120), ob.stdout.slice(0, 120)]))
+    }
+  }
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

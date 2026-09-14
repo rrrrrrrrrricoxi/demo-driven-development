@@ -45,7 +45,7 @@
 // (CLI 解析错误发生在 lang 解析之前,保持 zh)。manifest 卡内容是数据不进表,恒 zh。
 import {
   chmodSync, copyFileSync, existsSync, mkdirSync,
-  readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
+  readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -53,6 +53,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
 import { pickStrings } from './strings.mjs'
+import { genAttrPaths } from './board-branch-check.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const TPL = join(HERE, '..', 'templates')
@@ -388,6 +389,41 @@ function gitignoreMissing(giPath) {
   return gitignoreTplLines().filter((l) => !have.has(l))
 }
 
+// ---- .gitattributes(v0.17.4 §2:生成物是派生状态)----
+// -diff:git diff / show / log -p 对它们只说「Binary files differ」,几十万字符灌不进任何上下文。
+// merge=ours:合并时取当前分支的版本,不进冲突状态(合进主线后产物过期,守卫在主线上重渲即对)。
+//   它要每个克隆各定义一次驱动,所以下面顺手设仓库本地的 merge.ours.driver。
+// linguist-generated:GitHub PR 视图默认折叠。
+// 卡片 JSON / manifest / demos / docs 不在此列 —— 它们是源,该 diff 该合。
+// 路径按解析出的看板目录相对仓根拼(不写死 app/kanban);已有同名路径的行就不重复(幂等)。
+const GITATTR_HEAD = '# ddd 看板生成物:派生状态,不 diff、冲突取本分支、GitHub 折叠'
+const GITATTR_ATTRS = '-diff merge=ours linguist-generated=true'
+function gitattrPlan(root, kanban) {
+  const top = git(root, ['rev-parse', '--show-toplevel'])
+  if (!top) return null // 不在 git 仓里:属性文件无处可放,驱动也无从配
+  // 两端都取真实路径再相减:macOS 的 /var 是 /private/var 的软链,git 吐的 toplevel 是后者,
+  // 而 --dir 常是前者 —— 直接 relative 会算出一条跨过软链的怪路径,git add 的 pathspec 就对不上了
+  const repoRoot = realpathSync(resolve(top))
+  const here = realpathSync(resolve(root)) // 看板目录此刻可能还不存在(greenfield),只对已存在的 root 取真实路径
+  const rel = relative(repoRoot, join(here, relative(root, kanban))).split(sep).join('/')
+  const want = genAttrPaths(rel ? `${rel}/` : '')
+  const file = join(repoRoot, '.gitattributes')
+  let cur = ''
+  try { cur = readFileSync(file, 'utf8') } catch {}
+  const have = new Set(cur.split('\n').map((l) => l.trim().split(/\s+/)[0]))
+  const pad = Math.max(...want.map((p) => p.length)) + 2
+  const add = want.filter((p) => !have.has(p)).map((p) => `${p.padEnd(pad)}${GITATTR_ATTRS}`)
+  return {
+    repoRoot,
+    file,
+    rel: relative(repoRoot, file).split(sep).join('/'), // 显示用(相对仓根)
+    path: relative(here, file).split(sep).join('/'), // git add 用(相对 init 的 --dir,pathspec 按 cwd 解)
+    head: cur.includes(GITATTR_HEAD) ? '' : GITATTR_HEAD,
+    add,
+    driver: git(repoRoot, ['config', '--get', 'merge.ours.driver']) ? '' : 'true',
+  }
+}
+
 // ---- 合并计划(brownfield 散落归拢,设计 §7 merge 表) ----
 const today = () => new Date().toISOString().slice(0, 10)
 const filesEqual = (a, b2) => {
@@ -650,6 +686,9 @@ async function buildPlan(root, st, gi, opt, det) {
   const cm = existsSync(cmPath) ? readFileSync(cmPath, 'utf8') : ''
   plan.needsClaudeMd = !cm.includes(plan.claudeMarker)
 
+  // .gitattributes + merge.ours 驱动(v0.17.4 §2):非 git 场景为 null,整段跳过
+  plan.gitattr = gitattrPlan(root, st.kanban)
+
   // 旧装接管:摘旧 hook 注册 + 遗留卡;config 缺失时 docs 从旧 gen.mjs 提取
   if (st.legacyMech.length || st.legacyHooks.found.length) {
     plan.legacy = buildLegacyPlan(root, st)
@@ -681,6 +720,10 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
   console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
+  if (plan.gitattr) {
+    console.log(plan.gitattr.add.length ? S.init.planGitattr(plan.gitattr.rel, plan.gitattr.add) : S.init.planGitattrOk(plan.gitattr.rel))
+    console.log(plan.gitattr.driver ? S.init.planMergeDriver : S.init.planMergeDriverOk)
+  }
   if (plan.mergeDeferred) console.log(S.init.planMergeDeferred)
   if (plan.legacy) printLegacyPlan(plan.legacy, st.hasConfig)
   if (plan.merge) printMergePlan(plan.merge, opt)
@@ -924,6 +967,23 @@ async function doApply(root, st, gi, opt, plan) {
       writeFileSync(cmPath, cur + sep + plan.claudeSection)
       touched.push('CLAUDE.md')
       console.log(S.init.applyClaudeMd)
+    }
+
+    // -- 3.2 .gitattributes + merge.ours 驱动(v0.17.4 §2;幂等:同名路径的行已在就一行不加) --
+    if (plan.gitattr) {
+      const ga = plan.gitattr
+      if (ga.add.length) {
+        const cur = existsSync(ga.file) ? readFileSync(ga.file, 'utf8') : ''
+        const gap = cur === '' ? '' : (cur.endsWith('\n') ? '\n' : '\n\n')
+        writeFileSync(ga.file, cur + gap + (ga.head ? `${ga.head}\n` : '') + ga.add.join('\n') + '\n')
+        touched.push(ga.path)
+        console.log(S.init.applyGitattr(ga.rel, ga.add.length))
+      }
+      // 驱动是每个克隆各配一次的仓库本地配置(属性写了而驱动没定义,合并照样进冲突状态)
+      if (ga.driver) {
+        git(ga.repoRoot, ['config', 'merge.ours.driver', 'true'])
+        console.log(S.init.applyMergeDriver)
+      }
     }
 
     // -- 3.5 散落归拢(先写卡后 mv;守卫见 .init-lock 放行本轮) --
