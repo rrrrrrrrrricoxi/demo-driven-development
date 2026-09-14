@@ -70,7 +70,13 @@ nothing. No config key was added; `gen.mjs` is untouched and the generated
   mechanical remedy; a clean branch is let through without a word. A missing
   `gh`, a branch that cannot be found, or any other tool-level failure lets the
   call through with one line of explanation — the gate stops confirmed
-  violations, never tool failures. Letting through deliberately does *not*
+  violations, never tool failures. A command carrying `-R` / `--repo` is let
+  through for the same reason: the number belongs to another repository, pull
+  request numbers collide across repositories all the time, and denying on the
+  strength of a same-numbered pull request in *this* one would block a merge
+  over a branch that has nothing to do with it. Where a hit is found and the
+  tree is not standing on the offending branch, the remedy line names the
+  branch to switch to, so the command works where it is pasted. Letting through deliberately does *not*
   return `permissionDecision: "allow"`: that would skip the human's own
   permission prompt and turn a gate into an auto-approval. It makes no decision
   instead, and the normal permission flow proceeds.
@@ -80,7 +86,10 @@ nothing. No config key was added; `gen.mjs` is untouched and the generated
   <gen> --dir <kanban dir>` — with the real paths and the real mainline name
   filled in, so nobody has to guess. The section `kanban-init` maintains in
   `CLAUDE.md` now carries the same sentence, so every session knows it from the
-  start. The `-diff` attribute already hides the content from anyone who insists
+  start. That section is recognised by its heading alone, so a board installed
+  before 0.17.4 already has the heading and would never receive the new
+  sentence; init now notices that case and prints the sentence to paste in,
+  rather than rewriting a section its owner has very likely edited. The `-diff` attribute already hides the content from anyone who insists
   on looking; this is the second lock on the same door.
 - **A branch that already carries modified generated files is named.** Boards
   that ran an older guard on a branch have those files sitting in the working
@@ -106,8 +115,16 @@ the row.
 - **One signature box on the page at a time.** Clicking another row's verdict,
   note or paste while unsigned no longer opens a second box; the click is
   queued, and after Enter every queued action is replayed in click order, so
-  not one of them is lost. (Each item still writes through its own queue, so
-  two clicks on the same row land in the order they were made.)
+  not one of them is lost. Clicking the same verdict again replaces its place
+  in the queue instead of adding to it — the box may be open in a row that is
+  off screen, so a second click on the same button is an impatient repeat, not
+  a second opinion, and it must not land twice in an append-only account. A
+  pasted image is never deduplicated: two images are two things. And if that
+  one box is sitting in a fold the reader has since collapsed — where `focus()`
+  quietly does nothing and every further click would pile up invisibly — it
+  moves to wherever the click landed, carrying the half-typed name with it.
+  (Each item still writes through its own queue, so two clicks on the same row
+  land in the order they were made.)
 - **A name is at least two code points.** Below that, a grey line appears at
   the right edge inside the box — `至少 2 个字,免得手滑` — and nothing is
   committed and the box stays open. The 20-code-point ceiling, the

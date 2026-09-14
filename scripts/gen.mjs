@@ -3276,19 +3276,37 @@ const ACC_FB_JS = !AFB ? '' : `
     //     备注框的「失焦即存」不变:备注是内容,名字是身份。
     //   - 全页同一时刻只有一只框;未署名时点的每一下都排进队列,署完按点击顺序逐个补记。
     //   - 最少 2 个码点,不够就在框内右缘出一行灰字,不提交也不关框。
-    // @param key 同一个待办不重复排队(备注框的 blur 会在署名框抢焦点的那一刻再叫一次)
+    // @param key 同一个待办在队列里只占一格,后来那一下就地覆盖前一下(位置不动 = 点击顺序不乱)。
+    //   两处要它:① 备注框的 blur 会在署名框抢焦点的那一刻再叫一次这里;② 同一行的判定连点两下
+    //   (框在别的行、看不见反馈,人自然再点一次)—— 不覆盖就是同一枚判定在账上落两条一模一样的
+    //   记录,而 0.17.3 那版(fbThen 覆盖)只落一条。贴图不给 key:两张图是两件事,都得留下。
     function fbWhoAsk(row, then, key) {
-      if (then && (!key || !FB_QUEUE.some(function (q) { return q.key === key }))) FB_QUEUE.push({ key: key || null, run: then })
+      if (then) {
+        var at = key ? FB_QUEUE.findIndex(function (q) { return q.key === key }) : -1
+        if (at >= 0) FB_QUEUE[at].run = then
+        else FB_QUEUE.push({ key: key || null, run: then })
+      }
       // 全页只一只:已经开着就把焦点交回去 —— 重建会把人刚打的字扔掉,而刚点的那一下已经进了
       // 队列,署完自然轮得到它
       var open = document.querySelector('.accwhof')
-      if (open) { open.querySelector('.accwhoi').focus(); return }
+      var kept = null
+      if (open) {
+        var oi = open.querySelector('.accwhoi')
+        // 交焦点之前先问一句「那只框还看得见吗」:它可能长在一个已经收起来的 <details>(排队中 /
+        // 已验收)里 —— 隐藏子树里的 focus() 一声不响地不作数,于是人点什么都没反应,队列越排越
+        // 长,整页再也署不了名,只能刷新。看不见就把它连同人打了一半的字一起搬到这一处来。
+        if (oi.getClientRects().length) { oi.focus(); return }
+        kept = oi.value
+        var orow = open.closest('.accitem')
+        open.remove()
+        if (orow) fbOpen(orow)
+      }
       var host = row ? fbBox(row) : document.querySelector('[data-accme]')
       if (!host) { FB_QUEUE.length = 0; return }
       var f = fbEl('div', 'accwhof')
       var w = fbEl('div', 'accwhow')
       var i = document.createElement('input')
-      i.type = 'text'; i.className = 'accwhoi'; i.value = FB_WHO || ''
+      i.type = 'text'; i.className = 'accwhoi'; i.value = kept === null ? (FB_WHO || '') : kept // 搬过来的把字带上
       i.maxLength = 40 // 40 个 UTF-16 格 = 20 个码点的上限(全是 emoji 也装得下);真正的裁剪在 fbWhoNorm
       i.placeholder = '我是(2–20 字)'
       i.setAttribute('aria-label', '署名:我是(2–20 字);回车署名,Esc 取消;离开不提交,字留着')
@@ -3608,7 +3626,8 @@ const ACC_FB_JS = !AFB ? '' : `
       if (!act) return // 400ms 内的第二下:防误触,当没点
       // 未署名:就地问,一下也不弹框。署完补记的是刚点的那一枚(act 已经算定),不拿新身份重算切换
       // —— 重算的话,账上「甲」早就判过 ✓ 的那一条,会把这一下读成撤回
-      if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }); return }
+      // 带 key:同一行连点两下(或 ✓ 改点 ✕)只算最后那一下,不在账上落两条(见 fbWhoAsk)
+      if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }, 'v:' + k); return }
       fbVerdictGo(row, l, k, act)
     }
     function fbVerdictGo(row, l, k, act) { // 署过名之后的那一段:上色 → 排队发 → 失败回滚

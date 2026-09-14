@@ -109,11 +109,16 @@ const zh = {
   },
   // v0.17.4 §3:gh pr merge 前的本地硬闸。只拦确定的违规,工具故障一律放行。
   mergeGate: {
-    deny: (ref, h, main, prefix, gen, dir) => {
+    // onIt = 这棵树此刻就站在那条分支上(没给 PR 号那一档)。给了号的那一档人多半正站在主线上,
+    // 「先在分支上丢掉它们」照字面在当下跑等于什么都没做 —— 所以把该切到哪条分支一起填实。
+    deny: (ref, h, main, prefix, gen, dir, onIt = false) => {
       const files = [...h.gen, ...h.data, ...h.other]
+      const br = String(ref).replace(/^origin\//, '') // origin/feat-x 切不过去;裸分支名走 git 的 DWIM
       return `看板改动不许经 PR 合回 ${main}:分支 ${ref} 带着 ${files.length} 处看板改动(数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})——\n` +
         files.slice(0, 8).map((f) => `  ${f}`).join('\n') + (files.length > 8 ? `\n  …等 ${files.length} 个` : '') +
-        `\n  先在分支上丢掉它们:\`git checkout ${main} -- ${prefix}\`,提交后再合;真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。` +
+        (onIt
+          ? `\n  先在这条分支上丢掉它们:\`git checkout ${main} -- ${prefix}\`,提交后再合;真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。`
+          : `\n  先切到 ${br} 再丢掉它们:\`git switch ${br} && git checkout ${main} -- ${prefix}\`,提交后再合;真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。`) +
         (h.gen.length ? `\n  产物那几个是派生状态,永远不要手解、不要读:取主线那份再 \`node ${gen} --dir ${dir}\` 重新生成。` : '') +
         `\n  全表:\`node ${gen.replace(/gen\.mjs$/, 'board-branch-check.mjs')} --dir ${dir} --branch ${ref}\`。核过之后确要硬合,请人手在终端里跑 gh pr merge(这道闸只拦得住工具调用)。`
     },
@@ -121,6 +126,9 @@ const zh = {
     noGh: () => '找不到 gh 命令,问不出这个 PR 的头分支',
     ghFailed: (n) => `问不到 PR #${n} 的头分支(gh 未登录 / 无权访问该仓 / 网络不通都会这样)`,
     noRef: (ref) => `本地与 origin 都没有分支 ${ref},没有东西可比`,
+    // 命令里带了 -R/--repo:那个 PR 号属于另一个仓,而这道闸只问得出「当前仓的同号 PR 是哪条分支」——
+    // 照样判就是拿一条毫不相干的分支去 deny 一次别处的合并。误拦比漏拦坏,放行。
+    otherRepo: () => '这条命令用 -R/--repo 指向了别的仓,而这道闸只认当前仓的分支',
   },
   depsUnlocked: (rows, total) =>
     `前置已清:${rows.map((r) => depRow(r, DEP_WORDS_ZH)).join('、')}${total > rows.length ? ` …等 ${total} 张` : ''} —— 这几张卡等的东西都清掉了,可以开工。`,
@@ -347,6 +355,9 @@ const zh = {
     // v0.17.4 §2:生成物是派生状态 —— 标成不 diff、冲突取本分支、GitHub 折叠。路径按解析出的看板目录拼。
     planGitattr: (file, lines) => `[plan] ${file} 将追加 ${lines.length} 行(看板生成物 -diff merge=ours linguist-generated):\n${lines.map((l) => `  + ${l}`).join('\n')}`,
     planGitattrOk: (file) => `[plan] ${file}:看板生成物那几行已在,跳过`,
+    // v0.17.4 §4:段落标记按首行认,既有安装的标记早就在 —— 不补这一条,那句话对所有已装的板都落不了地。
+    // 段落多半被人改过(melon 的就是),不替人重写:只说缺哪一句、原话给全,人自己贴。
+    planClaudeStale: (line) => `[plan] 提醒:CLAUDE.md 的看板段落是 0.17.4 之前的版本 —— 缺「生成物只在主线上生成」那一句。段落可能被你改过,init 不替你重写;请自行把这一句加在那个段落末尾:\n  ${line}`,
     planMergeDriver: '[plan] 将设仓库本地 `git config merge.ours.driver true`(merge=ours 属性要每个克隆各定义一次驱动)',
     planMergeDriverOk: '[plan] merge.ours.driver 已配,跳过',
     applyGitattr: (file, n) => `[apply] ± ${file}(追加 ${n} 行:看板生成物标成派生状态)`,
@@ -529,11 +540,14 @@ const en = {
     rule: (prefix, main) => `The rule: the board is only edited on ${main} — branches leave ${prefix} alone, and demos and cards are committed on ${main} in their own commits.\n  Where a branch already touched it: before merging, run git checkout ${main} -- ${prefix} to drop the branch-side board changes, then replay them on ${main} (replaying is done from memory — miss one and the content is lost silently, which is why this list comes first).`,
   },
   mergeGate: {
-    deny: (ref, h, main, prefix, gen, dir) => {
+    deny: (ref, h, main, prefix, gen, dir, onIt = false) => {
       const files = [...h.gen, ...h.data, ...h.other]
+      const br = String(ref).replace(/^origin\//, '')
       return `Board changes must not reach ${main} through a pull request: branch ${ref} carries ${files.length} board change(s) (${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) —\n` +
         files.slice(0, 8).map((f) => `  ${f}`).join('\n') + (files.length > 8 ? `\n  … ${files.length} in total` : '') +
-        `\n  Drop them on the branch first: \`git checkout ${main} -- ${prefix}\`, commit, then merge; replay what genuinely belongs there (a new demo, a refs doc) on ${main}.` +
+        (onIt
+          ? `\n  Drop them on this branch first: \`git checkout ${main} -- ${prefix}\`, commit, then merge; replay what genuinely belongs there (a new demo, a refs doc) on ${main}.`
+          : `\n  Switch to ${br} and drop them there first: \`git switch ${br} && git checkout ${main} -- ${prefix}\`, commit, then merge; replay what genuinely belongs there (a new demo, a refs doc) on ${main}.`) +
         (h.gen.length ? `\n  The generated ones are derived state — never resolve or read them by hand: take the mainline copy and rebuild with \`node ${gen} --dir ${dir}\`.` : '') +
         `\n  Full table: \`node ${gen.replace(/gen\.mjs$/, 'board-branch-check.mjs')} --dir ${dir} --branch ${ref}\`. If you have checked it and still mean to merge, run gh pr merge yourself in a terminal (this gate only stops tool calls).`
     },
@@ -541,6 +555,7 @@ const en = {
     noGh: () => 'the gh command is not available, so the head branch of this pull request cannot be looked up',
     ghFailed: (n) => `could not look up the head branch of pull request #${n} (gh not logged in, no access to the repository, or no network)`,
     noRef: (ref) => `neither a local nor an origin branch named ${ref} exists, so there is nothing to compare`,
+    otherRepo: () => 'the command points at another repository with -R/--repo, and this gate only knows the branches of the current one',
   },
   wipOver: (n, hard, waiting = 0) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
@@ -773,6 +788,7 @@ kanban.config.json). This command never commits — git add the card files yours
     planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore exists; missing entries will be merged in (deduped): ${items.join(' · ')}`,
     planGitattr: (file, lines) => `[plan] ${file} will gain ${lines.length} line(s) (generated board files: -diff merge=ours linguist-generated):\n${lines.map((l) => `  + ${l}`).join('\n')}`,
     planGitattrOk: (file) => `[plan] ${file}: the generated-board-file lines are already there, skipping`,
+    planClaudeStale: (line) => `[plan] Note: the kanban section in CLAUDE.md predates 0.17.4 — the sentence about generated files being built on the mainline only is missing. You may have edited that section, so init will not rewrite it; please add this line at the end of it yourself:\n  ${line}`,
     planMergeDriver: '[plan] will set the repository-local `git config merge.ours.driver true` (a merge=ours attribute needs the driver defined once per clone)',
     planMergeDriverOk: '[plan] merge.ours.driver is already configured, skipping',
     applyGitattr: (file, n) => `[apply] ± ${file} (appended ${n} line(s): generated board files marked as derived state)`,

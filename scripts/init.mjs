@@ -396,6 +396,8 @@ function gitignoreMissing(giPath) {
 // linguist-generated:GitHub PR 视图默认折叠。
 // 卡片 JSON / manifest / demos / docs 不在此列 —— 它们是源,该 diff 该合。
 // 路径按解析出的看板目录相对仓根拼(不写死 app/kanban);已有同名路径的行就不重复(幂等)。
+/** CLAUDE.md 看板段落里 v0.17.4 那一句的指纹(段落首行只认「段落在不在」,认不出「是哪一版」) */
+const CLAUDE_SECTION_MARK = '生成物只在主线上生成'
 const GITATTR_HEAD = '# ddd 看板生成物:派生状态,不 diff、冲突取本分支、GitHub 折叠'
 const GITATTR_ATTRS = '-diff merge=ours linguist-generated=true'
 function gitattrPlan(root, kanban) {
@@ -685,6 +687,14 @@ async function buildPlan(root, st, gi, opt, det) {
   const cmPath = join(root, 'CLAUDE.md')
   const cm = existsSync(cmPath) ? readFileSync(cmPath, 'utf8') : ''
   plan.needsClaudeMd = !cm.includes(plan.claudeMarker)
+  // v0.17.4 §4:标记只认首行,而既有安装的首行早就在 —— 光靠 needsClaudeMd,这一版新加的那句
+  // 「生成物只在主线上生成」对每一块已经装过的板都永远落不了地(而 §6 正是让人升级后跑一次 init)。
+  // 段落是人的文件、多半被改过,不替人重写:只说缺哪一句、原话给全,贴不贴由人。
+  plan.claudeStale = null
+  if (!plan.needsClaudeMd) {
+    const last = section.split('\n').map((l) => l.trim()).filter(Boolean).pop()
+    if (last && !cm.includes(CLAUDE_SECTION_MARK)) plan.claudeStale = last
+  }
 
   // .gitattributes + merge.ours 驱动(v0.17.4 §2):非 git 场景为 null,整段跳过
   plan.gitattr = gitattrPlan(root, st.kanban)
@@ -720,6 +730,7 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
   console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
+  if (plan.claudeStale) console.log(S.init.planClaudeStale(plan.claudeStale))
   if (plan.gitattr) {
     console.log(plan.gitattr.add.length ? S.init.planGitattr(plan.gitattr.rel, plan.gitattr.add) : S.init.planGitattrOk(plan.gitattr.rel))
     console.log(plan.gitattr.driver ? S.init.planMergeDriver : S.init.planMergeDriverOk)
@@ -1042,6 +1053,7 @@ async function doApply(root, st, gi, opt, plan) {
     console.log(S.init.applyNoGit)
   }
   if (plan.mergeDeferred) console.log(S.init.applyMergeDeferred)
+  if (plan.claudeStale) console.log(S.init.planClaudeStale(plan.claudeStale)) // 同上:CLAUDE.md 是人的文件
   if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore) // 提醒而非动作:host 的 .gitignore 由人改
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(S.init.applyDone(plan.port))

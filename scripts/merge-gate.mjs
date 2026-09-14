@@ -30,6 +30,12 @@ const MERGE_RE = /^gh\s+pr\s+merge(?:\s|$)/
 // 要认分支选择符,把第一个非 flag 参数原样交给 gh pr view —— 但那需要一张「带值的 flag」清单,
 // 而认错了就是拿错分支下判断。退到当前分支最坏也只是漏拦一次,不会误拦。
 const PR_NUM_RE = /^gh\s+pr\s+merge\s+(?:.*?\s)?(?:(\d+)|\S*\/pull\/(\d+))(?:\s|$)/
+// -R/--repo 指向别的仓:PR 号属于那边,而这道闸只问得出「当前仓的同号 PR 是哪条分支」——
+// PR 号在两个仓之间撞号是常事,照样判就会拿一条毫不相干的分支去 deny 一次别处的合并。
+// 闸的立身之本是「只拦确定的违规」,误拦比漏拦坏,所以这一档放行并说一句。
+// 认死 -R 的三种写法(`-R x` / `-R=x` / cobra 允许的贴着写 `-Rx`)与 --repo。宁可多认一种:
+// 认错了是放行,放行只漏拦;认漏了才会落到「拿同号 PR 顶包」那条错路上。
+const OTHER_REPO_RE = /\s(?:-R\b|-R[^\s=]|--repo\b)/
 
 /** 决策 JSON 的形状按 Claude Code 的 PreToolUse 契约写(写错等于没拦) */
 const deny = (reason) => {
@@ -66,6 +72,8 @@ const git = (args) => {
   return r.error || r.status !== 0 ? null : String(r.stdout)
 }
 
+if (OTHER_REPO_RE.test(cmd)) pass(S.mergeGate.skipped(S.mergeGate.otherRepo()))
+
 const m = PR_NUM_RE.exec(cmd)
 const num = m ? (m[1] || m[2]) : null
 let ref = null
@@ -86,4 +94,6 @@ if (num) {
 const r = boardBranchCheck(KANBAN, S, ref ? { refs: [ref] } : {})
 if (r.skip) pass(S.mergeGate.skipped(r.skip))
 if (!r.hits.length) process.exit(0) // 干净:放行,不出声
-deny(r.hits.map((h) => S.mergeGate.deny(h.ref, h, r.main, r.prefix || 'app/kanban/', GEN, KANBAN)).join('\n\n'))
+// onIt:这棵树此刻就站在那条分支上(= 没给 PR 号那一档)。给了号时人多半正站在主线上准备合,
+// 补救那条命令得先说清切到哪儿去跑,否则照字面在当下跑等于什么都没做。
+deny(r.hits.map((h) => S.mergeGate.deny(h.ref, h, r.main, r.prefix || 'app/kanban/', GEN, KANBAN, h.ref === r.cur)).join('\n\n'))

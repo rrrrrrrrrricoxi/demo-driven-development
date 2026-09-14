@@ -5515,7 +5515,14 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     ok(on.includes('go.forEach(function (q) { q.run() })') && on.includes('var go = FB_QUEUE.slice()')
       && on.includes('FB_QUEUE.push({ key: key || null, run: then })'),
       '署完按点击顺序逐个补记 —— 点过的每一下都不丢(不再只记最后那一下)')
-    ok(on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }); return }')
+    // 评审补:框开在别的行、这一下看不见反馈,人自然再点一次同一枚 ✓。不覆盖就是同一枚判定在账上
+    // 落两条一模一样的记录(0.17.3 的 fbThen 覆盖只落一条)。同 key 就地覆盖:位置不动 = 顺序不乱。
+    ok(on.includes("var at = key ? FB_QUEUE.findIndex(function (q) { return q.key === key }) : -1")
+      && on.includes('if (at >= 0) FB_QUEUE[at].run = then'),
+      '同一个待办在队列里只占一格,后来那一下就地覆盖 —— 同一行连点两下不在账上落两条')
+    ok(on.includes("fbWhoAsk(row, function () { fbUpload(row, file) }); return }"),
+      '贴图不给 key:两张图是两件事,都得留下(去重只针对同一枚判定 / 同一只备注框)')
+    ok(on.includes("if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }, 'v:' + k); return }")
       && on.includes("if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }, 'note:' + fbKey(row)); return }")
       && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbUpload(row, file) }); return }')
       && on.includes("if (t.closest('[data-accwho]')) fbWhoAsk(null)"),
@@ -5523,8 +5530,13 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     ok(on.includes('function fbVerdictGo(row, l, k, act)') && !on.includes("if (!who) { fbSay(row, '先署个名"),
       '补记的是刚点的那一枚(act 早算定):不拿新身份重算切换,免得把这一下读成撤回;那句「先署个名」退场')
     ok(on.includes("var open = document.querySelector('.accwhof')")
-      && on.includes("if (open) { open.querySelector('.accwhoi').focus(); return }"),
-      'v0.17.4:全页同一时刻只有一只署名框 —— 已经开着就把焦点交回去,不重建(重建会把人刚打的字扔掉)')
+      && on.includes("if (oi.getClientRects().length) { oi.focus(); return }"),
+      'v0.17.4:全页同一时刻只有一只署名框 —— 已经开着且还看得见就把焦点交回去,不重建(重建会把人刚打的字扔掉)')
+    // 评审补:那只框可能长在一个收起来的 <details>(排队中 / 已验收)里。隐藏子树里 focus() 不作数,
+    // 于是人点什么都没反应、队列一直排、整页再也署不了名 —— 只能刷新。看不见就连字一起搬过来。
+    ok(on.includes('kept = oi.value') && on.includes('open.remove()')
+      && on.includes("i.value = kept === null ? (FB_WHO || '') : kept"),
+      '那只框要是藏在收起来的折叠里(focus 不作数),就带着人打了一半的字搬到这一处,不把人锁死')
     ok(on.includes("box.hidden = !(m.textContent || box.querySelector('.accwhof') || box.querySelector('.accwhook') || !ed.hidden || !ls.hidden)"),
       '署名那一行与一次性确认行都算展开区「开着」:收走了人就没处打字 / 看不见刚署的名')
     ok(on.includes('.accwhof { display: flex;') && on.includes('.accitem input.accwhoi {') && on.includes('.accme .accwhof { margin: 0; }'),
@@ -6609,6 +6621,20 @@ console.log('T76 生成物只在主线上生成 / 合并前硬闸')
       '幂等:plan 两条都说「跳过」')
     ok(readFileSync(join(repo, 'pkg', 'CLAUDE.md'), 'utf8').includes('冲突了不要手解'),
       'CLAUDE.md 看板段落带上同一句机械解法(每个会话开场就知道)')
+
+    // 评审补:段落标记只认首行,而既有安装(melon / 白泽)的首行早就在。光靠 needsClaudeMd,0.17.4
+    // 新加的那句对每一块已经装过的板都永远落不了地 —— 而 §6 恰恰是「升级后跑一次 kanban-init」。
+    const cmP = join(repo, 'pkg', 'CLAUDE.md')
+    const cmFull = readFileSync(cmP, 'utf8')
+    writeFileSync(cmP, cmFull.split('生成物只在主线上生成')[0].trimEnd() + '\n') // 退回 0.17.3 那版段落
+    const p3 = runInit('plan', '--port', '8999')
+    ok(/看板段落是 0\.17\.4 之前的版本/.test(p3.stdout) && /生成物只在主线上生成、只由机器碰/.test(p3.stdout),
+      '段落在、新句不在:一行点出缺的是哪一句并把原话给全(段落是人的文件,不替人重写)', p3.stdout.slice(-500))
+    ok(readFileSync(cmP, 'utf8') === cmFull.split('生成物只在主线上生成')[0].trimEnd() + '\n',
+      'plan 一个字节都没动人的 CLAUDE.md')
+    writeFileSync(cmP, cmFull)
+    ok(!/看板段落是 0\.17\.4 之前的版本/.test(runInit('plan', '--port', '8999').stdout),
+      '那句在了就闭嘴(零命中不说话)')
   }
 
   { // ---- ⑧ 合并前硬闸:四种输入的决策 JSON ----
@@ -6661,6 +6687,10 @@ esac
     const why = (j && j.hookSpecificOutput && j.hookSpecificOutput.permissionDecisionReason) || ''
     ok(/feat\/board/.test(why) && /backlog-manifest\.json/.test(why) && /git checkout main -- app\/kanban\//.test(why),
       'deny 的理由列出头分支、命中的文件与一行解法', why.slice(0, 300))
+    // 评审补:给了 PR 号的那一档,人此刻站在 main 上。「先在分支上丢掉它们」照字面在当下跑 = 什么
+    // 都没做,而这条 deny 的全部价值就是「说了怎么做」—— 该切到哪条分支得一起填实。
+    ok(/git switch feat\/board && git checkout main -- app\/kanban\//.test(why),
+      '在 main 上合别人的 PR:解法那条先把该切过去的分支填实,不让人在 main 上跑一条空命令', why.slice(0, 400))
 
     const clean = runGate('gh pr merge 14')
     ok(clean.status === 0 && clean.stdout === '', '头分支干净 → 放行,一个字不出', JSON.stringify(clean.stdout.slice(0, 200)))
@@ -6671,7 +6701,20 @@ esac
     try { jn = JSON.parse(noNum.stdout) } catch {}
     ok(jn && jn.hookSpecificOutput.permissionDecision === 'deny' && /feat\/board/.test(jn.hookSpecificOutput.permissionDecisionReason),
       '没给 PR 号 → 按当前分支判,照样拦得住', noNum.stdout.slice(0, 200))
+    ok(/先在这条分支上丢掉它们/.test(jn.hookSpecificOutput.permissionDecisionReason) &&
+      !/git switch/.test(jn.hookSpecificOutput.permissionDecisionReason),
+      '人就站在那条分支上时不多说一句「先切过去」(那是句废话)', (jn.hookSpecificOutput.permissionDecisionReason || '').slice(0, 300))
     g('checkout', '-q', 'main')
+
+    // 评审补:-R/--repo 指向别的仓 —— PR 号是那边的,这道闸只问得出当前仓的同号 PR 是哪条分支。
+    // 号在两个仓之间撞号是常事,照样判就会拿一条毫不相干的分支 deny 掉别处的合并。误拦比漏拦坏。
+    for (const cmd of ['gh pr merge 12 -R owner/other', 'gh pr merge --repo owner/other 12', 'gh pr merge --repo=owner/other', 'gh pr merge 12 -Rowner/other']) {
+      const other = runGate(cmd)
+      let jo = null
+      try { jo = JSON.parse(other.stdout) } catch {}
+      ok(other.status === 0 && jo && jo.systemMessage && !jo.hookSpecificOutput && /-R\/--repo/.test(jo.systemMessage),
+        `指向别的仓 → 放行并说明,不拿当前仓的同号 PR 顶包:${cmd}`, other.stdout.slice(0, 200))
+    }
 
     for (const cmd of ['git status', 'gh pr view 12', 'npm test && gh pr merge 12']) {
       const off = runGate(cmd)
