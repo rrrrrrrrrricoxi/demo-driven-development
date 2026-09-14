@@ -5501,34 +5501,69 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const genSrc = readFileSync(join(NEW_SCRIPTS, 'gen.mjs'), 'utf8')
     ok(!DIALOG.test(genSrc), 'gen.mjs 源码里也没有 —— 运行期片段是从这儿烤出去的,堵在源头',
       String((genSrc.match(new RegExp(DIALOG, 'g')) || [])[0] || ''))
-    ok(on.includes('function fbWhoAsk(row, then)') && !on.includes('fbAskWho'),
+    ok(on.includes('function fbWhoAsk(row, then, key)') && !on.includes('fbAskWho'),
       '问署名只剩 fbWhoAsk 这一只(行内、不阻塞),fbAskWho 连名字都不剩')
-    ok(on.includes("i.placeholder = '我是(1–20 字)'") && on.includes("i.setAttribute('aria-label', '署名:我是(1–20 字);回车或离开即署名,Esc 取消')"),
-      '行内输入框:占位写「我是(1–20 字)」,aria-label 把回车 / Esc 说清楚(键盘可达、读屏读得出)')
+    ok(on.includes("i.placeholder = '我是(2–20 字)'") && on.includes("i.setAttribute('aria-label', '署名:我是(2–20 字);回车署名,Esc 取消;离开不提交,字留着')"),
+      'v0.17.4:占位与 aria-label 一起改口「2–20 字 / 回车署名 / 离开不提交」(下限与手感都说给读屏听)')
     ok(on.includes("if (ev.key === 'Enter') { ev.preventDefault(); save(); return }")
       && on.includes("if (ev.key === 'Escape') { ev.preventDefault(); cancel() }")
-      && on.includes("i.addEventListener('blur', save)"),
-      '回车 / 失焦即署名,Esc 取消(与备注框同一套手感)')
-    ok(on.includes('var cancel = function () { if (done) return; done = true; close() }')
-      && on.includes("var v = fbWhoNorm(i.value)\n        if (!v) { cancel(); return }"),
-      'Esc 或留空离开 = 取消:什么都不记(fbWhoSet 一步都走不到)')
-    ok(on.includes('if (go) go()') && on.includes('f.fbThen = then || null'),
-      '署完把刚才那一下接着做完 —— 一次点击不许丢')
+      && !on.includes("i.addEventListener('blur', save)"),
+      'v0.17.4:只在回车时署名 —— blur 那条监听退场(手机上随手一点就把半截字提交了,正是「ok」那次事故)')
+    ok(on.includes('FB_QUEUE.length = 0')
+      && on.includes("if (Array.from(v).length < 2) { w.classList.add('short'); min.hidden = false; i.focus(); return }"),
+      'Esc = 取消(排着的那几下一并作废);不够 2 个码点连 fbWhoSet 都走不到,框也不关')
+    ok(on.includes('go.forEach(function (q) { q.run() })') && on.includes('var go = FB_QUEUE.slice()')
+      && on.includes('FB_QUEUE.push({ key: key || null, run: then })'),
+      '署完按点击顺序逐个补记 —— 点过的每一下都不丢(不再只记最后那一下)')
     ok(on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }); return }')
-      && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }); return }')
+      && on.includes("if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }, 'note:' + fbKey(row)); return }")
       && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbUpload(row, file) }); return }')
       && on.includes("if (t.closest('[data-accwho]')) fbWhoAsk(null)"),
       '四个口(判定 / 备注 / 贴图 / 顶上「署名·换人」)都走这一只行内输入')
     ok(on.includes('function fbVerdictGo(row, l, k, act)') && !on.includes("if (!who) { fbSay(row, '先署个名"),
       '补记的是刚点的那一枚(act 早算定):不拿新身份重算切换,免得把这一下读成撤回;那句「先署个名」退场')
-    ok(on.includes("if (old) { old.fbThen = then || null; old.querySelector('.accwhoi').focus(); return }"),
-      '同一处已经开着一只就不重建 —— 重建会把人刚打的字扔掉(备注框失焦会立刻再问一次)')
-    ok(on.includes("box.hidden = !(m.textContent || box.querySelector('.accwhof') || !ed.hidden || !ls.hidden)"),
-      '署名那一行也算展开区「开着」:收走了人就没处打字')
+    ok(on.includes("var open = document.querySelector('.accwhof')")
+      && on.includes("if (open) { open.querySelector('.accwhoi').focus(); return }"),
+      'v0.17.4:全页同一时刻只有一只署名框 —— 已经开着就把焦点交回去,不重建(重建会把人刚打的字扔掉)')
+    ok(on.includes("box.hidden = !(m.textContent || box.querySelector('.accwhof') || box.querySelector('.accwhook') || !ed.hidden || !ls.hidden)"),
+      '署名那一行与一次性确认行都算展开区「开着」:收走了人就没处打字 / 看不见刚署的名')
     ok(on.includes('.accwhof { display: flex;') && on.includes('.accitem input.accwhoi {') && on.includes('.accme .accwhof { margin: 0; }'),
       '样式随开关进来:行里一行、chip 旁边同排,且压得过 .accitem input 那条 15×15')
     ok(!on.includes('chip.hidden = false') && on.includes("chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'"),
       '芯片常显:运行期不再有「先藏起来再放出来」那一步,文案在两态之间切')
+
+    // ---- v0.17.4 §8 署名手感(病例:第一次署名落成了「ok」,此后 13 条都挂在它名下)----
+    ok(!on.includes("i.addEventListener('blur'")
+      && on.includes("i.addEventListener('input', function () { w.classList.remove('short'); min.hidden = true })"),
+      '失焦那条路彻底没有了:框留着、字还在,点回来接着打;一打字那句下限灰字自己收走')
+    ok(on.includes("var min = fbEl('i', 'accwhomin', '至少 2 个字,免得手滑')")
+      && on.includes('.accwhomin { position: absolute; right: 9px;')
+      && on.includes('.accwhow.short .accwhoi { padding-right: 122px; }'),
+      '不够 2 个码点:框内右缘一行灰字「至少 2 个字,免得手滑」,并把正文挤开不压在刚打的字上')
+    ok(on.includes("return Array.from(String(v == null ? '' : v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')"),
+      'fbWhoNorm 一个字没动(按码点切、控制字符剥掉、上限 20 —— 下限是新加的一道,不动这把尺)')
+    ok(on.includes('var FB_QUEUE = []') && on.includes('var FB_CONFIRMED = false'),
+      '队列与「确认行出过没有」都只活在这一页里:下一次收工页面重生成,确认行自然不再出现')
+    ok(on.includes('function fbWhoConfirm(row, name)')
+      && on.includes("p.appendChild(document.createTextNode('以后你的记录都署名 ' + name + ' · 不对?'))")
+      && on.includes("var b = fbEl('button', 'accwhokb', '改')"),
+      '第一次署名成功后那一行:「以后你的记录都署名 X · 不对?改」')
+    ok(on.includes('var first = !FB_WHO') && on.includes('if (first) fbWhoConfirm(row, v)')
+      && on.includes('if (FB_CONFIRMED) return'),
+      '只有第一次署名才出确认行,且全页只出这一次(换人不再出)')
+    ok(on.includes('if (row) { var box = fbBox(row); box.insertBefore(line(row), box.firstChild); fbOpen(row) }')
+      && on.includes('bar.parentNode.insertBefore(line(null), bar.nextSibling)'),
+      '那一行与顶部 chip 下各一份 —— 人在哪儿署的名,就在哪儿看见这句话')
+    ok(on.includes('function fbWhoDrop()')
+      && on.includes("b.addEventListener('click', function () { fbWhoDrop(); fbWhoAsk(target) })"),
+      '点过「改」:两处一起收走(一次性),并就地打开同一只输入框')
+    ok(on.includes("var dot = t.closest('[data-accwhodot]')")
+      && on.includes("if (dot) { fbWhoAsk(dot.closest('.accitem')); return }")
+      && on.includes("if (mine) av.dataset.accwhodot = '1'"),
+      '时间线里自己的姓名圆点可点 → 同一只改名输入(改名入口放在人看见名字的地方)')
+    ok(on.includes("av.title = mine ? String(r.who) + ' · 点一下改名' : String(r.who)")
+      && on.includes('button.accfbav { appearance: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; }'),
+      '只有自己的圆点是可点的真 <button>(可 Tab、Enter/Space);别人的还是 span,不冒充改名入口')
   }
   {
     // jsonl 只增不删、跨天跨周挂在同一页上:光一个 12:03 分不出「十分钟前」还是「上周三」
@@ -5776,7 +5811,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       '本机那条记下 who 与 base:键里没有 who(换人不换键),值里不记就把甲的判定算到乙头上')
     ok(on.includes('accFbPick(accFbMineAt(FB[k], l.rev, FB_WHO), accFbMine(fbLocal(l)[id], FB_WHO))'),
       '取判定时先过 who 这道筛(左栏颜色、进度、分组、「复制结果」共用这一只)')
-    ok(on.includes("ln.appendChild(fbEl('span', 'accfbav', Array.from(String(loc.who || '我'))[0]))"),
+    ok(on.includes("var lw = String(loc.who || '我'), lmine = FB_WHO && lw === FB_WHO")
+      && on.includes("var lav = fbEl(lmine ? 'button' : 'span', 'accfbav', Array.from(lw)[0])"),
       '时间线里本机那条的名字圆点取记录里的 who,不取当下署的名(§6:不伪造别人的反馈)')
     ok(on.includes('if (was !== v) window.accSync()'),
       '点「换人」当场重画:左栏 / 进度 / 分组全按「我的判定」算,而「我」刚刚变了(不重画就有 20 秒看着前一个人的判定)')
@@ -5829,7 +5865,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     '时间线列全部记录,撤回那条用淡色渲染(不抹,只是淡)')
   ok(!on.includes("fbEl('p', 'accfbe', '还没有反馈')") && !on.includes("'accfbe', '还没有反馈'"),
     '空态不再占一行(「还没有反馈」那句删掉了)')
-  ok(on.includes("var av = fbEl('span', 'accfbav', Array.from(String(r.who))[0] || '?')"),
+  ok(on.includes("var av = fbEl(mine ? 'button' : 'span', 'accfbav', Array.from(String(r.who))[0] || '?')"),
     '一行一条:姓名首字圆点 · ✓/✕ · 时间 · 备注 · 缩略图')
   ok(on.includes("function fbZoom(name, opener)") && on.includes("if (b && document.body.contains(b)) b.focus()")
     && on.includes("if (ev.key === 'Escape')") && !on.includes("a.href = 'shots/' + name"),

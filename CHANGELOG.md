@@ -87,6 +87,40 @@ nothing. No config key was added; `gen.mjs` is untouched and the generated
   tree. Off the mainline the guard reuses `board-branch-check`'s own dirty-file
   detection and prints one line naming them plus one line to drop them.
 
+### Also in this release: signing in stops happening by accident
+
+A real case, the day this shipped: someone's first signature landed as the two
+letters `ok`, and the next thirteen records were filed under that name. They
+believed they had typed a single `O`. The name never leaks in from a verdict —
+it only ever comes from the input box — so the bug was in the handling. Blur
+signed you in, and on a phone any stray tap (a keyboard suggestion, another
+button in the row) committed half a name. One character was accepted. Nothing
+ever said "from now on your records are signed X". And the only way to change
+it was a chip at the top of the tab, while the name people actually see is in
+the row.
+
+#### Changed
+- **Only Enter signs.** Blur neither commits nor clears: the box stays, the
+  text stays, and you can click back and keep typing. Esc cancels. The note
+  field keeps its save-on-blur — a note is content, a name is identity.
+- **One signature box on the page at a time.** Clicking another row's verdict,
+  note or paste while unsigned no longer opens a second box; the click is
+  queued, and after Enter every queued action is replayed in click order, so
+  not one of them is lost. (Each item still writes through its own queue, so
+  two clicks on the same row land in the order they were made.)
+- **A name is at least two code points.** Below that, a grey line appears at
+  the right edge inside the box — `至少 2 个字,免得手滑` — and nothing is
+  committed and the box stays open. The 20-code-point ceiling, the
+  control-character strip and the emoji-safe cut are unchanged.
+- **The first successful signature says so, once.** A single line appears in
+  that row and under the chip at the top: `以后你的记录都署名 X · 不对?改`,
+  where `改` opens the same inline input in place. It goes away when clicked,
+  and it does not come back — a later `换人` does not repeat it.
+- **Your own name dot in the timeline is a button.** Clicking it opens the same
+  rename input, right where the name is visible. Other people's dots stay
+  inert; a rename only affects records written afterwards, since the account is
+  append-only.
+
 ## [0.17.3] - 2026-09-11
 
 Signing in is now part of the board, not a browser dialog. The first time you
