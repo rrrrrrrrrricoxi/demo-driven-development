@@ -135,6 +135,20 @@ const zh = {
   // waiting > 0 才提前置那半句:板上一条 after 都没有时,这句与 0.15.x 一字不差
   wipOver: (n, hard, waiting = 0) =>
     `⚠ 看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
+  // v0.17.5:家务八类压成的那一行。每一格只给一个数 —— 数字就是索引,要正文去跑 audit。
+  // 次序由 audits.mjs 的 CHORE_KEYS 定,这里只管每一格怎么写字。
+  chore: {
+    longText: (e) => `长正文 ${e.n}`,
+    // 八类里只有这一类带对象(PR 号):它关乎别人的数据,光给个数判断不了该不该现在管
+    accFbUncommitted: (e) => `未提交反馈 ${e.n}(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
+    accFbPrunable: (e) => `可清截图 ${e.n}`,
+    settle: (e) => `待收账 ${e.n}`,
+    reopen: (e) => `收早了 ${e.n}`,
+    hold: (e) => `挂账到期 ${e.n}`,
+    depsUnlocked: (e) => `前置已清 ${e.n}`,
+    wip: (e) => `积压 ${e.n}/${e.hard}`,
+  },
+  choreLine: (parts, cmd) => `看板守卫:${parts.join(' · ')} —— 详情 ${cmd}`,
   cardsDirMissing: (rel) =>
     `⚠ 看板守卫:config.cardsDir 开着,但卡目录 ${rel} 不在 —— gen 会硬失败,看板停在上一版。建目录或把 cardsDir 从 kanban.config.json 去掉。`,
   cardIdBad: (rows, total) =>
@@ -230,14 +244,26 @@ const zh = {
   card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
 
 其它:
+  audit [--json] [--line <session 标签>]
+      只读跑一遍看板审计,把三级(阻断 / 坏了 / 家务)的完整文案打全 —— 收工时守卫只把「家务」
+      八类压成一行计数,正文在这儿。不 gen、不改任何文件。
+      --line 只看卡上 session 字段带那个标签的卡(家务活多半是按线分的);验收清单、分支、
+      孤儿 demo 这类不按线分的照旧全板算。
   export [--out f.json]             合成与 manifest 同形的一坨(backlog / decisions 两段),默认打到 stdout
   pr-sync […]                       转调 pr-sync.mjs,参数原样透传
 
 看板目录:--dir > $CLAUDE_PROJECT_DIR/app/kanban > 当前目录(含 kanban.config.json)。
 本命令从不 commit —— 写完的卡按纪律自己 git add 那几个文件。`,
+    // v0.17.5:`ddd audit` 的壳。正文全是守卫那几段原话(同一份 audits.mjs),这里只给分段与抬头。
+    audit: {
+      head: (dir, session) => `看板审计:${dir}${session ? `(只看 session 标签「${session}」的卡)` : ''}\n只读:不重生成看板,也不改任何文件。`,
+      clean: () => '三级都是零 —— 没有要处理的。',
+      sec: { block: (n) => `阻断(${n}):`, broken: (n) => `坏了(${n}):`, chore: (n) => `家务(${n}):` },
+      tail: (cmd) => `收工时守卫把家务那八类压成一行计数,正文就是上面这些;要再看一遍:${cmd}`,
+    },
     unknownFlag: (flag) => `ddd:不认识的旗子 ${flag}。看 --help;要把它当普通参数传就先写一个 -- 隔开。`,
     flagNeedsValue: (name) => `ddd:--${name} 后面要跟一个值。`,
-    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / export / pr-sync;看 --help。`,
+    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / audit / export / pr-sync;看 --help。`,
     unknownCardCmd: (cmd, list) => `ddd card:不认识的子命令「${cmd}」。可用:${list.join(' / ')};看 --help。`,
     kindBad: (kind) => `ddd card new:第一个参数要写 backlog 或 decision(给的是「${kind}」)。`,
     readFailed: (what, err) => `ddd:读不了 ${what}(不在,或不是合法 JSON):${err}`,
@@ -559,6 +585,17 @@ const en = {
   },
   wipOver: (n, hard, waiting = 0) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  chore: {
+    longText: (e) => `long prose ${e.n}`,
+    accFbUncommitted: (e) => `uncommitted feedback ${e.n} (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
+    accFbPrunable: (e) => `prunable shots ${e.n}`,
+    settle: (e) => `to settle ${e.n}`,
+    reopen: (e) => `settled early ${e.n}`,
+    hold: (e) => `holds due ${e.n}`,
+    depsUnlocked: (e) => `prerequisites cleared ${e.n}`,
+    wip: (e) => `backlog ${e.n}/${e.hard}`,
+  },
+  choreLine: (parts, cmd) => `Kanban guard: ${parts.join(' · ')} — details: ${cmd}`,
   cardsDirMissing: (rel) =>
     `⚠ Kanban guard: config.cardsDir is set but the card directory ${rel} is not there — gen will fail hard and the board stays on its last version. Create the directory, or drop cardsDir from kanban.config.json.`,
   cardIdBad: (rows, total) =>
@@ -662,15 +699,28 @@ Cards:
   card history <id>                 git history of that card's file (needs one file per card)
 
 Other:
+  audit [--json] [--line <session tag>]
+      Run the board audits read-only and print all three levels (blocking / broken / chores) in
+      full. On Stop the guard squeezes the eight chore categories into a single counted line;
+      the prose lives here. Nothing is generated and no file is touched.
+      --line keeps only the cards whose session field carries that tag (chores are mostly
+      per-line); audits that are not per-line — acceptance lists, branches, orphan demos —
+      still look at the whole board.
   export [--out f.json]             one object shaped like the manifests (a backlog and a
                                     decisions section); goes to stdout unless --out is given
   pr-sync […]                       hands over to pr-sync.mjs with the arguments unchanged
 
 Kanban directory: --dir > $CLAUDE_PROJECT_DIR/app/kanban > the current directory (if it holds a
 kanban.config.json). This command never commits — git add the card files yourself.`,
+    audit: {
+      head: (dir, session) => `Board audit: ${dir}${session ? ` (only cards tagged session "${session}")` : ''}\nRead-only: nothing is regenerated and no file is touched.`,
+      clean: () => 'All three levels are empty — nothing to deal with.',
+      sec: { block: (n) => `Blocking (${n}):`, broken: (n) => `Broken (${n}):`, chore: (n) => `Chores (${n}):` },
+      tail: (cmd) => `On Stop the guard squeezes those eight chore categories into one counted line; the prose above is what it stands for. To see it again: ${cmd}`,
+    },
     unknownFlag: (flag) => `ddd: unknown flag ${flag}. See --help; to pass it as a plain argument, put a -- in front of it.`,
     flagNeedsValue: (name) => `ddd: --${name} needs a value after it.`,
-    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / export / pr-sync; see --help.`,
+    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / audit / export / pr-sync; see --help.`,
     unknownCardCmd: (cmd, list) => `ddd card: unknown subcommand "${cmd}". Available: ${list.join(' / ')}; see --help.`,
     kindBad: (kind) => `ddd card new: the first argument must be backlog or decision (got "${kind}").`,
     readFailed: (what, err) => `ddd: cannot read ${what} (missing, or not valid JSON): ${err}`,

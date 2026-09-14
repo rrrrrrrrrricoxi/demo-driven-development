@@ -9,6 +9,75 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.5] - 2026-09-15
+
+### The Stop guard says one line about the chores
+
+The guard had grown to roughly twenty notice categories plus two blocking ones,
+and every one of them printed a full paragraph on every Stop, in every session.
+A single wrap-up could be seven or eight paragraphs, most of them about work on
+someone else's line — a card from July, an acceptance list from ops, a
+prerequisite that cleared for the dev session. Nobody read it on a phone, and
+every session paid tokens for everyone else's housekeeping.
+
+The notices are now sorted into three levels by what happens if you ignore them,
+not by how stern they sound:
+
+- **Blocking** — orphan demos, a freshly created card with over 800 characters
+  of prose and no `detail`. Unchanged: full text, both faces (block, and the
+  downgraded warning when the same Stop already blocked once).
+- **Broken** — missing card directory, card filename that disagrees with the id
+  inside, card JSON that will not parse, acceptance list that will not parse,
+  `current` with no list, the same pull request in two lists, a duplicate item
+  id, a list pointing at a card that does not exist, generated board files dirty
+  on a branch or stuck in a conflict, `merge=ours` with no driver defined, board
+  changes on a non-mainline branch — plus the regeneration by-products the guard
+  itself produces (newer stamp, broken install, off-mainline skip, unstamped
+  heal, a failed `gen`). Unchanged: one paragraph each. This level is normally
+  empty, so turning it into a number would only hide it.
+- **Chores** — long prose on older cards, uncommitted acceptance feedback,
+  prunable feedback screenshots, cards waiting to be settled, cards settled
+  early, settle holds past their fourteen days, prerequisites just cleared, and
+  a backlog over its WIP limit. Eight categories that are normally non-empty.
+
+### Added
+- **The eight chore categories collapse into one counted line.**
+
+  ```
+  看板守卫:长正文 10 · 收早了 1 · 挂账到期 1 · 前置已清 3 · 未提交反馈 13(#276) · 积压 25/20 —— 详情 node <plugin>/scripts/ddd.mjs audit
+  ```
+
+  Categories at zero do not appear; with all eight at zero the line is not
+  printed at all. The order and the separator are fixed, since this line shows up
+  on every Stop and a shifting order would have to be re-read each time. The
+  path is the guard's own install path, filled in rather than left as a
+  placeholder. Only "uncommitted feedback" keeps an object — the pull request
+  number — because that category is about someone else's data, and a bare count
+  is not enough to decide whether it needs attention now. No state file and no
+  config key were added: the numbers are the index, and whoever cares runs the
+  command.
+- **`ddd audit`** — a new read-only subcommand that prints all three levels in
+  full, the same prose the guard used to print, including the command that deals
+  with each. It never runs `gen` and never writes a file. `--json` gives the
+  structured form (`dir`, `session`, `summary`, `block`, `broken`, `chore`, each
+  entry carrying its key, count and text). `--line <session tag>` narrows the
+  card-scoped audits to the cards carrying that tag; audits that are not
+  per-line — acceptance lists, branches, orphan demos — still cover the whole
+  board, and the dependency graph and the card-id universe are never filtered,
+  or a card waiting on another line's prerequisite would be reported as a typo.
+
+### Changed
+- **The audits moved into one shared module, `scripts/audits.mjs`.** The guard
+  and `ddd audit` call it; there is no second copy. The guard decides how to
+  print (collapse the chores), `audit` prints everything. Two implementations of
+  the same judgement drift apart eventually, and only one of them is ever on
+  screen.
+- `gen.mjs` is untouched and the generated `index.html` is byte-for-byte what
+  0.17.4 produced. The blocking and broken output is byte-for-byte unchanged, and
+  with all eight chore categories at zero the guard's stdout matches 0.17.4
+  exactly — all three are pinned by tests that extract the 0.17.4 tag and run
+  both versions against the same fixture.
+
 ## [0.17.4] - 2026-09-15
 
 ### The board's generated files live on the mainline only
