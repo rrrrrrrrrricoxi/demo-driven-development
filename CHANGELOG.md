@@ -9,6 +9,135 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.4] - 2026-09-15
+
+### The board's generated files live on the mainline only
+
+The board renders to roughly 5 MB of HTML — `index.html`, `shots.html`,
+`parts/**`, `refs/**`. They are derived state, but git stores them as ordinary
+text, and every session that opened a feature branch paid for that. The guard
+regenerated on whichever branch the tree happened to be on, so a branch that
+had not touched a single card ended a session carrying a pile of large files:
+first to tell apart, then either to commit (and conflict on the merge) or to
+clean up. A `git diff` or a conflict view on one of them pours hundreds of
+thousands of characters into a context window, and on a busy board most of the
+mainline's commits are board commits, so a branch that carries generated output
+re-reads them on every sync.
+
+There is one rule behind all four changes below: generated files are derived
+state, and nobody should read them, diff them, or merge them by hand. When they
+conflict, the answer is mechanical — take the mainline copy, regenerate, read
+nothing. No config key was added; `gen.mjs` is untouched and the generated
+`index.html` is byte-for-byte what 0.17.3 produced.
+
+### Changed
+- **The guard only regenerates on the mainline.** Before rebuilding, the Stop
+  hook asks which branch this tree is on and reuses the mainline name that
+  `board-branch-check` already resolves (`instance.branch` across the three
+  manifests, defaulting to `main`) — there is no second implementation of that
+  lookup. Off the mainline, a detached HEAD included, the rebuild is skipped and
+  not a byte of the generated files is touched; every audit still runs, since
+  they all read sources only. The one-line notice appears **only** when a
+  rebuild would actually have happened — on a branch whose board is already
+  fresh the guard stays as silent as before. Running `gen.mjs` by hand still
+  works on any branch: a hand-run is an explicit intent. When git cannot answer
+  the question at all (no repository, no mainline branch, git missing), the
+  guard rebuilds exactly as it always did, so a board outside git never freezes.
+
+### Added
+- **`.gitattributes`, written by `kanban-init`, idempotent.** The four generated
+  paths are marked `-diff merge=ours linguist-generated=true`: `git diff`,
+  `git show` and `git log -p` then say only "Binary files differ" so nothing can
+  pour them into a context; a merge resolves them to the current branch's copy
+  instead of entering a conflict (once on the mainline the board is stale for a
+  moment, and the next guard run rebuilds it); and GitHub's pull request view
+  collapses them by default. Paths are composed from the kanban directory
+  resolved from the config, relative to the repository root, rather than a
+  hard-coded `app/kanban`. Card JSON, manifests, demos and docs are deliberately
+  not in the list — they are sources, and they should diff and merge. Because a
+  `merge=ours` attribute needs its driver defined in every clone, init also sets
+  the repository-local `git config merge.ours.driver true` and prints what it
+  did; a clone that has the attribute lines without the driver gets one line
+  from the guard.
+- **A gate in front of `gh pr merge`.** A new `PreToolUse` hook (matcher `Bash`,
+  15 s timeout) acts on `^gh pr merge` alone — every other command produces no
+  output and costs nothing, as the hook exits before it even looks for a board.
+  Given a pull request number it reads the head branch with
+  `gh pr view <n> --json headRefName` (falling back to `origin/<branch>` when
+  the branch is not local); with no number it uses the current branch. The
+  verdict comes from `board-branch-check`, the same caliber as the guard. A hit
+  returns `permissionDecision: "deny"` with the offending files and the
+  mechanical remedy; a clean branch is let through without a word. A missing
+  `gh`, a branch that cannot be found, or any other tool-level failure lets the
+  call through with one line of explanation — the gate stops confirmed
+  violations, never tool failures. A command carrying `-R` / `--repo` is let
+  through for the same reason: the number belongs to another repository, pull
+  request numbers collide across repositories all the time, and denying on the
+  strength of a same-numbered pull request in *this* one would block a merge
+  over a branch that has nothing to do with it. Where a hit is found and the
+  tree is not standing on the offending branch, the remedy line names the
+  branch to switch to, so the command works where it is pasted. Letting through deliberately does *not*
+  return `permissionDecision: "allow"`: that would skip the human's own
+  permission prompt and turn a gate into an auto-approval. It makes no decision
+  instead, and the normal permission flow proceeds.
+- **Conflicted generated files get one mechanical line.** Each stop, the guard
+  checks `git diff --name-only --diff-filter=U`; when a generated path is among
+  them it prints one line — `git checkout <mainline> -- <those paths> && node
+  <gen> --dir <kanban dir>` — with the real paths and the real mainline name
+  filled in, so nobody has to guess. The section `kanban-init` maintains in
+  `CLAUDE.md` now carries the same sentence, so every session knows it from the
+  start. That section is recognised by its heading alone, so a board installed
+  before 0.17.4 already has the heading and would never receive the new
+  sentence; init now notices that case and prints the sentence to paste in,
+  rather than rewriting a section its owner has very likely edited. The `-diff` attribute already hides the content from anyone who insists
+  on looking; this is the second lock on the same door.
+- **A branch that already carries modified generated files is named.** Boards
+  that ran an older guard on a branch have those files sitting in the working
+  tree. Off the mainline the guard reuses `board-branch-check`'s own dirty-file
+  detection and prints one line naming them plus one line to drop them.
+
+### Also in this release: signing in stops happening by accident
+
+A real case, the day this shipped: someone's first signature landed as the two
+letters `ok`, and the next thirteen records were filed under that name. They
+believed they had typed a single `O`. The name never leaks in from a verdict —
+it only ever comes from the input box — so the bug was in the handling. Blur
+signed you in, and on a phone any stray tap (a keyboard suggestion, another
+button in the row) committed half a name. One character was accepted. Nothing
+ever said "from now on your records are signed X". And the only way to change
+it was a chip at the top of the tab, while the name people actually see is in
+the row.
+
+#### Changed
+- **Only Enter signs.** Blur neither commits nor clears: the box stays, the
+  text stays, and you can click back and keep typing. Esc cancels. The note
+  field keeps its save-on-blur — a note is content, a name is identity.
+- **One signature box on the page at a time.** Clicking another row's verdict,
+  note or paste while unsigned no longer opens a second box; the click is
+  queued, and after Enter every queued action is replayed in click order, so
+  not one of them is lost. Clicking the same verdict again replaces its place
+  in the queue instead of adding to it — the box may be open in a row that is
+  off screen, so a second click on the same button is an impatient repeat, not
+  a second opinion, and it must not land twice in an append-only account. A
+  pasted image is never deduplicated: two images are two things. And if that
+  one box is sitting in a fold the reader has since collapsed — where `focus()`
+  quietly does nothing and every further click would pile up invisibly — it
+  moves to wherever the click landed, carrying the half-typed name with it.
+  (Each item still writes through its own queue, so two clicks on the same row
+  land in the order they were made.)
+- **A name is at least two code points.** Below that, a grey line appears at
+  the right edge inside the box — `至少 2 个字,免得手滑` — and nothing is
+  committed and the box stays open. The 20-code-point ceiling, the
+  control-character strip and the emoji-safe cut are unchanged.
+- **The first successful signature says so, once.** A single line appears in
+  that row and under the chip at the top: `以后你的记录都署名 X · 不对?改`,
+  where `改` opens the same inline input in place. It goes away when clicked,
+  and it does not come back — a later `换人` does not repeat it.
+- **Your own name dot in the timeline is a button.** Clicking it opens the same
+  rename input, right where the name is visible. Other people's dots stay
+  inert; a rename only affects records written afterwards, since the account is
+  append-only.
+
 ## [0.17.3] - 2026-09-11
 
 Signing in is now part of the board, not a browser dialog. The first time you

@@ -5501,34 +5501,81 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const genSrc = readFileSync(join(NEW_SCRIPTS, 'gen.mjs'), 'utf8')
     ok(!DIALOG.test(genSrc), 'gen.mjs 源码里也没有 —— 运行期片段是从这儿烤出去的,堵在源头',
       String((genSrc.match(new RegExp(DIALOG, 'g')) || [])[0] || ''))
-    ok(on.includes('function fbWhoAsk(row, then)') && !on.includes('fbAskWho'),
+    ok(on.includes('function fbWhoAsk(row, then, key)') && !on.includes('fbAskWho'),
       '问署名只剩 fbWhoAsk 这一只(行内、不阻塞),fbAskWho 连名字都不剩')
-    ok(on.includes("i.placeholder = '我是(1–20 字)'") && on.includes("i.setAttribute('aria-label', '署名:我是(1–20 字);回车或离开即署名,Esc 取消')"),
-      '行内输入框:占位写「我是(1–20 字)」,aria-label 把回车 / Esc 说清楚(键盘可达、读屏读得出)')
+    ok(on.includes("i.placeholder = '我是(2–20 字)'") && on.includes("i.setAttribute('aria-label', '署名:我是(2–20 字);回车署名,Esc 取消;离开不提交,字留着')"),
+      'v0.17.4:占位与 aria-label 一起改口「2–20 字 / 回车署名 / 离开不提交」(下限与手感都说给读屏听)')
     ok(on.includes("if (ev.key === 'Enter') { ev.preventDefault(); save(); return }")
       && on.includes("if (ev.key === 'Escape') { ev.preventDefault(); cancel() }")
-      && on.includes("i.addEventListener('blur', save)"),
-      '回车 / 失焦即署名,Esc 取消(与备注框同一套手感)')
-    ok(on.includes('var cancel = function () { if (done) return; done = true; close() }')
-      && on.includes("var v = fbWhoNorm(i.value)\n        if (!v) { cancel(); return }"),
-      'Esc 或留空离开 = 取消:什么都不记(fbWhoSet 一步都走不到)')
-    ok(on.includes('if (go) go()') && on.includes('f.fbThen = then || null'),
-      '署完把刚才那一下接着做完 —— 一次点击不许丢')
-    ok(on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }); return }')
-      && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }); return }')
+      && !on.includes("i.addEventListener('blur', save)"),
+      'v0.17.4:只在回车时署名 —— blur 那条监听退场(手机上随手一点就把半截字提交了,正是「ok」那次事故)')
+    ok(on.includes('FB_QUEUE.length = 0')
+      && on.includes("if (Array.from(v).length < 2) { w.classList.add('short'); min.hidden = false; i.focus(); return }"),
+      'Esc = 取消(排着的那几下一并作废);不够 2 个码点连 fbWhoSet 都走不到,框也不关')
+    ok(on.includes('go.forEach(function (q) { q.run() })') && on.includes('var go = FB_QUEUE.slice()')
+      && on.includes('FB_QUEUE.push({ key: key || null, run: then })'),
+      '署完按点击顺序逐个补记 —— 点过的每一下都不丢(不再只记最后那一下)')
+    // 评审补:框开在别的行、这一下看不见反馈,人自然再点一次同一枚 ✓。不覆盖就是同一枚判定在账上
+    // 落两条一模一样的记录(0.17.3 的 fbThen 覆盖只落一条)。同 key 就地覆盖:位置不动 = 顺序不乱。
+    ok(on.includes("var at = key ? FB_QUEUE.findIndex(function (q) { return q.key === key }) : -1")
+      && on.includes('if (at >= 0) FB_QUEUE[at].run = then'),
+      '同一个待办在队列里只占一格,后来那一下就地覆盖 —— 同一行连点两下不在账上落两条')
+    ok(on.includes("fbWhoAsk(row, function () { fbUpload(row, file) }); return }"),
+      '贴图不给 key:两张图是两件事,都得留下(去重只针对同一枚判定 / 同一只备注框)')
+    ok(on.includes("if (!FB_WHO) { fbWhoAsk(row, function () { fbVerdictGo(row, l, k, act) }, 'v:' + k); return }")
+      && on.includes("if (!FB_WHO) { fbWhoAsk(row, function () { fbNoteSave(row) }, 'note:' + fbKey(row)); return }")
       && on.includes('if (!FB_WHO) { fbWhoAsk(row, function () { fbUpload(row, file) }); return }')
       && on.includes("if (t.closest('[data-accwho]')) fbWhoAsk(null)"),
       '四个口(判定 / 备注 / 贴图 / 顶上「署名·换人」)都走这一只行内输入')
     ok(on.includes('function fbVerdictGo(row, l, k, act)') && !on.includes("if (!who) { fbSay(row, '先署个名"),
       '补记的是刚点的那一枚(act 早算定):不拿新身份重算切换,免得把这一下读成撤回;那句「先署个名」退场')
-    ok(on.includes("if (old) { old.fbThen = then || null; old.querySelector('.accwhoi').focus(); return }"),
-      '同一处已经开着一只就不重建 —— 重建会把人刚打的字扔掉(备注框失焦会立刻再问一次)')
-    ok(on.includes("box.hidden = !(m.textContent || box.querySelector('.accwhof') || !ed.hidden || !ls.hidden)"),
-      '署名那一行也算展开区「开着」:收走了人就没处打字')
+    ok(on.includes("var open = document.querySelector('.accwhof')")
+      && on.includes("if (oi.getClientRects().length) { oi.focus(); return }"),
+      'v0.17.4:全页同一时刻只有一只署名框 —— 已经开着且还看得见就把焦点交回去,不重建(重建会把人刚打的字扔掉)')
+    // 评审补:那只框可能长在一个收起来的 <details>(排队中 / 已验收)里。隐藏子树里 focus() 不作数,
+    // 于是人点什么都没反应、队列一直排、整页再也署不了名 —— 只能刷新。看不见就连字一起搬过来。
+    ok(on.includes('kept = oi.value') && on.includes('open.remove()')
+      && on.includes("i.value = kept === null ? (FB_WHO || '') : kept"),
+      '那只框要是藏在收起来的折叠里(focus 不作数),就带着人打了一半的字搬到这一处,不把人锁死')
+    ok(on.includes("box.hidden = !(m.textContent || box.querySelector('.accwhof') || box.querySelector('.accwhook') || !ed.hidden || !ls.hidden)"),
+      '署名那一行与一次性确认行都算展开区「开着」:收走了人就没处打字 / 看不见刚署的名')
     ok(on.includes('.accwhof { display: flex;') && on.includes('.accitem input.accwhoi {') && on.includes('.accme .accwhof { margin: 0; }'),
       '样式随开关进来:行里一行、chip 旁边同排,且压得过 .accitem input 那条 15×15')
     ok(!on.includes('chip.hidden = false') && on.includes("chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'"),
       '芯片常显:运行期不再有「先藏起来再放出来」那一步,文案在两态之间切')
+
+    // ---- v0.17.4 §8 署名手感(病例:第一次署名落成了「ok」,此后 13 条都挂在它名下)----
+    ok(!on.includes("i.addEventListener('blur'")
+      && on.includes("i.addEventListener('input', function () { w.classList.remove('short'); min.hidden = true })"),
+      '失焦那条路彻底没有了:框留着、字还在,点回来接着打;一打字那句下限灰字自己收走')
+    ok(on.includes("var min = fbEl('i', 'accwhomin', '至少 2 个字,免得手滑')")
+      && on.includes('.accwhomin { position: absolute; right: 9px;')
+      && on.includes('.accwhow.short .accwhoi { padding-right: 122px; }'),
+      '不够 2 个码点:框内右缘一行灰字「至少 2 个字,免得手滑」,并把正文挤开不压在刚打的字上')
+    ok(on.includes("return Array.from(String(v == null ? '' : v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')"),
+      'fbWhoNorm 一个字没动(按码点切、控制字符剥掉、上限 20 —— 下限是新加的一道,不动这把尺)')
+    ok(on.includes('var FB_QUEUE = []') && on.includes('var FB_CONFIRMED = false'),
+      '队列与「确认行出过没有」都只活在这一页里:下一次收工页面重生成,确认行自然不再出现')
+    ok(on.includes('function fbWhoConfirm(row, name)')
+      && on.includes("p.appendChild(document.createTextNode('以后你的记录都署名 ' + name + ' · 不对?'))")
+      && on.includes("var b = fbEl('button', 'accwhokb', '改')"),
+      '第一次署名成功后那一行:「以后你的记录都署名 X · 不对?改」')
+    ok(on.includes('var first = !FB_WHO') && on.includes('if (first) fbWhoConfirm(row, v)')
+      && on.includes('if (FB_CONFIRMED) return'),
+      '只有第一次署名才出确认行,且全页只出这一次(换人不再出)')
+    ok(on.includes('if (row) { var box = fbBox(row); box.insertBefore(line(row), box.firstChild); fbOpen(row) }')
+      && on.includes('bar.parentNode.insertBefore(line(null), bar.nextSibling)'),
+      '那一行与顶部 chip 下各一份 —— 人在哪儿署的名,就在哪儿看见这句话')
+    ok(on.includes('function fbWhoDrop()')
+      && on.includes("b.addEventListener('click', function () { fbWhoDrop(); fbWhoAsk(target) })"),
+      '点过「改」:两处一起收走(一次性),并就地打开同一只输入框')
+    ok(on.includes("var dot = t.closest('[data-accwhodot]')")
+      && on.includes("if (dot) { fbWhoAsk(dot.closest('.accitem')); return }")
+      && on.includes("if (mine) av.dataset.accwhodot = '1'"),
+      '时间线里自己的姓名圆点可点 → 同一只改名输入(改名入口放在人看见名字的地方)')
+    ok(on.includes("av.title = mine ? String(r.who) + ' · 点一下改名' : String(r.who)")
+      && on.includes('button.accfbav { appearance: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; }'),
+      '只有自己的圆点是可点的真 <button>(可 Tab、Enter/Space);别人的还是 span,不冒充改名入口')
   }
   {
     // jsonl 只增不删、跨天跨周挂在同一页上:光一个 12:03 分不出「十分钟前」还是「上周三」
@@ -5776,7 +5823,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       '本机那条记下 who 与 base:键里没有 who(换人不换键),值里不记就把甲的判定算到乙头上')
     ok(on.includes('accFbPick(accFbMineAt(FB[k], l.rev, FB_WHO), accFbMine(fbLocal(l)[id], FB_WHO))'),
       '取判定时先过 who 这道筛(左栏颜色、进度、分组、「复制结果」共用这一只)')
-    ok(on.includes("ln.appendChild(fbEl('span', 'accfbav', Array.from(String(loc.who || '我'))[0]))"),
+    ok(on.includes("var lw = String(loc.who || '我'), lmine = FB_WHO && lw === FB_WHO")
+      && on.includes("var lav = fbEl(lmine ? 'button' : 'span', 'accfbav', Array.from(lw)[0])"),
       '时间线里本机那条的名字圆点取记录里的 who,不取当下署的名(§6:不伪造别人的反馈)')
     ok(on.includes('if (was !== v) window.accSync()'),
       '点「换人」当场重画:左栏 / 进度 / 分组全按「我的判定」算,而「我」刚刚变了(不重画就有 20 秒看着前一个人的判定)')
@@ -5829,7 +5877,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     '时间线列全部记录,撤回那条用淡色渲染(不抹,只是淡)')
   ok(!on.includes("fbEl('p', 'accfbe', '还没有反馈')") && !on.includes("'accfbe', '还没有反馈'"),
     '空态不再占一行(「还没有反馈」那句删掉了)')
-  ok(on.includes("var av = fbEl('span', 'accfbav', Array.from(String(r.who))[0] || '?')"),
+  ok(on.includes("var av = fbEl(mine ? 'button' : 'span', 'accfbav', Array.from(String(r.who))[0] || '?')"),
     '一行一条:姓名首字圆点 · ✓/✕ · 时间 · 备注 · 缩略图')
   ok(on.includes("function fbZoom(name, opener)") && on.includes("if (b && document.body.contains(b)) b.focus()")
     && on.includes("if (ev.key === 'Escape')") && !on.includes("a.href = 'shots/' + name"),
@@ -6418,6 +6466,296 @@ console.log('T75 发布表格行高 / 上下居中')
   wr(cfgP, cfg)
   runGen(NEW_SCRIPTS, kb)
   ok(sha(idxP) === offSha, '关回后与冻结基线逐字节相同')
+}
+
+
+// ============ T76 生成物只在主线上生成、只由机器碰(0.17.4 §1–§4)============
+console.log('T76 生成物只在主线上生成 / 合并前硬闸')
+{
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  const setM = (p, sec) => utimesSync(p, sec, sec)
+  const stale = (p) => setM(p, Date.now() / 1000 + 5) // 比产物新 → 守卫「本来会重渲」
+  const old = (p) => setM(p, Date.now() / 1000 - 600) // 退回产物之前 → 新鲜度判定说不用重渲
+
+  { // ---- ① 分支三态:main 重渲 / feat 与游离 HEAD 跳过重渲(产物一个字节不动),审计照跑 ----
+    const fx = mkFixture('fx76a', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('checkout', '-q', '-B', 'main')
+    const mP = join(kb, 'manifest.json'), blP = join(kb, 'backlog-manifest.json'), idxP = join(kb, 'index.html')
+    for (const p of [mP, blP, join(kb, 'decisions-manifest.json')]) { const o = rd(p); o.instance.branch = 'main'; wr(p, o) }
+    runGen(NEW_SCRIPTS, kb)
+    g('add', '-A'); g('commit', '-qm', 'init')
+
+    stale(mP)
+    const beforeMain = statSync(idxP).mtimeMs
+    const onMain = runStop(NEW_SCRIPTS, root)
+    ok(onMain.status === 0 && !/未重渲/.test(onMain.stdout) && statSync(idxP).mtimeMs !== beforeMain,
+      '主线上照旧重渲:产物被重写,且一个字不说', `${onMain.status} ${onMain.stdout.slice(0, 200)}`)
+
+    g('checkout', '-q', '-b', 'feat/x')
+    stale(mP)
+    const idxSha = sha(idxP), idxAt = statSync(idxP).mtimeMs
+    const onFeat = runStop(NEW_SCRIPTS, root)
+    ok(/非主线分支 feat\/x/.test(onFeat.stdout) && /产物只在 main 上生成/.test(onFeat.stdout),
+      '非主线:出一行「非主线分支 feat/x,看板未重渲(产物只在 main 上生成)」', onFeat.stdout.slice(0, 260))
+    ok(sha(idxP) === idxSha && statSync(idxP).mtimeMs === idxAt,
+      '跳过重渲后产物 mtime 与内容都没动 —— 一个字节都没碰')
+
+    writeFileSync(join(kb, 'demos', 'orphan.html'), demoHtml('orphan'))
+    const audit = runStop(NEW_SCRIPTS, root)
+    ok(/"decision":"block"/.test(audit.stdout) && /orphan\.html/.test(audit.stdout),
+      '非主线上审计照跑:孤儿 demo 照样阻断(审计只读源文件,与重不重渲无关)', audit.stdout.slice(0, 200))
+    ok(sha(idxP) === idxSha, '审计跑过之后产物仍逐字节没动')
+    rmSync(join(kb, 'demos', 'orphan.html'))
+
+    g('checkout', '-q', '--detach', 'HEAD')
+    stale(mP)
+    const det = runStop(NEW_SCRIPTS, root)
+    ok(/游离 HEAD/.test(det.stdout) && /未重渲/.test(det.stdout) && sha(idxP) === idxSha,
+      '游离 HEAD 同样跳过重渲,并说清自己是游离的(不冒充「你在主线上」)', det.stdout.slice(0, 200))
+    g('checkout', '-q', 'feat/x')
+
+    const manual = runGen(NEW_SCRIPTS, kb)
+    ok(manual.status === 0 && statSync(idxP).mtimeMs !== idxAt,
+      '人手跑 gen.mjs 在分支上照旧能跑(人手 = 明确意图,不受此限)', manual.stderr)
+    old(mP)
+    const quiet = runStop(NEW_SCRIPTS, root)
+    ok(quiet.status === 0 && !/未重渲/.test(quiet.stdout),
+      '产物不过期的分支上一个字不说 —— 那一行只在「本来会重渲」时才出', quiet.stdout.slice(0, 200))
+
+    // ---- ② 分支上已有的脏产物:一行点名 + 一行解法 ----
+    writeFileSync(idxP, readFileSync(idxP, 'utf8') + '\n<!-- 手改 -->\n')
+    const dirty = runStop(NEW_SCRIPTS, root)
+    ok(/生成物改动/.test(dirty.stdout) && /app\/kanban\/index\.html/.test(dirty.stdout),
+      '分支工作区里的脏产物被点名到文件', dirty.stdout.slice(0, 300))
+    ok(/git checkout main -- app\/kanban\/index\.html/.test(dirty.stdout),
+      '解法那一行把主线名与路径都填实,不让人猜', (dirty.stdout.match(/git checkout[^\\"]*/) || [''])[0])
+    g('checkout', '-q', '--', '.')
+
+    // ---- ③ .gitattributes 写了 merge=ours 而驱动没配 → 一行提醒;配上就闭嘴 ----
+    const attrP = join(root, '.gitattributes')
+    writeFileSync(attrP, '# ddd 看板生成物\napp/kanban/index.html  -diff merge=ours linguist-generated=true\n')
+    const noDriver = runStop(NEW_SCRIPTS, root)
+    ok(/merge=ours/.test(noDriver.stdout) && /git config merge\.ours\.driver true/.test(noDriver.stdout),
+      '属性写了而驱动没定义:一行提醒,给出那条命令', noDriver.stdout.slice(0, 300))
+    g('config', 'merge.ours.driver', 'true')
+    const withDriver = runStop(NEW_SCRIPTS, root)
+    ok(!/merge\.ours\.driver/.test(withDriver.stdout), '驱动配上之后这条自己闭嘴(零命中不说话)')
+    rmSync(attrP)
+
+    // ---- ④ 生成物处在冲突状态:一行机械解法,路径与主线名都填实 ----
+    g('checkout', '-q', 'main')
+    writeFileSync(idxP, '<!doctype html>\n<!-- ddd-gen v0.0.0 -->\n<p>main</p>\n')
+    g('add', 'app/kanban/index.html'); g('commit', '-qm', 'main side')
+    g('checkout', '-q', '-b', 'feat/conflict', 'HEAD~1')
+    writeFileSync(idxP, '<!doctype html>\n<!-- ddd-gen v0.0.0 -->\n<p>branch</p>\n')
+    g('add', 'app/kanban/index.html'); g('commit', '-qm', 'branch side')
+    const mg = g('merge', 'main')
+    ok(mg.status !== 0, '前置:真造出一次生成物冲突', String(mg.status))
+    const conf = runStop(NEW_SCRIPTS, root)
+    ok(/冲突状态/.test(conf.stdout) && /git checkout main -- app\/kanban\/index\.html/.test(conf.stdout),
+      '冲突提醒点名到文件,并给「取主线那份」的那条命令', conf.stdout.slice(0, 400))
+    ok(/node [^\\"]*gen\.mjs --dir /.test(conf.stdout),
+      '同一行接着给重新生成的命令 —— 取主线 + 重渲,零阅读', (conf.stdout.match(/node [^\\"]*gen\.mjs --dir [^\\"]*/) || [''])[0].slice(0, 160))
+    g('merge', '--abort')
+    g('checkout', '-q', 'main'); g('checkout', '-q', '--', '.')
+
+    // ---- ⑤ 主线 + 产物新鲜 + 无冲突 + 无脏产物:四条新提醒一条都不出,守卫一个字节都不输出 ----
+    runGen(NEW_SCRIPTS, kb)
+    const cleanRun = runStop(NEW_SCRIPTS, root)
+    ok(cleanRun.status === 0 && cleanRun.stdout === '',
+      '§1–§4 触发条件都不满足时守卫零输出(与 0.17.3 同)', JSON.stringify(cleanRun.stdout.slice(0, 200)))
+    const idxText = readFileSync(idxP, 'utf8')
+    ok(!idxText.includes('未重渲') && !idxText.includes('merge=ours') && !idxText.includes('diff-filter=U'),
+      '§1–§4 一个字节都没落进产物(gen.mjs 本版一字不动)')
+  }
+
+  { // ---- ⑥ 口径复用:主线名与「什么算生成物」都不许有第二份实现 ----
+    const hookSrc = readFileSync(join(NEW_SCRIPTS, 'stop-hook.mjs'), 'utf8')
+    const gateSrc = readFileSync(join(NEW_SCRIPTS, 'merge-gate.mjs'), 'utf8')
+    ok(count(hookSrc, 'boardBranchCheck(KANBAN, S)') === 1 && !/instance[^\n]*\.branch/.test(hookSrc) && !hookSrc.includes('--abbrev-ref'),
+      '守卫只调一次 boardBranchCheck,不另写一份主线解析 / HEAD 解析')
+    ok(gateSrc.includes('boardBranchCheck(KANBAN, S,') && !/instance[^\n]*\.branch/.test(gateSrc) && !gateSrc.includes('--abbrev-ref'),
+      '合并闸走同一份口径,也不写第二份')
+    ok(/import \{[^}]*GEN_RE[^}]*\} from '\.\/board-branch-check\.mjs'/.test(hookSrc) && !/GEN_RE\s*=/.test(hookSrc),
+      '「什么算生成物」只有 board-branch-check 的 GEN_RE 一份,守卫是 import 来的')
+    ok(readFileSync(join(NEW_SCRIPTS, 'init.mjs'), 'utf8').includes("genAttrPaths") &&
+      !readFileSync(join(NEW_SCRIPTS, 'init.mjs'), 'utf8').includes("'app/kanban/index.html'"),
+      '.gitattributes 那四条路径也由同一份 genAttrPaths 拼,不写死 app/kanban')
+  }
+
+  { // ---- ⑦ kanban-init:幂等写 .gitattributes(路径按解析出的看板目录拼)+ 设本地 merge.ours 驱动 ----
+    const repo = join(WORK, 'fx76init')
+    mkdirSync(join(repo, 'pkg'), { recursive: true })
+    const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' })
+    g('init', '-q', '.'); g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('commit', '-q', '--allow-empty', '-m', 'root')
+    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), ...extra, '--dir', join(repo, 'pkg')],
+      { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS } })
+    const p1 = runInit('plan', '--brand', 'XT', '--port', '8999')
+    ok(/pkg\/app\/kanban\/index\.html\s+-diff merge=ours linguist-generated=true/.test(p1.stdout) &&
+      /pkg\/app\/kanban\/refs\/\*\*/.test(p1.stdout),
+      '路径按解析出的看板目录相对仓根拼(仓根在项目根之上时是 pkg/app/kanban/…,不写死 app/kanban)',
+      (p1.stdout.match(/\+ [^\n]*index\.html[^\n]*/) || [''])[0])
+    ok(/将设仓库本地 `git config merge\.ours\.driver true`/.test(p1.stdout), '驱动没配时 plan 说要设')
+    const a1 = runInit('apply', '--yes', '--brand', 'XT', '--port', '8999')
+    const attr = readFileSync(join(repo, '.gitattributes'), 'utf8')
+    ok(a1.status === 0 && attr.split('\n').filter((l) => l.includes('merge=ours')).length === 4 &&
+      attr.includes('parts/**') && attr.includes('shots.html'),
+      'apply 把四条写进仓库根 .gitattributes', `${a1.status} ${(a1.stderr || '').slice(0, 300)}`)
+    ok((g('config', '--get', 'merge.ours.driver').stdout || '').trim() === 'true',
+      'merge=ours 的驱动在这个克隆里定义好了(仓库本地)')
+    ok(/± [^\n]*\.gitattributes/.test(a1.stdout) && /git config merge\.ours\.driver true/.test(a1.stdout),
+      'apply 把做过的两件事都打印出来')
+    ok((g('status', '--porcelain', '--', '.gitattributes').stdout || '').trim() === '',
+      '.gitattributes 随本次 apply 一起提交了(不是留在工作区)')
+    const before = readFileSync(join(repo, '.gitattributes'), 'utf8')
+    const a2 = runInit('apply', '--yes', '--port', '8999')
+    ok(a2.status === 0 && readFileSync(join(repo, '.gitattributes'), 'utf8') === before,
+      '幂等:重跑 apply 一行都不重复追加', `${a2.status} ${(a2.stderr || '').slice(0, 200)}`)
+    ok(/看板生成物那几行已在,跳过/.test(runInit('plan', '--port', '8999').stdout) &&
+      /merge\.ours\.driver 已配,跳过/.test(runInit('plan', '--port', '8999').stdout),
+      '幂等:plan 两条都说「跳过」')
+    ok(readFileSync(join(repo, 'pkg', 'CLAUDE.md'), 'utf8').includes('冲突了不要手解'),
+      'CLAUDE.md 看板段落带上同一句机械解法(每个会话开场就知道)')
+
+    // 评审补:段落标记只认首行,而既有安装(melon / 白泽)的首行早就在。光靠 needsClaudeMd,0.17.4
+    // 新加的那句对每一块已经装过的板都永远落不了地 —— 而 §6 恰恰是「升级后跑一次 kanban-init」。
+    const cmP = join(repo, 'pkg', 'CLAUDE.md')
+    const cmFull = readFileSync(cmP, 'utf8')
+    writeFileSync(cmP, cmFull.split('生成物只在主线上生成')[0].trimEnd() + '\n') // 退回 0.17.3 那版段落
+    const p3 = runInit('plan', '--port', '8999')
+    ok(/看板段落是 0\.17\.4 之前的版本/.test(p3.stdout) && /生成物只在主线上生成、只由机器碰/.test(p3.stdout),
+      '段落在、新句不在:一行点出缺的是哪一句并把原话给全(段落是人的文件,不替人重写)', p3.stdout.slice(-500))
+    ok(readFileSync(cmP, 'utf8') === cmFull.split('生成物只在主线上生成')[0].trimEnd() + '\n',
+      'plan 一个字节都没动人的 CLAUDE.md')
+    writeFileSync(cmP, cmFull)
+    ok(!/看板段落是 0\.17\.4 之前的版本/.test(runInit('plan', '--port', '8999').stdout),
+      '那句在了就闭嘴(零命中不说话)')
+  }
+
+  { // ---- ⑧ 合并前硬闸:四种输入的决策 JSON ----
+    const fx = mkFixture('fx76b', { 's.html': demoHtml('s') })
+    const kb = fx.kb, root = fx.root
+    const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('checkout', '-q', '-B', 'main')
+    const blP = join(kb, 'backlog-manifest.json')
+    const bl = rd(blP)
+    bl.instance.branch = 'main'
+    bl.tiers = { 1: '核心' }
+    bl.items = [{ id: 'BL-1', status: 'ready', priority: 'high', tier: '1', title: '甲', problem: 'p', approach: 'a', area: 'x', source: 's' }]
+    wr(blP, bl)
+    g('add', '-A'); g('commit', '-qm', 'init')
+    g('checkout', '-q', '-b', 'feat/clean')
+    writeFileSync(join(root, 'README.md'), 'x\n')
+    g('add', '-A'); g('commit', '-qm', 'no board change')
+    g('checkout', '-q', 'main')
+    g('checkout', '-q', '-b', 'feat/board')
+    const bl2 = rd(blP); bl2.items.push({ ...bl.items[0], id: 'BL-2', title: '乙' }); wr(blP, bl2)
+    g('add', 'app/kanban/backlog-manifest.json'); g('commit', '-qm', 'board change on a branch')
+    g('checkout', '-q', 'main')
+
+    const ghDir = join(WORK, 'fakegh76')
+    mkdirSync(ghDir, { recursive: true })
+    writeFileSync(join(ghDir, 'gh'), `#!/bin/sh
+case "$1 $2 $3" in
+"pr view 12") echo '{"headRefName":"feat/board"}' ;;
+"pr view 14") echo '{"headRefName":"feat/clean"}' ;;
+*) echo 'could not resolve to a PullRequest' >&2; exit 1 ;;
+esac
+`)
+    chmodSync(join(ghDir, 'gh'), 0o755)
+    // 真 gh 可能就在 PATH 上:把假的排在最前面顶掉它;git 还得找得到,所以不清空 PATH
+    const GATE_ENV = { CLAUDE_PROJECT_DIR: root, PATH: `${ghDir}:${process.env.PATH}` }
+    const runGate = (command) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'merge-gate.mjs')], {
+      encoding: 'utf8',
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }),
+      env: { ...process.env, ...GATE_ENV },
+    })
+
+    const hit = runGate('gh pr merge 12 --squash --delete-branch')
+    let j = null
+    try { j = JSON.parse(hit.stdout) } catch {}
+    ok(hit.status === 0 && j && j.hookSpecificOutput && j.hookSpecificOutput.hookEventName === 'PreToolUse' &&
+      j.hookSpecificOutput.permissionDecision === 'deny',
+      'gh pr merge 12 命中 → 决策 JSON 就是 PreToolUse 契约那一份(hookSpecificOutput.permissionDecision = deny)',
+      hit.stdout.slice(0, 200))
+    const why = (j && j.hookSpecificOutput && j.hookSpecificOutput.permissionDecisionReason) || ''
+    ok(/feat\/board/.test(why) && /backlog-manifest\.json/.test(why) && /git checkout main -- app\/kanban\//.test(why),
+      'deny 的理由列出头分支、命中的文件与一行解法', why.slice(0, 300))
+    // 评审补:给了 PR 号的那一档,人此刻站在 main 上。「先在分支上丢掉它们」照字面在当下跑 = 什么
+    // 都没做,而这条 deny 的全部价值就是「说了怎么做」—— 该切到哪条分支得一起填实。
+    ok(/git switch feat\/board && git checkout main -- app\/kanban\//.test(why),
+      '在 main 上合别人的 PR:解法那条先把该切过去的分支填实,不让人在 main 上跑一条空命令', why.slice(0, 400))
+
+    const clean = runGate('gh pr merge 14')
+    ok(clean.status === 0 && clean.stdout === '', '头分支干净 → 放行,一个字不出', JSON.stringify(clean.stdout.slice(0, 200)))
+
+    g('checkout', '-q', 'feat/board')
+    const noNum = runGate('gh pr merge --squash')
+    let jn = null
+    try { jn = JSON.parse(noNum.stdout) } catch {}
+    ok(jn && jn.hookSpecificOutput.permissionDecision === 'deny' && /feat\/board/.test(jn.hookSpecificOutput.permissionDecisionReason),
+      '没给 PR 号 → 按当前分支判,照样拦得住', noNum.stdout.slice(0, 200))
+    ok(/先在这条分支上丢掉它们/.test(jn.hookSpecificOutput.permissionDecisionReason) &&
+      !/git switch/.test(jn.hookSpecificOutput.permissionDecisionReason),
+      '人就站在那条分支上时不多说一句「先切过去」(那是句废话)', (jn.hookSpecificOutput.permissionDecisionReason || '').slice(0, 300))
+    g('checkout', '-q', 'main')
+
+    // 评审补:-R/--repo 指向别的仓 —— PR 号是那边的,这道闸只问得出当前仓的同号 PR 是哪条分支。
+    // 号在两个仓之间撞号是常事,照样判就会拿一条毫不相干的分支 deny 掉别处的合并。误拦比漏拦坏。
+    for (const cmd of ['gh pr merge 12 -R owner/other', 'gh pr merge --repo owner/other 12', 'gh pr merge --repo=owner/other', 'gh pr merge 12 -Rowner/other']) {
+      const other = runGate(cmd)
+      let jo = null
+      try { jo = JSON.parse(other.stdout) } catch {}
+      ok(other.status === 0 && jo && jo.systemMessage && !jo.hookSpecificOutput && /-R\/--repo/.test(jo.systemMessage),
+        `指向别的仓 → 放行并说明,不拿当前仓的同号 PR 顶包:${cmd}`, other.stdout.slice(0, 200))
+    }
+
+    for (const cmd of ['git status', 'gh pr view 12', 'npm test && gh pr merge 12']) {
+      const off = runGate(cmd)
+      ok(off.status === 0 && off.stdout === '', `非 \`gh pr merge …\` 命令零输出:${cmd}`, JSON.stringify(off.stdout.slice(0, 120)))
+    }
+
+    const bad = runGate('gh pr merge 13')
+    let jb = null
+    try { jb = JSON.parse(bad.stdout) } catch {}
+    ok(bad.status === 0 && jb && jb.systemMessage && !jb.hookSpecificOutput,
+      'gh 查不到分支 → 放行(不作决定)并一行说明:闸只拦确定的违规,不拦工具故障', bad.stdout.slice(0, 200))
+    ok(/不拦工具故障/.test(jb.systemMessage) && /#13/.test(jb.systemMessage),
+      '那一行说清是哪个 PR、为什么没拦', (jb.systemMessage || '').slice(0, 200))
+    ok(![hit.stdout, clean.stdout, noNum.stdout, bad.stdout].some((s) => s.includes('"permissionDecision":"allow"')),
+      '放行那一档从不返回 allow —— allow 会替人跳过权限确认,把闸变成自动批准')
+  }
+
+  { // ---- ⑨ 与 0.17.3 的逐字节对照(参照树取自 tag;浅克隆 / 没取 tag 时整组不比,如实说明)----
+    const TAG = 'demo-driven-development--v0.17.3'
+    const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+    if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.3 逐字节对照本次不比`)
+    else {
+      const oldRoot = join(WORK, 'v0173')
+      mkdirSync(oldRoot, { recursive: true })
+      const tar = join(WORK, 'v0173.tar')
+      spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+      spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+      const oldScripts = join(oldRoot, 'scripts')
+      const a = mkFixture('fx76z-old', { 's.html': demoHtml('s') })
+      const b = mkFixture('fx76z-new', { 's.html': demoHtml('s') })
+      runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
+      const norm = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+      ok(norm(join(a.kb, 'index.html')) === norm(join(b.kb, 'index.html')),
+        '归一化版本戳后,产物与 0.17.3 逐字节相同(acceptanceFeedback 关着)')
+      const oa = spawnSync(process.execPath, [join(oldScripts, 'stop-hook.mjs')],
+        { encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: a.root } })
+      const ob = runStop(NEW_SCRIPTS, b.root)
+      ok(oa.stdout === ob.stdout && (oa.status ?? 0) === (ob.status ?? 0),
+        '§1–§4 触发条件都不满足时,守卫输出与 0.17.3 逐字节相同', JSON.stringify([oa.stdout.slice(0, 120), ob.stdout.slice(0, 120)]))
+    }
+  }
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)

@@ -8,6 +8,11 @@
 //      产物反而最新。戳缺失/低于本 plugin 版 = 旧 gen 产物 → 视为过期重跑(自愈,与 mtime OR);
 //      戳高于本 plugin 版 = 本 session 才是旧的 → 一票否决重生成(含 mtime 判过期),出警告但
 //      绝不 exit 2——「重启我自己」是 Claude 修不了的状态,阻断只会造死循环。审计(只读)照做。
+//      v0.17.4 起叠加分支维度(生成物只在主线上生成):不是主线(含游离 HEAD)一律跳过重渲,产物
+//      一个字节不碰、审计照跑,且只在「本来会重渲」时出一行。理由是几 MB 的派生状态落在分支上,
+//      会在别的会话里反复烧 token(先分辨、再清、合并必冲突)。人手跑 gen.mjs 不受此限(明确意图)。
+//   1b. 生成物的三条机械提醒(v0.17.4):分支工作区里已有的脏产物 / 处在冲突状态的产物 /
+//      .gitattributes 写了 merge=ours 却没在这个克隆里定义驱动。都非阻断,零命中完全不出声。
 //   2. 审计:demos/*.html 凡未被任何 *.json manifest 引用、且不在 demos/.no-card-ok
 //      豁免名单(一行一个文件名)的,即「孤儿 demo」→ 阻断收工,要求当场补卡。
 //      v0.10.0 起认「合订引用」:被已豁免 demo 用 iframe(data-src/src)内嵌的同目录子页
@@ -73,7 +78,7 @@ import { prsOfCard } from './prlink.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } from './settle.mjs'
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, daysBetween, localDate, scanCardDir } from './cards.mjs'
 import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
-import { boardBranchCheck } from './board-branch-check.mjs'
+import { GEN_RE, boardBranchCheck, dirtyBoardFiles, genAttrPaths } from './board-branch-check.mjs'
 import { ACC_FB_PRUNE_DAYS, ACC_FB_PRUNE_MIN, prunable } from './acc-feedback-prune.mjs'
 
 const KANBAN = detect()
@@ -271,6 +276,21 @@ function depCtx() {
   if (parseBad.length) notices.push(S.cardParseBad(parseBad.slice(0, 5), parseBad.length))
 }
 
+// ---- 这棵树现在在哪条分支上(v0.17.4 §1)。一次算清,①(要不要重渲)与 ⑦(分支审计)共读 ----
+// 口径全在 board-branch-check.mjs:主线名怎么解析、游离 HEAD 算不算一个位置,都不在这儿再写一遍。
+// scanned === 0 ⟺ 当前位置就是主线(那份实现把主线本身从待比清单里滤掉了);游离 HEAD 的 cur 是
+// 短 sha,滤不掉,于是 scanned === 1 —— 正是「不是主线」。
+// skip(不在 git 仓 / git 跑不起来 / 找不到主线)= 问不出分支,那就照旧重渲:宁可多渲一次,
+// 也不能让非 git 的板与找不到主线的克隆从此永远停更。
+const BRANCH = boardBranchCheck(KANBAN, S)
+const ON_MAIN = Boolean(BRANCH.skip) || BRANCH.scanned === 0
+/** 仓根(看板目录退掉 prefix 那几级);问不出分支时没有这个概念 */
+const REPO_ROOT = BRANCH.skip ? null : resolve(KANBAN, ...(BRANCH.prefix || '').split('/').filter(Boolean).map(() => '..'))
+const gitq = (args) => {
+  const r = spawnSync('git', args, { cwd: KANBAN, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  return r.error || r.status !== 0 ? null : String(r.stdout)
+}
+
 // ---- ① 新鲜度 → 自动重跑 gen(gen.mjs 未随 plugin 落地时跳过) ----
 if (existsSync(GEN)) {
   const indexAt = mtime(INDEX)
@@ -295,12 +315,18 @@ if (existsSync(GEN)) {
   // MY_VER / STAMP 在文件头取过一份(版本转发与这里同一份口径);走到这儿说明没转发出去。
   const stampNewer = Boolean(MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0)
   const stampStale = Boolean(MY_VER && STAMP !== undefined && (STAMP === null || cmpVer(STAMP, MY_VER) < 0))
+  const wouldRegen = newest > indexAt || stampStale || lazyBroken // 「本来会重渲」:§1 那一行只在这时才出
   if (stampNewer) {
     notices.push(S.stampNewer(STAMP, MY_VER)) // 只否决重生成;审计(只读)在下面照做
   } else if (!MY_VER) {
     // gen 读不到自身版本必硬失败——别 spawn 一个注定 exit 2 的 gen 造不可自修的阻断循环
     if (newest > indexAt) notices.push(S.noSelfVersion())
-  } else if (newest > indexAt || stampStale || lazyBroken) {
+  } else if (!ON_MAIN && wouldRegen) {
+    // v0.17.4 §1:生成物只在主线上生成。分支(含游离 HEAD)上产物一个字节不碰 —— 分支带着几 MB
+    // 没人改过的大文件收工,下一个会话要先花 token 分辨它们,合并时还必冲突。这一行只在「本来会
+    // 重渲」时出:产物不过期的分支收工,守卫照旧一个字不说。人手跑 gen.mjs 不受此限(明确意图)。
+    notices.push(S.genOffMain(BRANCH.cur, BRANCH.main, BRANCH.detached))
+  } else if (wouldRegen) {
     const r = spawnSync(process.execPath, [GEN], { cwd: KANBAN, stdio: ['ignore', 'ignore', 'pipe'] })
     const err = (r.stderr || r.error?.message || '').toString()
     if (r.status !== 0) {
@@ -317,6 +343,28 @@ if (existsSync(GEN)) {
     if (err.trim()) process.stderr.write(err)
     // 自愈自「无戳产物」= 刚被旧 gen 盖过板(或 0.6.0 前存量)的签名 → 现场指向断火源解药
     if (stampStale && STAMP === null) notices.push(S.healedUnstamped())
+  }
+}
+
+// ---- ①b 生成物在分支上 / 处在冲突里 / merge=ours 驱动没配(v0.17.4 §1 §2 §4)----
+// 三条都非阻断、零命中完全不出声。只在 BRANCH 问得出分支时才探:git 跑不起来的板,这三件事无从谈起。
+if (!BRANCH.skip) {
+  // §1 后半:分支上已经有生成物改动(多半是旧版守卫在分支上重渲留下的)。一行点名 + 一行解法。
+  if (!ON_MAIN) {
+    const dirtyGen = (BRANCH.hits.length ? BRANCH.dirty : dirtyBoardFiles(KANBAN)).filter((f) => GEN_RE.test(f))
+    if (dirtyGen.length) notices.push(S.genOffMainDirty(dirtyGen, BRANCH.main))
+  }
+  // §4:冲突了就机械处理 —— 取主线那份,重新生成,零阅读。路径与主线名都填实,不让人猜。
+  const unmerged = (gitq(['diff', '--name-only', '--diff-filter=U', '--', '.']) || '')
+    .split('\n').map((s) => s.trim()).filter((f) => f && GEN_RE.test(f))
+  if (unmerged.length) notices.push(S.genConflict(unmerged, BRANCH.main, GEN, KANBAN))
+  // §2:.gitattributes 写了 merge=ours,驱动却没在这个克隆里定义 —— 属性写了也不生效,照样进冲突
+  if (REPO_ROOT) {
+    let attrs = ''
+    try { attrs = readFileSync(join(REPO_ROOT, '.gitattributes'), 'utf8') } catch {}
+    const want = genAttrPaths(BRANCH.prefix)
+    const armed = attrs.split('\n').some((l) => l.includes('merge=ours') && want.some((p) => l.trim().startsWith(p)))
+    if (armed && !((gitq(['config', '--get', 'merge.ours.driver']) || '').trim())) notices.push(S.mergeDriverMissing())
   }
 }
 
@@ -573,7 +621,7 @@ let RLM = null
 // 规矩是「看板只在主线上改」;这里只看当前分支(全表走 board-branch-check.mjs --all)。
 // git 不可用 / 找不到主线 / 就在主线上 → 一个字都不说,也不多花一次 spawn。
 {
-  const r = boardBranchCheck(KANBAN, S)
+  const r = BRANCH // v0.17.4:①(要不要重渲)在前面就要这份结果,一次算清两处共读,不多花一趟 spawn
   // dirty = 工作区里没提交的看板改动:补救那条 checkout 会连它们一起盖掉,清单不说就是安静地丢内容
   if (!r.skip) for (const h of r.hits) notices.push(S.boardBranchGuard(h, r.main, r.dirty))
 }

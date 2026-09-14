@@ -556,6 +556,22 @@ running it before merging. Where a branch already touched the board:
 `git checkout <main> -- <kanban dir>` drops the branch-side changes before
 merging, and whatever genuinely belonged there gets replayed on the mainline.
 
+A third layer turns the reminder into a gate. A PreToolUse hook watches only
+for `gh pr merge` invocations — every other command passes through with zero
+output and zero delay. It resolves the PR's head branch (from the PR number
+when one is given, from the current branch otherwise) and runs the same
+`board-branch-check` logic against it. A hit denies the tool call, with the
+head branch, the offending files, and a one-line fix in the denial reason; a
+clean branch passes silently. Passing here deliberately never returns an
+`allow` decision — `allow` would skip the normal permission prompt and turn a
+violation-blocker into an auto-approval, so a pass just means "no decision,"
+and the usual permission flow still runs. When `gh` isn't available, the
+branch can't be resolved, the command targets another repository via
+`-R`/`--repo`, or anything else in the tool chain fails, the hook steps aside
+with one line explaining why — it only blocks violations it's sure of, never
+tool failures. It only sees tool calls a session makes; running `gh pr merge`
+by hand in a terminal is outside its reach.
+
 ## Sticky tab bar (optional, recommended)
 
 Set `config.stickyTabs` to `true` and the tab bar freezes under the hub bar

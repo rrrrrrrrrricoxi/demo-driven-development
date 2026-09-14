@@ -24,7 +24,10 @@ import { CARD_KINDS, cardsDirOf } from './cards.mjs'
 
 /** 看板里的数据文件:一改就是「板变了」。产物另算(见 GEN_RE),demo / 文档等归「其它」。 */
 const dataRe = (cardsDir) => new RegExp(`(?:^|/)(?:${cardsDir ? `${cardsDir}/.+\\.json|` : ''}[a-z-]*manifest\\.json|kanban\\.config\\.json)$`)
-const GEN_RE = /(?:^|\/)(?:index\.html|shots\.html|parts\/|refs\/)/
+/** 「哪些文件是生成物」的一个真源:分类、守卫跳过重渲、.gitattributes、冲突提示都读这一份 */
+export const GEN_RE = /(?:^|\/)(?:index\.html|shots\.html|parts\/|refs\/)/
+/** 生成物在 .gitattributes 里的四条路径(相对仓根;prefix = 看板目录相对仓根,仓根即看板目录时为空串) */
+export const genAttrPaths = (prefix = '') => ['index.html', 'shots.html', 'parts/**', 'refs/**'].map((p) => `${prefix}${p}`)
 
 const git = (cwd, args) => {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
