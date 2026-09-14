@@ -12,7 +12,7 @@
 //   node scripts/ddd.mjs card list [--status s --line X --session Y --since YYYY-MM-DD] [--json]
 //   node scripts/ddd.mjs card history <id>
 //   node scripts/ddd.mjs export [--out f.json]
-//   node scripts/ddd.mjs audit [--json] [--line <session 标签>]     (只读:守卫那一行背后的正文)
+//   node scripts/ddd.mjs audit [--json] [--line|--session <session 标签>]  (只读:守卫那一行背后的正文)
 //   node scripts/ddd.mjs pr-sync […]
 //
 // 为什么值得有:手搓 JSON 每次都要小心末尾换行、键序、转义,而错了要么 gen 硬失败、要么静默
@@ -642,7 +642,9 @@ function cmdExport() {
  * 只读:不 gen、不改任何文件 —— 一条「想看看现在什么情况」的命令不该顺手改板。
  */
 function cmdAudit() {
-  const session = flags.line ? String(flags.line).trim() : ''
+  // 筛的是卡上的 session 字段。`card list` 管这个字段叫 --session,评审稿管它叫 --line ——
+  // 两个都收:只认一个,另一个会被旗子解析器悄悄放行然后丢掉,人得到的是一份没筛过的全板审计。
+  const session = String(flags.line || flags.session || '').trim()
   const ctx = makeCtx(KANBAN, { session, scriptsDir: HERE })
   const entries = collect(ctx, TABLE, { branch: boardBranchCheck(KANBAN, TABLE), gen: join(HERE, 'gen.mjs') })
   const cmd = auditCmd(HERE)

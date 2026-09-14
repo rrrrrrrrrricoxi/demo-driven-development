@@ -60,11 +60,17 @@ not by how stern they sound:
   full, the same prose the guard used to print, including the command that deals
   with each. It never runs `gen` and never writes a file. `--json` gives the
   structured form (`dir`, `session`, `summary`, `block`, `broken`, `chore`, each
-  entry carrying its key, count and text). `--line <session tag>` narrows the
-  card-scoped audits to the cards carrying that tag; audits that are not
-  per-line — acceptance lists, branches, orphan demos — still cover the whole
-  board, and the dependency graph and the card-id universe are never filtered,
-  or a card waiting on another line's prerequisite would be reported as a typo.
+  entry carrying its key, count and text). `--line <session tag>` (also spelled
+  `--session`, the name the card field and `card list` use) narrows the per-line
+  chores — long prose on older cards, cards to settle, cards settled early,
+  settle holds due, prerequisites cleared — to the cards carrying that tag.
+  Everything else keeps the whole board in view: the blocking and broken levels,
+  because the guard blocks regardless of line and a narrowed "nothing to deal
+  with" would be a lie; the backlog count, whose `config.wip.hard` threshold is a
+  whole-board number that a narrowed numerator cannot be read against; and
+  acceptance lists, branches and orphan demos, which have no line to begin with.
+  The dependency graph and the card-id universe are never filtered either, or a
+  card waiting on another line's prerequisite would be reported as a typo.
 
 ### Changed
 - **The audits moved into one shared module, `scripts/audits.mjs`.** The guard

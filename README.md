@@ -676,18 +676,25 @@ node <plugin>/scripts/ddd.mjs card after <id> <ref>…            # BL-C74 / D89
 node <plugin>/scripts/ddd.mjs card after <id> --rm <ref>
 node <plugin>/scripts/ddd.mjs card show|history <id>
 node <plugin>/scripts/ddd.mjs card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD]
-node <plugin>/scripts/ddd.mjs audit [--json] [--line <session tag>]
+node <plugin>/scripts/ddd.mjs audit [--json] [--line|--session <session tag>]
 node <plugin>/scripts/ddd.mjs export [--out f.json]
 node <plugin>/scripts/ddd.mjs pr-sync […]
 ```
 
 `audit` is the read-only counterpart of the Stop guard: same audits, same module,
 but it prints all three levels in full instead of collapsing the chores into one
-counted line. It generates nothing and writes nothing. `--line` keeps only the
-cards whose `session` field carries that tag — audits that are not per-line
-(acceptance lists, branches, orphan demos) still look at the whole board, and the
-dependency graph and the card-id universe are never filtered, or a card waiting on
-another line's prerequisite would read as a typo.
+counted line. It generates nothing and writes nothing. `--line` (spelled
+`--session` if you prefer the name the card field has, and the one `card list`
+uses) narrows the per-line chores — long prose on older cards, cards to settle,
+cards settled early, settle holds due, prerequisites cleared — to the cards whose
+`session` field carries that tag. Everything else keeps the whole board in view:
+the blocking and broken levels, because the guard blocks regardless of line and a
+narrowed "nothing to deal with" would be a lie; the backlog count, because its
+`config.wip.hard` threshold is a whole-board number and a narrowed numerator
+cannot be read against it; and acceptance lists, branches and orphan demos, which
+have no line to begin with. The dependency graph and the card-id universe are
+never filtered either, or a card waiting on another line's prerequisite would read
+as a typo.
 
 `card new` allocates the next id and reserves it: with one file per card it
 creates the file with `openSync(path, 'wx')`, so two sessions racing for the same

@@ -45,7 +45,8 @@ const hasTok = (v, want) => String(v || '').split(/\s+/).filter(Boolean).include
 /**
  * 一块板的读取现场:配置、卡目录、三份头文件、release-manifest、按需算的 git 事实。
  * 建一次、下面各段共读 —— 每段自己读一遍卡目录的话,一次审计要把整块板读七八遍。
- * @param session 只看这个 session 标签的卡(`ddd audit --line dev`);空 = 全板。守卫恒为空。
+ * @param session 只收窄「按线分的家务」到这个 session 标签(`ddd audit --line dev`;见下面 cardsOf);
+ *                空 = 全板。守卫恒为空。
  * @param scriptsDir 本份 plugin 的 scripts 目录 —— 一行里那条命令要把路径填实,不让人猜。
  */
 export function makeCtx(kanbanDir, { session = '', scriptsDir = '' } = {}) {
@@ -89,13 +90,19 @@ export function makeCtx(kanbanDir, { session = '', scriptsDir = '' } = {}) {
     try { return JSON.parse(readFileSync(join(KANBAN, file), 'utf8'))[key] || [] } catch { return [] }
   }
   const SESSION = String(session || '').trim()
+  /** 这张卡算不算在 --line 挑的那条线上(没给 --line 时全算) */
+  const inLine = (c) => !SESSION || Boolean(c && hasTok(c.session, SESSION))
   /**
-   * 「该点名哪些卡」用这个(带 --line 过滤);「板上一共有哪些卡」一律走 rawCardsOf ——
-   * 依赖图与卡号宇宙不能跟着过滤缩水,不然 A 线的卡等着 B 线的前置就会被算成「写错了卡号」。
+   * 「该点名哪些卡」用这个(带 --line 过滤),而且只有**按线分的家务**该用它:长正文(老卡)、
+   * 待收账、收早了、挂账到期、前置已清。别的一律走 rawCardsOf ——
+   *   · 依赖图与卡号宇宙不能跟着过滤缩水,不然 A 线的卡等着 B 线的前置会被算成「写错了卡号」;
+   *   · 阻断一级更不能:守卫拦人从不看线别,`--line dev` 要是把 release 线的新卡长正文滤没了,
+   *     dev 的人看到的是「三级都是零」,回头照样被拦(0.17.5 评审复盘坐实过这一条);
+   *   · 积压的阈值 config.wip.hard 是全板的一个数,分子跟着线缩、分母不缩,那个数就没法读。
    */
   const cardsOf = (file, key, sub) => {
     const rows = rawCardsOf(file, key, sub)
-    return SESSION ? rows.filter((c) => c && hasTok(c.session, SESSION)) : rows
+    return SESSION ? rows.filter(inLine) : rows
   }
 
   const gitq = (args) => {
@@ -163,7 +170,7 @@ export function makeCtx(kanbanDir, { session = '', scriptsDir = '' } = {}) {
   return {
     dir: KANBAN, cfg, cardsDir: CARDS_DIR, cardScan, cardWatch, manifests, demos, rlm: RLM,
     today: TODAY, session: SESSION, scriptsDir,
-    rawCardsOf, cardsOf, gitq, committedCards, cardUpdAll, depCtx, isFreshCard,
+    rawCardsOf, cardsOf, inLine, gitq, committedCards, cardUpdAll, depCtx, isFreshCard,
   }
 }
 
@@ -264,6 +271,8 @@ export function auditAcceptance(ctx, S) {
  * 分两档(v0.16.2):**刚立的卡阻断**,已提交的老卡是家务一行里的「长正文 N」。
  * 分档的依据是时机不是严厉程度 —— 新卡的正文刚写出来还在手边,当场拆最省事、也只有此刻拆得动;
  * 老卡是历史,拦下来只会逼人去改一份别人也在读的卡,于是通知永远缩不掉(0.15.6 的终态豁免同理)。
+ * --line 只收窄老卡那一格(它是按线分的家务);新卡那一档是阻断,守卫拦人从不看线别,
+ * 跟着线缩就会让 `audit --line dev` 报「三级都是零」,而同一块板上收工照样被拦。
  */
 export function auditRichText(ctx, S) {
   const out = []
@@ -276,7 +285,7 @@ export function auditRichText(ctx, S) {
     ['backlog-manifest.json', 'items', 'backlog', ['problem', 'approach', 'note']],
     ['decisions-manifest.json', 'entries', 'decisions', ['question', 'decision', 'demoNote', 'source']],
   ]) {
-    for (const c of ctx.cardsOf(f, k, sub)) {
+    for (const c of ctx.rawCardsOf(f, k, sub)) {
       if (!c || c.detail) continue
       if (TERMINAL.has(String(c.status || ''))) continue // 终态卡(done / live / closed)不会再改写,点名只会让这条通知永远缩不掉
       let hit = null // 一张卡只算一次,取最长的那个字段
@@ -286,6 +295,7 @@ export function auditRichText(ctx, S) {
       }
       if (!hit) continue
       if (ctx.isFreshCard(c, sub)) { fresh.push({ id: String(c.id ?? '?'), key: hit.key, n: hit.n }); continue }
+      if (!ctx.inLine(c)) continue // 老卡那一格是按线分的家务,--line 到这儿才收窄
       total++
       if (!worst || hit.n > worst.n) worst = { id: String(c.id ?? '?'), key: hit.key, n: hit.n }
     }
@@ -451,6 +461,8 @@ export function auditBoardBranch(ctx, S, branch) {
 /**
  * 积压审计(家务,v0.13.0,只在 config.wip 配了对象时跑):ready 超 hard 就报一个数。
  * 与卡上的横幅同一口径(只数 ready),但守卫看的是全线别的总数 —— 分线别的账在页面上看。
+ * 正因为口径是全板的,--line 在这儿不收窄:阈值 config.wip.hard 是全板的一个数,
+ * 分子跟着线缩、分母不缩,报出来的 `N/阈值` 就没法读,还会把真超阈的板报成没事。
  */
 export function auditWip(ctx, S) {
   const out = []
@@ -459,7 +471,7 @@ export function auditWip(ctx, S) {
   const hard = Number.isFinite(w.hard) ? w.hard : 20
   // 口径与卡上的横幅同一条(v0.16.0):ready 且前置已清才算「可立即做」,等前置的另报一个数。
   // 板上一条 after 都没有时 waiting 恒 0,这句话与 0.15.x 一字不差。
-  const ready = ctx.cardsOf('backlog-manifest.json', 'items', 'backlog').filter((it) => it && it.status === 'ready')
+  const ready = ctx.rawCardsOf('backlog-manifest.json', 'items', 'backlog').filter((it) => it && it.status === 'ready')
   const waiting = ready.some((it) => afterOf(it).length)
     ? ready.filter((it) => openCount(afterStates(it, ctx.depCtx()))).length
     : 0

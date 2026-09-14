@@ -6957,6 +6957,36 @@ console.log('T77 收工提醒分级压成一行')
     ok(JSON.parse(runAudit(fx.kb, ['--line', 'nobody', '--json']).stdout).chore.length === 0, '没有卡挂这个标签 → 家务全零')
   }
 
+  { // ---- --line 只收窄「按线分的家务」:阻断一级、积压、`--session` 同名旗子(0.17.5 评审复盘)----
+    // 病例:`ddd audit --line dev` 在一块「release 线今天立了张长正文卡」的板上报「三级都是零」,
+    // 而同一块板收工照样被守卫拦下 —— 阻断跟着线缩,就成了一句假的「没事」。
+    const fx = board('fx77-line-scope', {
+      cfg: { richText: true, wip: { soft: 0, hard: 1 }, sessionTags: { dev: { label: 'dev' }, release: { label: 'release' } } },
+      items: [
+        { id: 'BL-DEVOLD', status: 'ready', date: dayAgo(1), session: 'dev', title: 'dev 的老长卡', ...BASE, problem: '正'.repeat(900) },
+        { id: 'BL-RELOLD', status: 'ready', date: dayAgo(1), session: 'release', title: 'release 的老长卡', ...BASE, problem: '文'.repeat(900) },
+        { id: 'BL-RELNEW', status: 'ready', date: localDate(), session: 'release', title: 'release 今天立的长卡', ...BASE, problem: '证'.repeat(900) },
+        { id: 'BL-X', status: 'ready', date: dayAgo(1), session: 'dev', title: '凑积压的', ...BASE },
+      ],
+    })
+    ok(JSON.parse(runStop(NEW_SCRIPTS, fx.root).stdout).decision === 'block', '摆盘先确认:这块板收工会被拦(阻断不看线别)')
+    const dev = JSON.parse(runAudit(fx.kb, ['--line', 'dev', '--json']).stdout)
+    ok(dev.block.map((e) => e.key).join(',') === 'richLongNew' && dev.block[0].text.includes('BL-RELNEW'),
+      '--line dev 照样看得见 release 线那张新卡的阻断 —— 守卫拦人不看线别,这一级跟着线缩就是假的「没事」',
+      JSON.stringify(dev.block.map((e) => e.key)))
+    const wipRow = dev.chore.find((e) => e.key === 'wip')
+    ok(wipRow && wipRow.n === 4 && wipRow.hard === 1,
+      '积压照旧全板算:阈值 config.wip.hard 是全板的一个数,分子跟着线缩、分母不缩,那个数就没法读',
+      JSON.stringify(wipRow))
+    ok(dev.chore.find((e) => e.key === 'longText').n === 1,
+      '按线分的那几类照旧收窄:长正文(老卡)在 dev 这条线上只有 1 张', JSON.stringify(dev.chore.map((e) => `${e.key}=${e.n}`)))
+    ok(runAudit(fx.kb, ['--session', 'dev', '--json']).stdout === runAudit(fx.kb, ['--line', 'dev', '--json']).stdout,
+      '`--session` 与 `--line` 是同一个筛子(卡上那个字段就叫 session,card list 也用这个名) —— 只认一个,另一个会被悄悄吞掉',
+      runAudit(fx.kb, ['--session', 'dev', '--json']).stdout.slice(0, 160))
+    ok(runAudit(fx.kb, ['--line', 'dev']).stdout.includes('阻断 / 坏了 / 积压照旧全板'),
+      '人话那版抬头把「哪些跟着线缩、哪些不缩」说在明处')
+  }
+
   // 阻断两类 + 坏了四条一副盘面:今天立的长正文卡、孤儿 demo、外加一份四处出错的验收清单
   const ACC_BAD = JSON.stringify({
     current: 999,
@@ -6978,6 +7008,28 @@ console.log('T77 收工提醒分级压成一行')
        broken.some((l) => /条目 id「a」重复/.test(l)) && broken.some((l) => /不存在的卡号/.test(l)),
       '坏了一级四条各出一段全文 —— 它平时恒为零,压成数字就是把它藏起来', (g.systemMessage || '').slice(0, 200))
     ok(!/看板守卫:.*详情 /.test(g.systemMessage || ''), '这块板家务全零 → 那一行整条不出', (g.systemMessage || '').slice(0, 200))
+  }
+
+  /**
+   * 在 loadedBoard 之上再摆「坏了一级里要 git 才谈得起」的那几条:分支上带着看板改动、工作区里
+   * 有脏产物、.gitattributes 写了 merge=ours 而驱动没配。没有这一档,上面那几副盘面全是
+   * 「git init 过但一个提交都没有」—— boardBranchCheck 恒 skip,分支与生成物三条审计一条都没跑到,
+   * 而它们正是这次从守卫里搬走的东西。
+   */
+  const branchBoard = (name, gen) => {
+    const fx = loadedBoard(name, gen)
+    writeFileSync(join(fx.root, '.gitattributes'),
+      ['index.html', 'shots.html', 'parts/**', 'refs/**'].map((p) => `app/kanban/${p} merge=ours -diff linguist-generated`).join('\n') + '\n')
+    const g = (...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: fx.root, encoding: 'utf8' })
+    g('add', '-A'); g('commit', '-q', '-m', 'board'); g('branch', '-M', 'main'); g('checkout', '-q', '-b', 'feat/x')
+    const bl = rd(join(fx.kb, 'backlog-manifest.json'))
+    bl.items[0].title = '分支上改过的标题'
+    wr(join(fx.kb, 'backlog-manifest.json'), bl)
+    g('add', '-A'); g('commit', '-q', '-m', 'branch change')
+    const idx = join(fx.kb, 'index.html')
+    writeFileSync(idx, readFileSync(idx, 'utf8') + '\n<!-- dirty -->\n')
+    touch(idx) // index 最新 → 不会「本来会重渲」:分支上产物一个字节不碰,这几条才是唯一的声音
+    return fx
   }
 
   { // ---- 与 0.17.4 的逐字节对照(参照树取自 tag;浅克隆 / 没取 tag 时整组不比,如实说明)----
@@ -7009,6 +7061,20 @@ console.log('T77 收工提醒分级压成一行')
       ok(oc.stdout === od.stdout && (oc.status ?? 0) === (od.status ?? 0),
         '阻断两类与坏了一级的输出与 0.17.4 逐字节相同(同一副盘面,两版跑出同一份 stdout)',
         JSON.stringify([oc.stdout.slice(0, 200), od.stdout.slice(0, 200)]))
+      // ④ 坏了一级里要 git 才谈得起的那几条(分支 / 脏产物 / merge 驱动):次序也不许变。
+      //    0.17.4 里它们分散在三处(①b 在验收之前、⑦ 在前置已清之后),0.17.5 全从 audits.mjs
+      //    的原序补上 —— 家务全零时这两种排法必须给出同一份字节。
+      const ba = branchBoard('fx77x-old', oldScripts), bb = branchBoard('fx77x-new')
+      const oe = runOld(ba.root), of = runStop(NEW_SCRIPTS, bb.root)
+      const msgNew = JSON.parse(of.stdout || '{}').systemMessage || ''
+      ok(/分支的工作区里有 1 处看板生成物改动/.test(msgNew) && /merge=ours/.test(msgNew) &&
+         /当前分支 feat\/x 带着看板改动/.test(msgNew) && /acceptance-manifest\.json 的 current = 999/.test(msgNew),
+        '摆盘先确认:分支 / 脏产物 / merge 驱动 / 验收清单四种「坏了」这一轮真的都出声了', msgNew.slice(0, 160))
+      ok(!/看板守卫:.*详情 /.test(msgNew), '这副盘面家务仍全零 —— 那一行整条不出,才比得出「坏了」的字节')
+      const bare = (r, root, scripts) => (r.stdout || '').split(root).join('<ROOT>').split(scripts).join('<SCRIPTS>')
+      ok(bare(oe, ba.root, oldScripts) === bare(of, bb.root, NEW_SCRIPTS) && (oe.status ?? 0) === (of.status ?? 0),
+        '分支与生成物那几条「坏了」的次序与措辞也与 0.17.4 逐字节相同(只归一化两块板各自的路径)',
+        JSON.stringify([bare(oe, ba.root, oldScripts).slice(0, 200), bare(of, bb.root, NEW_SCRIPTS).slice(0, 200)]))
     }
   }
 }

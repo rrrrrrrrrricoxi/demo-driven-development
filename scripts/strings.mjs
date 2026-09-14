@@ -244,11 +244,12 @@ const zh = {
   card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
 
 其它:
-  audit [--json] [--line <session 标签>]
+  audit [--json] [--line|--session <session 标签>]
       只读跑一遍看板审计,把三级(阻断 / 坏了 / 家务)的完整文案打全 —— 收工时守卫只把「家务」
       八类压成一行计数,正文在这儿。不 gen、不改任何文件。
-      --line 只看卡上 session 字段带那个标签的卡(家务活多半是按线分的);验收清单、分支、
-      孤儿 demo 这类不按线分的照旧全板算。
+      --line(= --session)只收窄按线分的那几类家务:长正文(老卡)、待收账、收早了、挂账到期、
+      前置已清。阻断与坏了两级、积压、验收清单、分支、孤儿 demo 照旧全板算 —— 守卫拦人不看线别,
+      这几样跟着线缩就成了假的「没事」。
   export [--out f.json]             合成与 manifest 同形的一坨(backlog / decisions 两段),默认打到 stdout
   pr-sync […]                       转调 pr-sync.mjs,参数原样透传
 
@@ -256,7 +257,7 @@ const zh = {
 本命令从不 commit —— 写完的卡按纪律自己 git add 那几个文件。`,
     // v0.17.5:`ddd audit` 的壳。正文全是守卫那几段原话(同一份 audits.mjs),这里只给分段与抬头。
     audit: {
-      head: (dir, session) => `看板审计:${dir}${session ? `(只看 session 标签「${session}」的卡)` : ''}\n只读:不重生成看板,也不改任何文件。`,
+      head: (dir, session) => `看板审计:${dir}${session ? `(按线分的家务只看 session 标签「${session}」的卡;阻断 / 坏了 / 积压照旧全板)` : ''}\n只读:不重生成看板,也不改任何文件。`,
       clean: () => '三级都是零 —— 没有要处理的。',
       sec: { block: (n) => `阻断(${n}):`, broken: (n) => `坏了(${n}):`, chore: (n) => `家务(${n}):` },
       tail: (cmd) => `收工时守卫把家务那八类压成一行计数,正文就是上面这些;要再看一遍:${cmd}`,
@@ -699,13 +700,15 @@ Cards:
   card history <id>                 git history of that card's file (needs one file per card)
 
 Other:
-  audit [--json] [--line <session tag>]
+  audit [--json] [--line|--session <session tag>]
       Run the board audits read-only and print all three levels (blocking / broken / chores) in
       full. On Stop the guard squeezes the eight chore categories into a single counted line;
       the prose lives here. Nothing is generated and no file is touched.
-      --line keeps only the cards whose session field carries that tag (chores are mostly
-      per-line); audits that are not per-line — acceptance lists, branches, orphan demos —
-      still look at the whole board.
+      --line (= --session) narrows only the per-line chores: long prose on older cards, cards
+      to settle, cards settled early, settle holds due, prerequisites cleared. The blocking and
+      broken levels, the backlog count, acceptance lists, branches and orphan demos still cover
+      the whole board — the guard blocks regardless of line, so narrowing those would report a
+      clean board that still stops the session.
   export [--out f.json]             one object shaped like the manifests (a backlog and a
                                     decisions section); goes to stdout unless --out is given
   pr-sync […]                       hands over to pr-sync.mjs with the arguments unchanged
@@ -713,7 +716,7 @@ Other:
 Kanban directory: --dir > $CLAUDE_PROJECT_DIR/app/kanban > the current directory (if it holds a
 kanban.config.json). This command never commits — git add the card files yourself.`,
     audit: {
-      head: (dir, session) => `Board audit: ${dir}${session ? ` (only cards tagged session "${session}")` : ''}\nRead-only: nothing is regenerated and no file is touched.`,
+      head: (dir, session) => `Board audit: ${dir}${session ? ` (per-line chores limited to cards tagged session "${session}"; blocking, broken and the backlog count still cover the whole board)` : ''}\nRead-only: nothing is regenerated and no file is touched.`,
       clean: () => 'All three levels are empty — nothing to deal with.',
       sec: { block: (n) => `Blocking (${n}):`, broken: (n) => `Broken (${n}):`, chore: (n) => `Chores (${n}):` },
       tail: (cmd) => `On Stop the guard squeezes those eight chore categories into one counted line; the prose above is what it stands for. To see it again: ${cmd}`,
