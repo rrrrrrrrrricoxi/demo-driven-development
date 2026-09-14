@@ -54,6 +54,14 @@ python3 app/kanban/serve.py        # then open the printed port
 
 On every Stop, the guard compares mtimes: if any manifest, demo, theme file, or the generator itself is newer than `index.html`, it regenerates the board, so nobody has to remember to ask for an update. `gen` also writes a version stamp (`<!-- ddd-gen vX.Y.Z -->`) on line 2 of `index.html`. A session running an older plugin refuses to overwrite newer output and warns instead; a newer plugin heals older output automatically. Separately, every `demos/*.html` must be referenced by a manifest or listed in `demos/.no-card-ok`, otherwise the session is blocked until the demo gets a card.
 
+What the guard says is sorted into three levels, by what happens if you ignore it rather than by how stern it sounds. **Blocking** — an orphan demo, a freshly created card whose prose runs past 800 characters with no `detail` — prints in full and stops the session; a second Stop in the same round downgrades it to a warning so nothing can loop. **Broken** — a missing card directory, a card filename that disagrees with the id inside, a card or acceptance list that is not valid JSON, a duplicated pull request or item id, a list pointing at a card that does not exist, generated board files sitting on a branch or stuck in a conflict, a `merge=ours` attribute with no driver defined, board changes on a non-mainline branch — also prints in full, one paragraph each. That level is normally empty, so squeezing it into a number would just hide it. **Chores** — long prose on older cards, uncommitted acceptance feedback, prunable feedback screenshots, cards waiting to be settled, cards settled early, settle holds past their 14 days, prerequisites just cleared, a backlog over its WIP limit — are eight categories that are normally non-empty and mostly belong to someone else's line, so since 0.17.5 they collapse into one counted line:
+
+```
+看板守卫:长正文 10 · 收早了 1 · 挂账到期 1 · 前置已清 3 · 未提交反馈 13(#276) · 积压 25/20 —— 详情 node <plugin>/scripts/ddd.mjs audit
+```
+
+Categories at zero do not appear, and if all eight are zero the line is gone entirely. The order and the separator are fixed, `<plugin>` is the guard's own install path filled in, and only "uncommitted feedback" carries an object — the pull request number — because that one is about someone else's data. The numbers are the index: `node <plugin>/scripts/ddd.mjs audit` prints all three levels in full, including how to deal with each, and `--session <session tag>` narrows the card-scoped ones to one line of work (`--line` is accepted too, as a synonym). Guard and `audit` share one implementation (`scripts/audits.mjs`), so the two can never disagree.
+
 A hook process is bound to the plugin version its session started with, so upgrading the plugin mid-session used to leave that session's guard permanently old — and an old `gen` may not overwrite newer output, which froze the board until someone restarted. Since 0.16.2 the hook checks first: if the board's stamp is newer than itself, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and, when that install is at least as new as the board's output and is not itself, hands the whole hook over — same stdin, environment and working directory — returning that version's stdout and exit code unchanged, with one line in the output saying it forwarded and to which version. `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read, holds no newer install, or holds one that is still older than the board's output, the old behaviour stands: skip regeneration and say why. Running `gen.mjs` by hand from an old path is still refused — the forwarding is the guard's, not the generator's.
 
 ## Upgrading
@@ -668,9 +676,25 @@ node <plugin>/scripts/ddd.mjs card after <id> <ref>…            # BL-C74 / D89
 node <plugin>/scripts/ddd.mjs card after <id> --rm <ref>
 node <plugin>/scripts/ddd.mjs card show|history <id>
 node <plugin>/scripts/ddd.mjs card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD]
+node <plugin>/scripts/ddd.mjs audit [--json] [--session <session tag>]
 node <plugin>/scripts/ddd.mjs export [--out f.json]
 node <plugin>/scripts/ddd.mjs pr-sync […]
 ```
+
+`audit` is the read-only counterpart of the Stop guard: same audits, same module,
+but it prints all three levels in full instead of collapsing the chores into one
+counted line. It generates nothing and writes nothing. `--session` narrows the
+per-line chores — long prose on older cards, cards to settle, cards settled
+early, settle holds due, prerequisites cleared — to the cards whose `session`
+field carries that tag (`--line` is accepted too, as a synonym). Everything
+else keeps the whole board in view:
+the blocking and broken levels, because the guard blocks regardless of line and a
+narrowed "nothing to deal with" would be a lie; the backlog count, because its
+`config.wip.hard` threshold is a whole-board number and a narrowed numerator
+cannot be read against it; and acceptance lists, branches and orphan demos, which
+have no line to begin with. The dependency graph and the card-id universe are
+never filtered either, or a card waiting on another line's prerequisite would read
+as a typo.
 
 `card new` allocates the next id and reserves it: with one file per card it
 creates the file with `openSync(path, 'wx')`, so two sessions racing for the same

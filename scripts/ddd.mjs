@@ -12,6 +12,7 @@
 //   node scripts/ddd.mjs card list [--status s --line X --session Y --since YYYY-MM-DD] [--json]
 //   node scripts/ddd.mjs card history <id>
 //   node scripts/ddd.mjs export [--out f.json]
+//   node scripts/ddd.mjs audit [--json] [--session <session 标签>]  (只读:守卫那一行背后的正文;--line 同义,仍接受)
 //   node scripts/ddd.mjs pr-sync […]
 //
 // 为什么值得有:手搓 JSON 每次都要小心末尾换行、键序、转义,而错了要么 gen 硬失败、要么静默
@@ -32,6 +33,8 @@ import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, sca
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
 import { afterKey, afterOf, afterStates, auditAfter, depCtxFrom, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
+import { boardBranchCheck } from './board-branch-check.mjs'
+import { auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ARGV = process.argv.slice(2)
@@ -73,7 +76,8 @@ let KANBAN = null
 let dirErr = null
 try { KANBAN = resolveKanbanDir(parsed.flags && parsed.flags.dir ? ['--dir', parsed.flags.dir] : []) }
 catch (e) { dirErr = e }
-const S = (KANBAN ? loadStrings(KANBAN) : pickStrings()).cli
+const TABLE = KANBAN ? loadStrings(KANBAN) : pickStrings()
+const S = TABLE.cli
 
 if (parsed.flags && parsed.flags.help) { console.log(S.usage()); process.exit(0) }
 if (parsed.bad) die(S.unknownFlag(parsed.bad))
@@ -631,6 +635,41 @@ function cmdExport() {
   console.error(S.exportWrote(flags.out))
 }
 
+/**
+ * 看板审计(v0.17.5):只读跑一遍 audits.mjs,把三级(阻断 / 坏了 / 家务)的完整文案打全。
+ * 收工时守卫只把「家务」八类压成一行计数 —— 这条命令就是那一行背后的正文,含各段怎么处理的命令。
+ * 与守卫共读同一份实现(不许有第二份),所以同一块板两边的数字永远对得上。
+ * 只读:不 gen、不改任何文件 —— 一条「想看看现在什么情况」的命令不该顺手改板。
+ */
+function cmdAudit() {
+  // 筛的是卡上的 session 字段。`card list` 管这个字段叫 --session,评审稿管它叫 --line ——
+  // 两个都收:只认一个,另一个会被旗子解析器悄悄放行然后丢掉,人得到的是一份没筛过的全板审计。
+  const session = String(flags.line || flags.session || '').trim()
+  const ctx = makeCtx(KANBAN, { session })
+  const entries = collect(ctx, TABLE, { branch: boardBranchCheck(KANBAN, TABLE), gen: join(HERE, 'gen.mjs') })
+  const cmd = auditCmd(HERE)
+  const line = choreLine(entries, TABLE, cmd)
+  const LEVELS = [['block', S.audit.sec.block], ['broken', S.audit.sec.broken], ['chore', S.audit.sec.chore]]
+  if (flags.json) {
+    const shape = (e) => ({
+      key: e.key, level: e.level, n: e.n, text: e.text,
+      ...(e.prs ? { prs: e.prs, prTotal: e.prTotal } : {}),
+      ...(e.hard === undefined ? {} : { hard: e.hard, waiting: e.waiting }),
+    })
+    const out = { dir: KANBAN, session: session || null, summary: line || null }
+    for (const [level] of LEVELS) out[level] = pickLevel(entries, level).map(shape)
+    console.log(JSON.stringify(out, null, 2))
+    return
+  }
+  const parts = [S.audit.head(KANBAN, session)]
+  for (const [level, sec] of LEVELS) {
+    const rows = pickLevel(entries, level)
+    if (rows.length) parts.push(`${sec(rows.length)}\n${rows.map((e) => e.text).join('\n\n')}`)
+  }
+  parts.push(entries.length ? S.audit.tail(cmd) : S.audit.clean())
+  console.log(parts.join('\n\n'))
+}
+
 // ---- 分派 ----------------------------------------------------------------
 const CARD_CMDS = { new: cmdNew, set: cmdSet, status: cmdStatus, note: cmdNote, link: cmdLink, after: cmdAfter, show: cmdShow, list: cmdList, history: cmdHistory }
 if (pos[0] === 'card') {
@@ -639,6 +678,8 @@ if (pos[0] === 'card') {
   run()
 } else if (pos[0] === 'export') {
   cmdExport()
+} else if (pos[0] === 'audit') {
+  cmdAudit()
 } else {
   die(S.unknownCmd(pos[0]))
 }
