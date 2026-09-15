@@ -3298,13 +3298,17 @@ const ACC_FB_JS = !AFB ? '' : `
       return Array.from(String(v == null ? '' : v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')
     }
 ${!AFB_PIN ? '' : `    // v0.17.6 名册:谁能在验收账上出现,该有人点头。拉得到(200)= 这块板有名册这套机制;
-    // 404 / 拉不到 / 读不懂 = 没有(宿主的 serve.py 还是老版,或名册文件还没建),照 0.17.5 走 ——
+    // 404 / 拉不到 / 读不懂 = 没有(宿主的 serve.py 还是老版,或这块板没配口令),照 0.17.5 走 ——
     // 署名不问口令。放行得再宽也越不过服务端那道门:配了口令的板上,名册外的名字在 mark / shot 那儿是 403。
+    // (配了口令而名册文件还没建的那一档不在这里:v4 会代答一份空名册,页面照样问得出口令 ——
+    //  答 404 的话第一个人就永远进不了名册,而 mark 那头正卡着他。)
     function fbRoster() {
       if (!fbSendable()) return Promise.resolve(null) // 降级:写不进共享账,名册无意义
       return fetch('acceptance-roster.json', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null })
-        .then(function (o) { return o ? ((o.names || []).map(String)) : null })
+        // 名册也过一遍 fbWhoNorm:服务端比的是归一后的串,页面拿原样去比就会两头判得不一样 ——
+        // 手写进 git 的名册里多一个尾空格,人明明在册,页面还要他输口令
+        .then(function (o) { return o ? ((o.names || []).map(fbWhoNorm)) : null })
         .catch(function () { return null })
     }
     function fbWhoPost(name, pin) { // 名字进名册:对了回整份名册,不对回一句(落在口令格右缘)
@@ -3388,7 +3392,7 @@ ${!AFB_PIN ? '' : `    // v0.17.6 名册:谁能在验收账上出现,该有人�
 ${!AFB_PIN ? '' : `      // v0.17.6 名册这一关(只有配了口令的板才有这一段):名字不在名册里时,同一行多出一格
       // 4 位口令(不弹框 —— 0.17.3 定的规矩)。过了关的那个名字记在 okName 里:人回头又改了名,
       // 就得重过一次,不能拿上一个名字的口令给新名字背书。
-      var okName = null, pw = null, pi = null, pmsg = null
+      var okName = null, pw = null, pi = null, pmsg = null, seen
       var askPin = function () {
         if (!pw) {
           pw = fbEl('div', 'accwhow')
@@ -3411,8 +3415,16 @@ ${!AFB_PIN ? '' : `      // v0.17.6 名册这一关(只有配了口令的板才�
         pi.focus()
       }
       var gate = function (v) {
-        if (pw) { // 口令格已经在了:这一下是连口令一起交
-          fbWhoPost(v, pi.value).then(function () { okName = v; save() }, function (e) {
+        // 名册拉回来一次就记着(seen):口令格出来之后人又把名字改回在册的那个,这一下不该再要口令
+        // —— 那格是为上一个名字出的。「换回名册里的旧名也不问」是明写的规矩,而只看 pw 在不在的话,
+        // 他改回自己那个在册的名字,收到的是「口令不对」,除非猜中口令或整次重来
+        if (seen !== undefined && !accFbPinNeed(fbSendable(), seen !== null, seen, v)) { okName = v; save(); return }
+        if (pw) { // 口令格已经在了,而这个名字确实还没进名册:这一下是连口令一起交
+          fbWhoPost(v, pi.value).then(function (o) {
+            if (o && o.names) seen = o.names.map(fbWhoNorm) // 服务端回的是整份名册,以它为准
+            okName = v
+            save()
+          }, function (e) {
             pw.classList.add('bad')
             pmsg.textContent = String((e && e.message) || e)
             pmsg.hidden = false // 不关框:人还在这儿,再打一遍就是了
@@ -3423,6 +3435,7 @@ ${!AFB_PIN ? '' : `      // v0.17.6 名册这一关(只有配了口令的板才�
         }
         fbRoster().then(function (names) {
           if (done) return // 等名册回来的这几百毫秒里人按了 Esc
+          seen = names
           if (accFbPinNeed(fbSendable(), names !== null, names, v)) askPin()
           else { okName = v; save() }
         })

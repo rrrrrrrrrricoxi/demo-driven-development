@@ -248,14 +248,19 @@ into the roster. A wrong pin sleeps one second and answers 403 — no lockout, n
 counter, since the trust boundary is still the network and that second only
 blunts a slipped finger. With a pin configured, `mark` and `shot` answer 403 for
 any `who` outside the roster; with `acceptanceFeedback: true` those two behave
-exactly as they did in 0.17.0, the `who` endpoint answers 404, and the generated
-board carries not one byte of the roster code. The roster only grows: to remove
-somebody, edit the file and commit it, the same discipline as the ledger itself.
-Names are normalised the same way signatures are (control characters dropped,
-trimmed, cut to 20 code points), so the roster and the ledger always compare the
-same string. The pin must be a 4-digit string; any other shape is a hard error
-from both `gen` and `serve.py` rather than a silent fallback to "no pin", which
-is precisely the case where somebody believes one is set.
+exactly as they did in 0.17.0, the `who` route does not exist (501, the same
+answer 0.17.5 gave it), and the generated board carries not one byte of the
+roster code. Where a pin *is* configured, the server also answers
+`GET /acceptance-roster.json` itself, so a board whose roster file has not been
+committed yet still hands the page an empty roster and the first person can pin
+themselves in. The roster only grows: to remove somebody, edit the file and
+commit it, the same discipline as the ledger itself. Names are normalised the
+same way signatures are (control characters dropped, trimmed, cut to 20 code
+points) and every comparison runs through that normaliser on both sides, so a
+name hand-written into the roster with a stray space still matches its owner.
+The pin must be a 4-digit string; any other shape is a hard error from both
+`gen` and `serve.py` rather than a silent fallback to "no pin", which is
+precisely the case where somebody believes one is set.
 
 Both sides need the newer pieces: the endpoint ships with `serve.py` version
 `# ddd-serve v4`, and the roster flow is baked by the 0.17.6 generator. A board

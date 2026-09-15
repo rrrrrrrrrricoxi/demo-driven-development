@@ -7129,6 +7129,14 @@ console.log('T78 验收名册与口令')
     '口令不对:框里出那句原话,框不关(人还在这儿,再打一遍就是了)')
   ok(on.includes('if (okName !== v) { gate(v); return }'),
     '过了关的名字记在 okName:人回头又改了名就得重过一次(不拿上一个名字的口令给新名字背书)')
+  // 病例:口令格一旦出来就只认口令。新人打了自己的名字、口令格冒出来,这时他改成名册里那个
+  // 在用的名字回车 —— 收到的是「口令不对」,除非猜中口令或整次重来。规矩写的是「换回名册里的
+  // 旧名也不问」,所以名册拉回来那一份要记着(seen),每一下都拿它重判一次
+  ok(on.includes('if (seen !== undefined && !accFbPinNeed(fbSendable(), seen !== null, seen, v)) { okName = v; save(); return }')
+    && on.includes('seen = names') && on.includes('if (o && o.names) seen = o.names.map(fbWhoNorm)'),
+    '名册拉回来就记着:名字改回在册的那个,不再问口令(who 回的整份名册也拿来刷新它)')
+  ok(on.includes("return o ? ((o.names || []).map(fbWhoNorm)) : null"),
+    '页面比名册前也过一遍 fbWhoNorm —— 服务端比的是归一后的串,两头得用同一把尺')
   ok(on.includes('FB_QUEUE.length = 0') && on.includes('go.forEach(function (q) { q.run() })'),
     '0.17.4 的补记队列原样还在:口令过了之后,刚才点的每一下照样按点击顺序补记')
 
@@ -7178,8 +7186,11 @@ console.log('T78 验收名册与口令')
     ok(true, '本机没有 python3,serve.py 那组跳过(CI 的 ubuntu 上有)')
   } else {
     cpSync(join(REPO, 'templates', 'serve.py'), join(kb, 'serve.py'))
-    ok(/^# ddd-serve v4$/m.test(readFileSync(join(kb, 'serve.py'), 'utf8')),
+    const srvSrc = readFileSync(join(kb, 'serve.py'), 'utf8')
+    ok(/^# ddd-serve v4$/m.test(srvSrc),
       'serve.py 版本戳升到 v4(写口的形状变了:多一条 who,mark/shot 多一道名册门)')
+    ok(!srvSrc.includes('ROSTER_FILE + ".tmp"') && srvSrc.includes('threading.get_ident()'),
+      '名册的临时文件名带线程号:这台服务是线程化的,写死一个 .tmp 就是两个线程对写同一个文件')
     const srv = await startServe(kb)
     try {
       const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(64)])
@@ -7193,12 +7204,21 @@ console.log('T78 验收名册与口令')
       // ① 没配口令(acceptanceFeedback: true):who 口不存在,mark 照旧收任何名字 —— 冻结②
       {
         const c = rd(cfgP); c.acceptanceFeedback = true; wr(cfgP, c)
+        // 501 不是 404:0.17.5 对这条路径答的就是这一句(它没有 who 这条路),而「true 的板逐响应
+        // 与 0.17.5 相同」是这一版的硬口径。答 404 + 一句 JSON 解释,探针矩阵上就是一处差异
         const w = await who({ name: '路人', pin: '1111' })
-        ok(w.status === 404 && String(w.json && w.json.error).includes('pin'),
-          '冻结②:没配口令的板 —— who 口 404(写口不存在),一句说清缺的是哪个键', `${w.status} ${w.text.slice(0, 90)}`)
+        ok(w.status === 501 && /Unsupported method/.test(w.text),
+          '冻结②:没配口令的板 —— who 这条路压根不存在(501,与 0.17.5 同一句)', `${w.status} ${w.text.slice(0, 90)}`)
         ok((await mark({ pr: 277, item: 'JJ3', who: '路人甲', verdict: 'ok' })).status === 200,
           '冻结②:没配口令时 mark 照旧收任何名字(0.17.0 起的行为一字不改)')
         ok(!existsSync(rosP), '名册文件也没被创建出来 —— 没配口令的板上根本没有名册这回事')
+        ok((await req(srv.base, '/acceptance-roster.json')).status === 404,
+          '冻结②:名册那份 GET 也照旧是静态文件(文件不在就 404,服务端不代答)')
+        // 反馈整个关掉的板:同一条路径同样是 501(0.17.5 连 do_POST 的第一道门都没走到这儿)
+        const c0 = rd(cfgP); delete c0.acceptanceFeedback; wr(cfgP, c0)
+        const w0 = await who({ name: '路人', pin: '1111' })
+        ok(w0.status === 501 && /Unsupported method/.test(w0.text),
+          '冻结②:acceptanceFeedback 关着的板 —— who 同样 501,不是「未开」那句 404', `${w0.status} ${w0.text.slice(0, 90)}`)
       }
       const c2 = rd(cfgP); c2.acceptanceFeedback = { pin: '1111' }; wr(cfgP, c2)
 
@@ -7213,8 +7233,15 @@ console.log('T78 验收名册与口令')
       }
 
       // ③ 名册:缺席 = 空;口令对就进;去重;归一化(与署名同一套)
-      ok((await req(srv.base, '/acceptance-roster.json')).status === 404,
-        '名册文件缺席 = 空名册(GET 404,页面按「没有名册机制」处理)')
+      // 配了口令时名册那份 GET 由服务端答,文件还没建也答一份空的:答 404 的话页面读成「这块板
+      // 没有名册这回事」→ 不问口令就署名 → mark 那头按名册 403,而人被告知去输的那格永远不会出现。
+      // 第一个人上板时名册文件本来就不在,这一档是常态不是边角
+      {
+        const g0 = await req(srv.base, '/acceptance-roster.json')
+        ok(g0.status === 200 && JSON.stringify(g0.json) === '{"names":[]}',
+          '名册文件还没建:GET 答 200 空名册(不是 404)—— 第一个人才进得了名册', `${g0.status} ${g0.text.slice(0, 80)}`)
+        ok(!existsSync(rosP), '而且只是答一份空的,没顺手把文件建出来(名册是人提交进 git 的东西)')
+      }
       const w1 = await who({ name: '  tester-a  ', pin: '1111' })
       ok(w1.status === 200 && JSON.stringify(w1.json.names) === JSON.stringify(['tester-a']),
         '口令对:名字归一(去首尾空白)后进名册,回的是整份名册', w1.text.slice(0, 120))
@@ -7275,6 +7302,55 @@ console.log('T78 验收名册与口令')
         const g = await req(srv.base, '/acceptance-roster.json')
         ok(g.status === 200 && String(g.headers.get('cache-control')).includes('no-store'),
           '名册 GET 带 no-store(与 jsonl 同一把尺)', String(g.headers.get('cache-control')))
+      }
+
+      // ⑧ 名册是人手写进 git 的那一份:两边都过同一只归一再比,别留一道人看不见的门
+      {
+        wr(rosP, { names: ['  tester-hand  ', 'tester-a'] }) // 手敲 JSON 落下的首尾空白
+        const m = await mark({ pr: 277, item: 'JJ3', who: 'tester-hand', verdict: 'ok' })
+        ok(m.status === 200 && m.json.who === 'tester-hand',
+          '名册项带首尾空白:页面送的归一名照样认得(账上记的也是归一后的那个串)', `${m.status} ${m.text.slice(0, 120)}`)
+        ok((await mark({ pr: 277, item: 'JJ3', who: 'tester-nobody', verdict: 'ok' })).status === 403,
+          '归一只是把两边拉到同一把尺上,名册外的名字照样 403')
+        const g = await req(srv.base, '/acceptance-roster.json')
+        ok(g.status === 200 && g.json.names.length === 2, '名册读坏不了就照原样答(归一只发生在比的那一刻)')
+      }
+
+      // ⑨ 名册读坏了:答空名册,而不是把全板的人卡在 403 上没有出路
+      {
+        const keep = readFileSync(rosP, 'utf8')
+        writeFileSync(rosP, '{"names": ["tester-a"')  // 半截 JSON(手改手滑 / 上一版撕出来的)
+        const g = await req(srv.base, '/acceptance-roster.json')
+        ok(g.status === 200 && JSON.stringify(g.json) === '{"names":[]}',
+          '名册不是合法 JSON:GET 答空名册 —— 页面会问口令,输一次就把它整份重写回来', g.text.slice(0, 80))
+        ok((await who({ name: 'tester-a', pin: '1111' })).status === 200 && rd(rosP).names.join(',') === 'tester-a',
+          '输一次口令,坏名册被整份重写回来(自己能爬出来,不必有人上机修文件)')
+        writeFileSync(rosP, keep)
+      }
+
+      // ⑩ 两个人同一秒加名字:名册可以掉一个(ponytail 认的),但不许撕成读不回来的半截
+      // 病例:临时文件名是写死的一个 .tmp,两个线程一起 O_TRUNC 往同一个文件里对写,长的写在前、
+      // 短的写在后,rename 出去的是「短的 + 长的尾巴」—— 名册从此不是 JSON,全板的人一律 403
+      {
+        const keep = readFileSync(rosP, 'utf8')
+        for (let i = 0; i < 12; i++) {
+          await Promise.all([who({ name: `n${i}`, pin: '1111' }), who({ name: `longname-${i}-xxxxxxxx`, pin: '1111' })])
+          let names = null
+          try { names = rd(rosP).names } catch (e) { names = String(e) }
+          ok(Array.isArray(names) && names.every((n) => typeof n === 'string'),
+            `并发两写第 ${i + 1} 轮:名册仍是一份读得回来的 JSON`, String(names).slice(0, 160))
+        }
+        ok(readdirSync(kb).every((f) => !f.endsWith('.tmp')), '临时文件都被 rename 吃掉了,看板目录不留残渣')
+        writeFileSync(rosP, keep)
+      }
+
+      // ⑪ pin 的形状:Python 的 $ 还认「末尾那个换行」,而页面那把尺(/^[0-9]{4}$/)不认
+      {
+        const c = rd(cfgP); c.acceptanceFeedback = { pin: '1111\n' }; wr(cfgP, c)
+        const w = await who({ name: 'tester-a', pin: '1111\n' })
+        ok(w.status === 500 && /4 位数字/.test(String(w.json && w.json.error)),
+          '"1111\\n" 不是 4 位数字口令:serve 与 gen 判得一样(硬报错,不是一边收一边拒)', `${w.status} ${w.text.slice(0, 120)}`)
+        wr(cfgP, c2)
       }
       ok((await req(srv.base, '/api/nope', { method: 'POST', body: '{}' })).status === 501,
         '别的 POST 路径照旧 501(多一条写口没把这句兜底改掉)')

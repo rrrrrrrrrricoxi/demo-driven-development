@@ -30,8 +30,10 @@
 #   谁能在验收账上出现,应该有人点头。名册是 acceptance-roster.json(进 git),往里加人要那 4 位口令:
 #   第三个写口 /api/acceptance/who 收 {name, pin} —— 口令对就把归一后的名字并进名册并回整份名册,
 #   不对就 sleep 1s 再 403(不锁、不计数:信任边界仍在网络层,这一秒只防手滑连点)。
-#   配了口令之后,mark 与 shot 只收名册里的名字(否则 403);没配口令(acceptanceFeedback: true)时
-#   who 口 404、mark/shot 照 v3 收任何名字 —— 老宿主零差异。
+#   配了口令之后,mark 与 shot 只收名册里的名字(否则 403),名册那一份 GET 也改由服务端答(文件还
+#   没建时答空名册,否则页面以为这块板没有名册这回事,不问口令就署名,却在 mark 那儿被 403 卡死);
+#   没配口令(acceptanceFeedback: true)时 who 这条路压根不存在(501,与 v3 同一句),mark/shot 照 v3
+#   收任何名字,名册那份 GET 照旧当静态文件发 —— 老宿主逐响应零差异。
 
 import functools
 import gzip
@@ -41,6 +43,7 @@ import os
 import re
 import socketserver
 import sys
+import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
@@ -55,11 +58,14 @@ COMPRESSIBLE = {".html", ".htm", ".css", ".js", ".json", ".jsonl", ".svg", ".md"
 # ---- 验收反馈共享(opt-in)----
 FEEDBACK_FILE = os.path.join(ROOT, "acceptance-feedback.jsonl")
 ROSTER_FILE = os.path.join(ROOT, "acceptance-roster.json")
+ROSTER_ROUTE = "/acceptance-roster.json"
 SHOTS_DIR = os.path.join(ROOT, "shots")
 MARK_ROUTE = "/api/acceptance/mark"
 SHOT_ROUTE = "/api/acceptance/shot"
 WHO_ROUTE = "/api/acceptance/who"
-PIN_RE = re.compile(r"^[0-9]{4}$")
+# \Z 不是 $:Python 的 $ 还认「末尾那个换行之前」,"1111\n" 会被当成合法口令,而页面那把同样的尺
+# (gen 的 /^[0-9]{4}$/)不认 —— 两边对同一份 config 判得不一样,是迟早要还的账
+PIN_RE = re.compile(r"^[0-9]{4}\Z")
 MAX_SHOT = 2 * 1024 * 1024  # 客户端已按长边 1280 / JPEG 0.8 压过,2 MB 是兜底不是目标
 MAX_MARK = 64 * 1024
 # 超限的请求体也照读照扔(至多这么多):不读完就答,客户端还在发,它看到的是断管不是那句 400
@@ -123,11 +129,17 @@ def roster_names():
 def roster_write(names):
     """整份重写(名册是一份 JSON,不像账那样只追加):先写临时文件再 rename —— 半截名册不会露出来。
 
-    ponytail:读—改—写之间没有锁,两个人同一秒加名字理论上会掉一个。加名字是一辈子一次的动作,
-    现在按这个量级不值得上锁;真要上,给 ROSTER_FILE 配一把 O_EXCL 的锁文件即可。
+    临时文件名带线程号:这台服务是线程化的,两个人同一秒加名字就是两个线程。共用一个 .tmp 的话,
+    后到那个 O_TRUNC 把前一个正在写的截了,长的写在前、短的写在后,rename 出去的是「短的 + 长的尾巴」
+    —— 名册从此不是合法 JSON,roster_names() 读成空,全板的人在 mark 那儿一律 403,得有人手工修文件。
+    (实测 40 轮并发两写里第 16 轮就撞出来过。)
+
+    ponytail:读—改—写之间仍没有锁,两个人同一秒加名字会掉一个(后写的那份没有前一个的名字)。
+    掉一个只要再输一次口令就补回来,不像撕坏那样要人动手;加名字是一辈子一次的动作,现在按这个
+    量级不值得上锁。真要上,给 ROSTER_FILE 配一把 O_EXCL 的锁文件即可。
     """
     body = (json.dumps({"names": names}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    tmp = ROSTER_FILE + ".tmp"
+    tmp = "%s.%d.tmp" % (ROSTER_FILE, threading.get_ident())
     write_fd(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644), body)
     os.replace(tmp, ROSTER_FILE)
 
@@ -224,6 +236,17 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        # 配了口令的板:名册这一份由服务端答,不当静态文件发 —— 文件还没建(第一个人还没署过名)
+        # 时也要答一份空名册。答 404 的话页面读成「这块板没有名册这回事」,于是不问口令就署名,
+        # 而 mark 那头正按名册卡着 403:人被告知「先在署名那格输一次口令」,而那格永远不会出现。
+        # 名册读坏了同理按空名册答(下一次 who 会把它整份重写回来)。没配口令时一个字节都不动。
+        if urlsplit(self.path).path == ROSTER_ROUTE:
+            try:
+                _on, pin = feedback_cfg()
+            except BadConfig:
+                pin = ""  # config 坏了:照旧当静态文件发,报错归写口与 gen 那两处
+            if pin:
+                return self.reply_json(200, {"names": roster_names()})
         path = self.translate_path(self.path)
         # 目录且无尾斜杠:让基类走 301 重定向(直接回 index.html 会坏掉页内相对链接)
         if os.path.isdir(path) and not self.path.split("?", 1)[0].endswith("/"):
@@ -257,13 +280,15 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             on, pin = feedback_cfg()
         except BadConfig as e:
             return self.reply_json(500, {"error": str(e)})
+        # 没配口令 = 没有名册这套机制,这条路压根不存在:答得跟 0.17.5(它根本没有这条路)一个字不差,
+        # 这句要在下面那两道门之前 —— acceptanceFeedback 写 true 或关着的板上,这一路的每个回应都得冻住
+        if route == WHO_ROUTE and not pin:
+            return self.send_error(501, "Unsupported method ('POST')")
         if not on:
             return self.reply_json(404, {"error": "acceptanceFeedback 未开(kanban.config.json)"})
         bad = self.cross_site()
         if bad:
             return self.reply_json(403, {"error": bad})
-        if route == WHO_ROUTE and not pin:  # 没配口令 = 没有名册这套机制,这条路压根不存在
-            return self.reply_json(404, {"error": "这块板没配验收口令(kanban.config.json 的 acceptanceFeedback.pin)"})
         try:
             if route == WHO_ROUTE:
                 body = self.post_who(pin)
@@ -337,10 +362,15 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         if any(ord(c) < 32 or ord(c) == 127 for c in who):
             raise Rejected("who 含控制字符")
         check_wellformed(who, "who")
-        # 配了口令的板:账上只认名册里的名字。名字进名册走 /api/acceptance/who(要口令),
-        # 这里不归一化再比 —— 名册存的就是页面归一后的那个串,比不上就是没进过名册
-        if pin and who not in roster_names():
-            raise Denied("「%s」未在名册 —— 先在署名那格输一次口令,把名字加进 acceptance-roster.json" % who)
+        # 配了口令的板:账上只认名册里的名字。名字进名册走 /api/acceptance/who(要口令)。
+        # 两边都过同一只 norm_who 再比:who 写口收下的是归一后的串,而名册也可能是人手写进 git 的
+        # (首宿主就是这么起的账),差一个尾空格就成了一道人看不见的门 —— 「甲 」入了册,「甲」被拒,
+        # 而页面上这两个名字长得一模一样。归一后的那个串也是记进账里的那个,同一个人不会因为多打
+        # 一个空格在账上变成两个人。
+        if pin:
+            who = norm_who(who)
+            if who not in [norm_who(n) for n in roster_names()]:
+                raise Denied("「%s」未在名册 —— 先在署名那格输一次口令,把名字加进 acceptance-roster.json" % who)
         return pr, item, who, rev
 
     def post_who(self, pin):

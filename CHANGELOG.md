@@ -39,14 +39,27 @@ the same discipline the ledger itself follows.
 ### Added
 - **`POST /api/acceptance/who`** in `serve.py` (`# ddd-serve v4`), body
   `{name, pin}`. The name is normalised the way signatures are — control
-  characters dropped, trimmed, cut to 20 code points — so the roster and the
-  ledger always compare the same string; a name already there is not added
-  twice. The file is rewritten through a temporary file plus `rename` and
-  `fsync`, so a half-written roster never becomes visible. A wrong pin sleeps
-  one second and answers 403: no lockout and no counter, because the trust
-  boundary is still the network and that second only blunts a slipped finger.
-  The endpoint answers 404 where no pin is configured, and it sits behind the
+  characters dropped, trimmed, cut to 20 code points — and both sides of every
+  later comparison go through that same normaliser, `mark` and `shot` on the
+  server and the signing box in the page, so a roster entry typed into git by
+  hand with a stray space does not quietly lock its owner out; a name already
+  there is not added twice. The file is rewritten through a temporary file plus
+  `rename` and `fsync`, so a half-written roster never becomes visible, and that
+  temporary file is named per thread: two people adding a name in the same
+  second cannot write over each other's bytes. (The worst case stays the
+  documented one — one of the two additions is lost, and typing the pin again
+  puts it back.) A wrong pin sleeps one second and answers 403: no lockout and
+  no counter, because the trust boundary is still the network and that second
+  only blunts a slipped finger. Where no pin is configured the route does not
+  exist at all: 501, the same answer 0.17.5 gives for it. It sits behind the
   same cross-site gate and the same `application/json`-only rule as `mark`.
+- **`GET /acceptance-roster.json` answered by the server** where a pin is
+  configured — including an empty roster when the file is not there yet, or
+  cannot be parsed. A 404 would tell the page this board has no roster at all,
+  so it would sign without asking for a pin and then be refused by `mark`, whose
+  message points at a box that would never appear: the first person on a new
+  board would have no way in, and a roster damaged by hand would lock everyone
+  out at once. Where no pin is configured the path stays an ordinary static file.
 - **The roster gate on `mark` and `shot`.** With a pin configured, a `who`
   outside the roster is a 403 that says so. With `acceptanceFeedback: true`
   both endpoints behave exactly as they did in 0.17.0.
@@ -55,7 +68,11 @@ the same discipline the ledger itself follows.
   a grey 口令不对 inside the right edge of that box and keeps it open; Esc
   cancels the whole signing, including the clicks queued behind it. No dialog is
   raised, and the queue that 0.17.4 added still replays every click in order once
-  the name lands. Boards without a pin never fetch a roster and never ask.
+  the name lands. The roster fetched when the box came up is kept and consulted
+  again on every attempt, so editing the name back to one already on the roster
+  signs straight through — the box raised for a new name never traps somebody who
+  then decides to sign as themselves. Boards without a pin never fetch a roster
+  and never ask.
 - **A line from `kanban-init`** — in both `plan` and `apply` — when
   `acceptanceFeedback` is on with no pin configured, with the exact shape to
   write. It does not edit your config, for the same reason it does not edit your
