@@ -9,6 +9,41 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.10] - 2026-09-16
+
+### One pull request, one head
+
+Two designs in the release timeline added up to a misleading picture. Lanes were
+capped at six and a seventh concurrent pull request was deliberately stacked on
+the lane that freed up earliest, so two bars sat on top of each other; and in
+the middle zoom (40–120px a day) a pull request that is still open was drawn
+with a solid cap at its right end, which is exactly how a merged one ends. Put
+together, two overlapping bars with four caps read as one pull request with two
+heads, and the legend's "dashed edge = still open" was not true at that zoom.
+
+### Changed
+- **Lanes grow on demand instead of stacking.** `TL.lanes: 6` is now a starting
+  value and `TL.lanesMax: 12` the ceiling: when none of the open lanes has room,
+  `relPack` and `relPackChip` open a new one rather than stacking, and the band's
+  height follows the lanes actually used. A band with six or fewer concurrent
+  pull requests is drawn exactly as before.
+- **Whatever twelve lanes cannot hold folds into a `+N`.** Items past the
+  ceiling are no longer drawn on top of a neighbour; they come back as `hidden`
+  and render as one `+N 条未画` chip at the right edge of the band, in the same
+  shape as the per-day `+N` — every folded number is listed in `data-relfold`
+  and the hover card names them. The band's own subtitle still counts them.
+- **An open pull request ends in a dashed edge at the middle zoom.** `tlCap`
+  draws no cap at the right end for an open pull request and runs the hairline
+  to the right edge with `relhr-open` (same colour, 3px on / 2px off), matching
+  the base and chip regimes. One rule now holds at every zoom: a solid cap at
+  the right end means merged.
+
+### Upgrading
+`templates/serve.py` and the hooks are untouched — nothing to restart. Boards
+whose bands never hold more than six concurrent pull requests, and which have no
+open pull request drawn at the middle zoom, render byte-for-byte as they did in
+0.17.9.
+
 ## [0.17.9] - 2026-09-15
 
 ### Review follow-ups

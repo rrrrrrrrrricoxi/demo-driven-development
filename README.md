@@ -281,8 +281,10 @@ offers two views of the same data — a table (number, title, stage, status and
 date, cards, branch, acceptance progress; sortable, searchable, released ones
 folded by version) and a timeline. The timeline is one band per version plus
 dev, test and the leftovers, around 200px folded; click a band and it expands
-in place, packing its pull requests into at most six shared lanes so the
-expanded height has a ceiling. The date axis is not linear — a quiet day is
+in place, packing its pull requests into six shared lanes, growing a lane at a
+time up to twelve when six will not hold them without overlapping and folding
+whatever is left over into a `+N` at the right edge, so the expanded height
+follows the lanes actually used and still has a ceiling. The date axis is not linear — a quiet day is
 narrow and a day with many pull requests is widened to fit them side by
 side, which is where the old one-row-per-pull-request timeline was spending
 2400px of height for no information. Those weights are relative: the axis is
@@ -290,7 +292,9 @@ scaled to fill the panel, so a shorter window zooms in rather than stopping
 halfway across, and only a window too wide to fit scrolls sideways. How wide a
 day ends up being then picks the glyphs: below 40px a day it renders as it
 always has; from 40 the squares grow with the day and a bar becomes a solid cap
-at each end joined by a hairline; from 120 every pull request is a labelled
+at each end joined by a hairline — unless it is still open, which ends in a
+dashed edge instead, since a solid cap at the right end means merged in all
+three regimes; from 120 every pull request is a labelled
 `#NNN` chip in its day's cell, with a whisker back to the day it was opened and
 a `+N` for whatever a cell cannot hold.
 Five chips set the window — Last 30 days,

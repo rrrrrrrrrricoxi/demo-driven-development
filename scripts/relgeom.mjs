@@ -3,7 +3,8 @@
 // 「打包按估算、绘制按真实」是上一版时间线撞车的根:泳道分配与画条必须走同一个 relBar。
 //
 // 轴是**非线性**的:一天一格,安静的日子只给 quiet px,有 PR 的日子至少 base px,
-// 一天挤了很多个就按 ceil(当日数 / lanes) 格加宽 —— 横向是这张图唯一没被用起来的一维。
+// 一天挤了很多个就按 ceil(当日数 / lanes) 格加宽(lanes 取**起步值**,不随 lanesMax 走:
+// 轴宽是全局的,不该被某一条带临时多开的几道拽宽)—— 横向是这张图唯一没被用起来的一维。
 // 宽度一律按**全局**日计数算(不是当前筛选后的),所以展开/折叠/筛选都不会让轴跳。
 //
 // 浏览器侧要跑在没有 const/箭头函数假设的老壳里,这里统一用 var + function。
@@ -81,26 +82,24 @@ export function relBar(ax, s, e, min) {
 
 /**
  * 跨天 PR 的泳道打包:按开始日贪心塞进第一条空出来的泳道。
- * 泳道数封顶 o.lanes —— 展开后的高度因此与 PR 数无关(这正是「不再一人一行」的落点);
- * 真的满了就塞进最早空出来的那条(宁可两条挨一下,也不让一条带长到看不完)。
- * @param items [{ n, s, e }] · @returns { used, bars: [{ n, lane, x, w, item }] }
+ * o.lanes 是**起步**不是上限(v0.17.10):所有已开的道都放不下就开新道,开到 o.lanesMax 条封顶 ——
+ * 展开后的高度仍有上界,但第 7 条并发不再被硬塞回已有的道上叠着画(叠出来的两条像一个 PR 两个头)。
+ * 到顶仍放不下的**不画**,收进 hidden,由调用方在带的右端出一枚「+N 条未画」。
+ * @param items [{ n, s, e }] · @returns { used, bars: [{ n, lane, x, w, item }], hidden: [item…] }
  */
 export function relPack(items, ax, o) {
-  var ends = [], used = 0, bars = [], i, j, q, g
+  var mx = o.lanesMax || o.lanes, ends = [], used = 0, bars = [], hidden = [], i, j, g
   var list = items.slice().sort(function (a, b) { return a.s < b.s ? -1 : a.s > b.s ? 1 : a.n - b.n })
   for (i = 0; i < list.length; i++) {
     g = relBar(ax, list[i].s, list[i].e, o.min)
     if (!g) continue
     for (j = 0; j < ends.length; j++) if (ends[j] + o.gap <= g.x0) break
-    if (j >= o.lanes) {
-      j = 0
-      for (q = 1; q < ends.length; q++) if (ends[q] < ends[j]) j = q
-    }
+    if (j >= mx) { hidden.push(list[i]); continue }
     ends[j] = g.x0 + g.w
     bars.push({ n: list[i].n, lane: j, x: g.x0, w: g.w, item: list[i] })
     if (j + 1 > used) used = j + 1
   }
-  return { used: used, bars: bars }
+  return { used: used, bars: bars, hidden: hidden }
 }
 
 /**
@@ -127,7 +126,8 @@ export function relGrid(byDay, ax, o) {
 
 /**
  * 一条带的高度:折叠 = 带头;展开 = 带头 + 两组泳道(各自带一行小标题)+ 底衬。
- * m / s 都封了顶(见 relPack / relGrid / relGridBig),所以展开后的高度有上界,与带里有多少 PR 无关。
+ * m / s 都封了顶(见 relPack / relGrid / relGridBig),所以展开后的高度有上界,与带里有多少 PR 无关 ——
+ * 高度随**实际用到**的道数走(v0.17.10 把跨天那组的顶从 6 抬到 lanesMax 12,不拥挤的带一个像素不动)。
  * rm / rs(v0.15.11)= 两组各自的行距,不传就是老的 o.row —— 放大档的方块 / 芯片比 13px 高,
  * 带高必须跟着长,不然字形放大了却挤在原来的行距里。
  */
@@ -237,10 +237,11 @@ export function relGridChip(byDay, ax, cw) {
  * 芯片落在**锚点日**那一格:合了的落合并日,还开着的落开 PR 那天 —— 与轴宽的日计数同一条口径
  * (DAYC 按锚点日落桶),否则格子的宽与格子里的芯片数对不上。
  * 细线连的是芯片块与跨度的另一端;开始日被窗口裁掉时留一个 ‹ 在左沿。
- * @returns { used, rows: [{ lane, clip, open, x0, x1, cx, show, list }] } x0→x1 = 细线,cx = 芯片起点
+ * @returns { used, rows: [{ lane, clip, open, x0, x1, cx, show, list }], hidden } x0→x1 = 细线,cx = 芯片起点
  */
 export function relPackChip(multi, ax, cw, o) {
-  var pitch = relChipPitch(cw), gm = {}, order = [], rows = [], ends = [], i, j, q, k, it, g, an, clip, cx, cols, show, blk, x0, x1, lo, hi
+  var mx = o.lanesMax || o.lanes, pitch = relChipPitch(cw), gm = {}, order = [], rows = [], ends = [], hidden = []
+  var i, j, k, it, g, an, clip, cx, cols, show, blk, x0, x1, lo, hi
   for (i = 0; i < multi.length; i++) {
     it = multi[i]
     if (it.e < ax.t0 || it.s > ax.t1) continue
@@ -264,16 +265,16 @@ export function relPackChip(multi, ax, cw, o) {
     blk = (show + (g.list.length > show ? 1 : 0)) * pitch - CHIP_GAP // 芯片块占的横向
     x0 = g.open ? cx + blk : (clip ? o.lbl + 11 : ax.x[g.s] + 5)
     x1 = g.open ? ax.x[g.e] + ax.w[g.e] - 4 : cx
-    // 横向不打架的两组并作一行,行数照旧封顶 o.lanes —— 与 relPack 同一条规矩:
-    // 宁可两条挨一下,也不让一条带长到看不完(真挤到了,芯片各在自己那一格,含糊的只是细线)
+    // 横向不打架的两组并作一行,行数从 o.lanes 起步、放不下就加行、到 o.lanesMax 封顶 ——
+    // 与 relPack 同一条规矩(v0.17.10):不再往已有的行上叠,到顶仍放不下的收进 hidden 走 +N
     lo = Math.min(x0, cx)
     hi = Math.max(x1, cx + blk)
     for (j = 0; j < ends.length; j++) if (ends[j] + o.gap <= lo) break
-    if (j >= o.lanes) { j = 0; for (q = 1; q < ends.length; q++) if (ends[q] < ends[j]) j = q }
+    if (j >= mx) { for (k = 0; k < g.list.length; k++) hidden.push(g.list[k]); continue }
     ends[j] = hi
     rows.push({ lane: j, clip: clip, open: g.open, an: an, cx: cx, show: show, list: g.list, x0: x0, x1: x1 })
   }
-  return { used: ends.length > o.lanes ? o.lanes : ends.length, rows: rows }
+  return { used: ends.length, rows: rows, hidden: hidden }
 }
 
 /**
