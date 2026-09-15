@@ -2877,7 +2877,12 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accfbzoom img { max-width: 92vw; max-height: 88vh; border-radius: 6px; }
   .accfbzx { position: absolute; top: 12px; right: 16px; appearance: none; border: 0; background: none;
      font-size: 24px; line-height: 1; color: #fff; cursor: pointer; }
-  .accme { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--mut); }
+  /* v0.17.6:这枚 chip 的高度两态一致 —— 输入框换上来时它不许比现在高一分,否则点一下「换人」
+     整块板从这一行往下集体下移一截(min-height 取的就是 11.5px 那行字的行盒,只入不出) */
+  .accme { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--mut);
+     min-height: 19px; align-self: center; }
+  /* chip 里那只输入框是矮版:行高与内边距压到 17px 外高,塞得进上面那 19px */
+  .accme .accwhoi { width: 150px; font-size: 11px; line-height: 15px; padding: 0 7px; }
   .accmeb { appearance: none; border: 0; background: none; font: inherit; font-size: 11px; padding: 0;
      color: var(--accent); cursor: pointer; }
   /* 署名就地问(v0.17.3):一行输入框,落在行下那句灰字的位置,或顶上 chip 旁边 —— 不弹系统对话框 */
@@ -2896,7 +2901,9 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accwhopi { flex: none; width: 108px; font: inherit; font-size: 12px; line-height: 20px; padding: 2px 8px;
      border: 1px solid var(--line-strong); border-radius: 7px; background: var(--card); color: var(--ink); }
   .accitem input.accwhopi { width: 108px; height: auto; margin: 0; } /* 同 .accwhoi:躲开 .accitem input 那条 15×15 */
-  .accwhow.bad .accwhopi { padding-right: 58px; }`}
+  .accwhow.bad .accwhopi { padding-right: 58px; }
+  /* 同 .accwhoi:chip 里用矮版。宽度要容得下「4 位数字 + 右缘那句灰字」,窄了数字会被挤没 */
+  .accme .accwhopi { width: 120px; font-size: 11px; line-height: 15px; padding: 0 7px; }`}
   .accwhoh { font-size: 10.5px; color: var(--faint); }
   /* 第一次署名落地后那一行一次性确认(v0.17.4):行里与顶部 chip 下各一份,「改」就地开同一只框 */
   .accwhook { margin: 7px 0 0; font-size: 11px; color: var(--mut); }
@@ -3273,6 +3280,18 @@ const ACC_FB_JS = !AFB ? '' : `
       chip.querySelector('.accmen').textContent = FB_WHO ? '我是 ' + FB_WHO : '未署名'
       chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'
     }
+    // 换人时顶栏那一行不许跳:chip 的两格让位给输入框(hidden,不是 remove —— 名字还要写回去),
+    // 框一走就原样露回来。按「现查」写而不记在闭包里:那只框可能被搬去别的行(见 fbWhoAsk 开头),
+    // 收拾残局的不一定是当初藏它的那一次调用。
+    function fbChipHide() { fbChipToggle(true) }
+    function fbChipShow() { fbChipToggle(false) }
+    function fbChipToggle(hide) {
+      var c = document.querySelector('[data-accme]')
+      if (!c) return
+      var n = c.querySelector('.accmen'), b = c.querySelector('[data-accwho]')
+      if (n) n.hidden = hide
+      if (b) b.hidden = hide
+    }
     function fbWhoNorm(v) {
       // 按码点切,不按 UTF-16 格:第 20 格正好落在一个 emoji 的代理对中间时,slice 会切出半个字,
       // 服务端 json.dumps().encode('utf-8') 上炸掉,连接被掐,页面还误报成「你的 serve.py 太旧」
@@ -3342,6 +3361,7 @@ ${!AFB_PIN ? '' : `    // v0.17.6 名册:谁能在验收账上出现,该有人�
         kept = oi.value
         var orow = open.closest('.accitem')
         open.remove()
+        fbChipShow() // 框要是长在 chip 里,拆走它的同时得把让出去的那两格还回来
         if (orow) fbOpen(orow)
       }
       var host = row ? fbBox(row) : document.querySelector('[data-accme]')
@@ -3358,7 +3378,7 @@ ${!AFB_PIN ? '' : `    // v0.17.6 名册:谁能在验收账上出现,该有人�
       w.append(i, min)
       f.append(w, fbEl('span', 'accwhoh', '回车署名 · Esc 取消'))
       var done = false
-      var close = function () { f.remove(); if (row) fbOpen(row) }
+      var close = function () { f.remove(); fbChipShow(); if (row) fbOpen(row) }
       var cancel = function () { // Esc:什么都不记,排着的那几下一并作废(没名字就记不成)
         if (done) return
         done = true
@@ -3427,7 +3447,10 @@ ${!AFB_PIN ? '' : `        if (okName !== v) { gate(v); return } // 名册那一
         if (ev.key === 'Escape') { ev.preventDefault(); cancel() }
       })
       if (row) host.insertBefore(f, host.firstChild) // 行里:落在原来那句「先署个名」的位置
-      else host.appendChild(f) // 顶上:紧挨着那枚 chip
+      // v0.17.6 顶上那一处是**替换**不是追加:输入框顶掉「我是 X · 换人」那两格,落在同一行、
+      // 同一高度。追加会把顶栏挤到换行 —— 点一下「换人」,从这一行往下整块板集体下移一截,
+      // 换完又跳回来(病例:0.17.3 起一直如此)。chip 的两格只是 hidden,close 时原样露回来。
+      else { fbChipHide(); host.appendChild(f) }
       // 先让这一块可见再聚焦:display:none 的子树里 focus() 一律不作数(fbEdit 那处踩过同一个坑)
       if (row) fbOpen(row)
       i.focus()

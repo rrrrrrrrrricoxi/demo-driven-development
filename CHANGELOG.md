@@ -9,6 +9,87 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.6] - 2026-09-15
+
+### Who gets to sign the acceptance ledger
+
+Since 0.17.0 the acceptance ledger has been shared: two people testing the same
+pull request see each other's verdicts, notes and screenshots within seconds.
+Anyone who can open the board can also sign it under any name they type. On a
+private network that is not a security hole — the trust boundary is the port,
+and it always was — but it is a discipline hole. The ledger is a record. Who
+appears in it should be somebody's decision, not a free-text field.
+
+A roster fixes that without inventing accounts. `acceptanceFeedback` now takes
+an object as well as `true`:
+
+```json
+"acceptanceFeedback": { "pin": "1111" }
+```
+
+`app/kanban/acceptance-roster.json` is a plain `{"names": […]}` that lives in
+git, and the ledger accepts only the names on it. Signing as somebody already on
+the roster is exactly what it was — no pin, no extra click — and switching back
+to a name used before never asks either. A name that is not on the roster gets
+one more box on the same line, four digits wide: enter the pin and the name
+joins the roster, with whatever was just clicked recorded right after it. The
+roster only grows; removing somebody means editing the file and committing it,
+the same discipline the ledger itself follows.
+
+### Added
+- **`POST /api/acceptance/who`** in `serve.py` (`# ddd-serve v4`), body
+  `{name, pin}`. The name is normalised the way signatures are — control
+  characters dropped, trimmed, cut to 20 code points — so the roster and the
+  ledger always compare the same string; a name already there is not added
+  twice. The file is rewritten through a temporary file plus `rename` and
+  `fsync`, so a half-written roster never becomes visible. A wrong pin sleeps
+  one second and answers 403: no lockout and no counter, because the trust
+  boundary is still the network and that second only blunts a slipped finger.
+  The endpoint answers 404 where no pin is configured, and it sits behind the
+  same cross-site gate and the same `application/json`-only rule as `mark`.
+- **The roster gate on `mark` and `shot`.** With a pin configured, a `who`
+  outside the roster is a 403 that says so. With `acceptanceFeedback: true`
+  both endpoints behave exactly as they did in 0.17.0.
+- **A four-digit box on the signing line.** `inputmode="numeric"`,
+  `maxlength="4"`, autocomplete off, placeholder 新名字要口令. A wrong pin leaves
+  a grey 口令不对 inside the right edge of that box and keeps it open; Esc
+  cancels the whole signing, including the clicks queued behind it. No dialog is
+  raised, and the queue that 0.17.4 added still replays every click in order once
+  the name lands. Boards without a pin never fetch a roster and never ask.
+- **A line from `kanban-init`** — in both `plan` and `apply` — when
+  `acceptanceFeedback` is on with no pin configured, with the exact shape to
+  write. It does not edit your config, for the same reason it does not edit your
+  `.gitignore`.
+
+### Changed
+- **The acceptance tab's subtitle speaks to the person testing.** It used to
+  read 清单源 acceptance-manifest.json · 判定存 acceptance-feedback.jsonl(改
+  revision 即作废旧账)· 判定(✓/✕)、备注与截图经本机的 serve.py 共享给同看板的人 —
+  three developer words (a filename, a `revision`, a `serve.py`) in the first
+  line under the title. There are only two things that line has to say, and it
+  now says them: 判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废. Where
+  the file lives and how `revision` works stayed in the README and in the stamp
+  at the foot of the tab.
+- **The signing box replaces the identity chip instead of following it.**
+  Clicking 换人 used to append an input after 我是 X · 换人, which wrapped the
+  header and pushed everything below it down by eight pixels — and pulled it
+  back up when the box closed. The two chip parts are now hidden while the input
+  takes their place on the same line, and the chip keeps one height in both
+  states (measured in a real browser: the elements above and below it do not move
+  by a single pixel, at desktop width and at phone width).
+- **The `acceptanceFeedback` key is read in one place**, `scripts/accfb.mjs`, by
+  `gen`, the guard and `kanban-init` alike; `serve.py` carries the same rules in
+  Python. A `pin` that is not a 4-digit string is a hard error from both `gen`
+  and the write endpoints rather than a quiet fallback to "no pin" — which is
+  precisely the case where somebody believes one is set.
+
+### Frozen
+- A board with `acceptanceFeedback: true` gets the two fixes above and nothing
+  else: the roster code is baked only where a pin is configured, so its generated
+  output differs from 0.17.5 by exactly those two hunks, and its endpoints answer
+  the same way they did. A board with the key off or absent is byte-identical, as
+  always. Tests pin all three.
+
 ## [0.17.5] - 2026-09-15
 
 ### The Stop guard says one line about the chores

@@ -7369,6 +7369,96 @@ console.log('T79 验收副标题说人话')
     '页底那行出处照旧:文件名不是不能说,是不该摆在标题下第一行')
 }
 
+// ============ T80 换人那一行不跳 + 与 0.17.5 的冻结对照(0.17.6)============
+// 病例:点一下顶栏的「换人」,输入框追加在 chip 之后 —— 顶栏换行,从这一行往下整块板集体下移
+// 一截,换完又跳回来。修法是**替换**:chip 的两格让位给输入框,落在同一行、同一高度。
+console.log('T80 换人不跳与 0.17.5 冻结对照')
+{
+  const fx80 = mkFixture('fx80', { 's.html': demoHtml('s') })
+  const kb = fx80.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  wr(join(kb, 'acceptance-manifest.json'), {
+    current: 277,
+    lists: [{
+      pr: 277, revision: 2, title: '通扫收口',
+      groups: [{ id: 'J', title: 'J 组', tip: '' }],
+      items: [{ id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' }],
+    }],
+  })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  cfg.acceptanceFeedback = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- 形态:替换而不是追加 ----
+  ok(on.includes('else { fbChipHide(); host.appendChild(f) }') && !on.includes('else host.appendChild(f)'),
+    'chip 那一处是替换:先把「我是 X · 换人」两格藏起来再放输入框(不是直接追加在它们后面)')
+  ok(on.includes('function fbChipHide() { fbChipToggle(true) }') && on.includes('function fbChipShow() { fbChipToggle(false) }')
+    && on.includes('if (n) n.hidden = hide') && on.includes('if (b) b.hidden = hide'),
+    '让位是 hidden 不是 remove —— 名字还要写回那两格(fbWhoChip 照旧改它们的 textContent)')
+  ok(count(on, 'fbChipShow()') === 3 && on.includes("var close = function () { f.remove(); fbChipShow(); if (row) fbOpen(row) }"),
+    '两条退出路都还位:close(Esc / 署完)一条,框被搬去别的行那条一条(加上定义那行共 3 处)',
+    String(count(on, 'fbChipShow()')))
+  ok(on.includes('min-height: 19px; align-self: center; }') && on.includes('.accme .accwhoi { width: 150px; font-size: 11px; line-height: 15px; padding: 0 7px; }'),
+    '同一高度靠两条 CSS:chip 定高(两态一致)+ 框用矮版(17px 外高,塞得进 19px)')
+  ok(!/\.accme \{[^}]*align-items: baseline/.test(on),
+    'chip 不再按基线对齐 —— 基线随「里面装的是文字还是输入框」变,那 0.7px 就是一次微跳')
+
+  // ---- 与 0.17.5 的逐字节对照:true 档只许差那两处修错(参照树取自 tag)----
+  const TAG = 'demo-driven-development--v0.17.5'
+  const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.5 逐字节对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v0175')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v0175.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const oldScripts = join(oldRoot, 'scripts')
+    const mk = (name) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      cpSync(join(kb, 'acceptance-manifest.json'), join(fx.kb, 'acceptance-manifest.json'))
+      const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+      c.acceptanceTab = true
+      c.acceptanceFeedback = true
+      writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+      return fx
+    }
+    const a = mk('fx80-old'), b = mk('fx80-new')
+    runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
+    const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
+    const oldL = ml(join(a.kb, 'index.html')), newL = ml(join(b.kb, 'index.html'))
+    // 按行做多重集差:行号整体后移不算差异,只看「哪些行没了 / 哪些行是新的」
+    const onlyIn = (x, y) => {
+      const c = new Map()
+      y.forEach((l) => c.set(l, (c.get(l) || 0) + 1))
+      return x.filter((l) => { const n = c.get(l) || 0; if (n) { c.set(l, n - 1); return false } return true })
+    }
+    const gone = onlyIn(oldL, newL), added = onlyIn(newL, oldL)
+    ok(gone.length === 4, '0.17.5 那版里只有 4 行没了(副标题 1 行 + chip 那 3 行)', JSON.stringify(gone).slice(0, 300))
+    ok(gone.every((l) => /\.accme \{|<span class="sess">|var close = function|else host\.appendChild/.test(l)),
+      '没了的那几行全属于这两处修错(副标题 / 换人那一行),别处一行没动', JSON.stringify(gone).slice(0, 300))
+    // 两处修错各自的行 + 它们的续行(多行注释 / 多行 CSS 声明 / 那只小函数的函数体)
+    const MARK = /accme|accwho|fbChip|class="sess"|0\.17\.6|chip|顶栏|输入框|整块板|min-height: 19px|hidden = hide|if \(!c\) return|现查|收拾残局|^\s*\}$/
+    ok(added.length === 25 && added.every((l) => MARK.test(l)),
+      '新增的每一行也都属于这两处(其余一个字节不动)',
+      `${added.length} / ${JSON.stringify(added.filter((l) => !MARK.test(l))).slice(0, 300)}`)
+    ok(added.some((l) => l.includes('判定、备注与截图,同看板的人都看得见')) && added.some((l) => l.includes('fbChipHide')),
+      '两处修错确实都在这一份 diff 里(不是「什么都没改也全绿」)')
+
+    // 关档(不开 acceptanceFeedback)照旧逐字节冻结 —— 冻结③
+    const oa = mkFixture('fx80z-old', { 's.html': demoHtml('s') })
+    const ob = mkFixture('fx80z-new', { 's.html': demoHtml('s') })
+    runGen(oldScripts, oa.kb); runGen(NEW_SCRIPTS, ob.kb)
+    ok(ml(join(oa.kb, 'index.html')).join('\n') === ml(join(ob.kb, 'index.html')).join('\n'),
+      '冻结③:acceptanceFeedback 关着的板 —— 归一化版本戳后与 0.17.5 逐字节相同')
+  }
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })
