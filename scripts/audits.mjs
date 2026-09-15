@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 看板审计(共用模块,零依赖)。v0.17.5 起守卫(stop-hook.mjs)与 `ddd.mjs audit` 共读这一份 ——
-// 两边算的是同一批事实,只是打印方式不同:守卫把「家务」压成一行计数,audit 把三级全文原样打出来。
+// 两边算的是同一批事实,只是打印方式不同:守卫把「家务」压成每类一行(0.17.7),audit 把三级全文原样打出来。
 // 不许有第二份实现:同一件事两处各算一遍,迟早一处改了另一处没改,而人只会看见其中一处。
 //
 // 三级(0.17.5 评审稿 §1)。归级的依据是「不处理会怎样」,不是严厉程度:
@@ -34,6 +34,12 @@ export const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifes
  * 固定,是因为这一行每次收工都出:次序一变,人就得重新读一遍才知道哪个数是哪类。
  */
 export const CHORE_KEYS = ['longText', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'wip']
+
+/**
+ * 家务那几行里点得到名的卡号上限(v0.17.7)。点名是为了「不必先跑一条命令才知道是哪张卡」,
+ * 不是为了列全 —— 列全那一行就长回一段;剩下的写「等 N 张」,正文照旧在 `ddd audit`。
+ */
+export const CHORE_IDS = 3
 
 /** 卡文件审计那几条:gen 会栽在它们上,所以守卫要赶在重跑 gen 之前就把话备好 */
 export const CARD_FILE_KEYS = new Set(['cardsDirMissing', 'cardIdBad', 'cardParseBad'])
@@ -297,7 +303,7 @@ export function auditRichText(ctx, S) {
       if (!worst || hit.n > worst.n) worst = { id: String(c.id ?? '?'), key: hit.key, n: hit.n }
     }
   }
-  if (total) out.push({ key: 'longText', level: 'chore', n: total, text: S.richLongText(worst, total) })
+  if (total) out.push({ key: 'longText', level: 'chore', n: total, worst: worst.id, text: S.richLongText(worst, total) })
   if (fresh.length) {
     fresh.sort((a, z) => z.n - a.n) // 最长的排前面 —— 点名封顶 5 张时,先说最该拆的那几张
     const top = fresh.slice(0, 5)
@@ -395,8 +401,8 @@ export function auditResponse(ctx, S) {
       }
     }
   }
-  if (settle.length) out.push({ key: 'settle', level: 'chore', n: settle.length, text: S.respSettle(settle.slice(0, 5), settle.length) })
-  if (reopen.length) out.push({ key: 'reopen', level: 'chore', n: reopen.length, text: S.respReopen(reopen.slice(0, 5), reopen.length) })
+  if (settle.length) out.push({ key: 'settle', level: 'chore', n: settle.length, ids: settle.slice(0, CHORE_IDS), text: S.respSettle(settle.slice(0, 5), settle.length) })
+  if (reopen.length) out.push({ key: 'reopen', level: 'chore', n: reopen.length, ids: reopen.slice(0, CHORE_IDS), text: S.respReopen(reopen.slice(0, 5), reopen.length) })
 
   // 挂账到期提醒(v0.15.14,BL-C112 §3):hold 是承诺不是遗忘,挂满 SETTLE_HOLD_DAYS 天说一行。
   // 只提醒 —— 不解除静音、不改卡:到期的判断仍然只能由人做,替人记的只是「多久了」。
@@ -411,7 +417,7 @@ export function auditResponse(ctx, S) {
       .map((h) => ({ id: h.id, days: daysBetween(h.since, ctx.today) }))
       .filter((h) => Number.isFinite(h.days) && h.days >= SETTLE_HOLD_DAYS)
       .sort((a, z) => z.days - a.days)
-    if (old.length) out.push({ key: 'hold', level: 'chore', n: old.length, text: S.respHoldOld(old.slice(0, 5).map((h) => h.id), old[0].days, old.length) })
+    if (old.length) out.push({ key: 'hold', level: 'chore', n: old.length, ids: old.slice(0, CHORE_IDS).map((h) => h.id), text: S.respHoldOld(old.slice(0, 5).map((h) => h.id), old[0].days, old.length) })
   }
   return out
 }
@@ -439,7 +445,7 @@ export function auditDeps(ctx, S) {
     rows.push({ id: String(c.id), at, items: list })
   }
   rows.sort((a, z) => (a.at < z.at ? 1 : a.at > z.at ? -1 : 0)) // 最近清的先(同日保持板上顺序)
-  if (rows.length) out.push({ key: 'depsUnlocked', level: 'chore', n: rows.length, text: S.depsUnlocked(rows.slice(0, 5), rows.length) })
+  if (rows.length) out.push({ key: 'depsUnlocked', level: 'chore', n: rows.length, ids: rows.slice(0, CHORE_IDS).map((r) => r.id), text: S.depsUnlocked(rows.slice(0, 5), rows.length) })
   return out
 }
 
@@ -545,8 +551,12 @@ export function collect(ctx, S, { branch = null, gen = '' } = {}) {
 export const pickLevel = (entries, level) => entries.filter((e) => e.level === level)
 
 /**
- * 家务八类压成的那一行(0.17.5 §1)。零的类别不出现;八类全零则返回 ''(那一行整条不出)。
- * 类别次序与分隔符都固定 —— 这一行每次收工都出,次序一变人就得重读一遍才知道哪个数是哪类。
+ * 家务那一段(0.17.5 §1 立的一行,0.17.7 §9 改成每类一行)。零的类别不出现;八类全零则返回 ''
+ * (整段不出)。类别次序固定 —— 这一段每次收工都出,次序一变人就得重读一遍才知道哪行是哪类。
+ *
+ * 0.17.5 那一行是「标签 + 计数」,压过头了:标签是行话(「收早了」「挂账到期」),数字又不点名,
+ * 读的人两头都落不到实处,只能来问。0.17.7 给每类一整行:人话标签 + 最多三张卡号 —— 仍然不带
+ * 命令、不带路径(那是 `ddd audit` 的活),但看完知道是哪张卡、要不要现在管。
  * @param cmd 详情那条命令(v0.17.6 起不带路径)
  */
 export function choreLine(entries, S, cmd) {

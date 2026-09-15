@@ -1381,8 +1381,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
     '一行到底:不报字数,也不铺逐卡清单(v0.15.7)', a1.stdout.slice(0, 260))
   ok(/⚠ 看板守卫:1 张卡的正文字段超过 800 字/.test(a1.stdout),
     '非阻断通知带 ⚠ 前缀(与其它 notice 同一形制;阻断的那几条才不带)', a1.stdout.slice(0, 260))
-  ok(/^\{"systemMessage":"看板守卫:长正文 1 —— 详情 ddd audit"\}$/.test(g1.stdout.trim()),
-    'v0.17.6:守卫那头只剩一行「长正文 1」,结尾只写 ddd audit(全文归 ddd audit)', g1.stdout.slice(0, 260))
+  ok(/^\{"systemMessage":"看板守卫 · 家务 1 类\(详情 ddd audit\)\\n· 正文过长没拆 detail:1 张,最长 BL-1"\}$/.test(g1.stdout.trim()),
+    'v0.17.7:守卫那头只剩头行 + 那一行,点得到最长的卡号,结尾只写 ddd audit(全文归 ddd audit)', g1.stdout.slice(0, 260))
 
   // ---- 终态卡不点名(v0.15.6,TERMINAL 与 settle.mjs 同一份口径)----
   bl.items.push({ id: 'BL-9', status: 'done', priority: Object.keys(bl.priorities)[0], tier: '1', title: 'e',
@@ -1411,8 +1411,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
   const g1n = runAudit(fx35.kb)
   ok(/最长:D9 的 question/.test(g1n.stdout) && /2 张卡的正文字段超过 800 字/.test(g1n.stdout),
     '把它改回非终态,同一张卡当场夺回最长指针,总数也涨回 2', g1n.stdout.slice(0, 300))
-  ok(/看板守卫:长正文 2 —— 详情 /.test(runStop(NEW_SCRIPTS, fx35.root).stdout),
-    'v0.17.5:一行里那个数与 audit 里的张数是同一份结果(两张长正文卡 → 长正文 2)')
+  ok(/· 正文过长没拆 detail:2 张,最长 D9/.test(runStop(NEW_SCRIPTS, fx35.root).stdout),
+    'v0.17.7:那一行里的数与 audit 里的张数是同一份结果(两张长正文卡 → 2 张),最长的那张也是同一张')
   bl.items.pop()
   dec.entries.pop()
   wr(blP, bl)
@@ -1597,7 +1597,8 @@ console.log('T37 进度响应渲染')
   ok(g.status === 0 && /2 张卡的关联 PR 都已合并/.test(ga.stdout) && /BL-S/.test(ga.stdout) && /D1/.test(ga.stdout),
     '守卫:待收账的卡号 + 总数(非阻断)', `${g.status} ${ga.stdout.slice(0, 300)}`)
   ok(/2 张卡已收到终态,却还有关联 PR 开着/.test(ga.stdout) && /BL-R/.test(ga.stdout) && /D2/.test(ga.stdout), '守卫:反向那条也点名')
-  ok(/看板守卫:待收账 2 · 收早了 2 —— 详情 /.test(g.stdout), 'v0.17.5:守卫那一行两类都在,次序照 CHORE_KEYS(待收账 在 收早了 前)', g.stdout.slice(0, 300))
+  ok(/· PR 全合了还没收账:BL-S、D1\\n· 已收但 PR 还开着:BL-R、D2/.test(g.stdout),
+    'v0.17.7:守卫那两行都在,次序照 CHORE_KEYS(待收账 在 收早了 前),两行各自点到卡号', g.stdout.slice(0, 300))
   ok(!/"decision":\s*"block"/.test(g.stdout), '两条都不阻断收工')
 
   // ---- 撤掉 release-manifest:逐字节回到基线 ----
@@ -1840,7 +1841,7 @@ console.log('T40 积压提醒 wip')
     const ra = runAudit(fx40.kb)
     ok(r.status === 0, '积压审计不阻断收工(exit 0)', `${r.status} ${r.stderr.slice(0, 200)}`)
     ok(ra.stdout.includes('ready)的卡有 3 张') && ra.stdout.includes('config.wip.hard = 2'), '守卫点名 ready 数与 hard 阈值')
-    ok(/看板守卫:积压 3\/2 —— 详情 /.test(r.stdout), 'v0.17.5:一行里的积压格是「N/阈值」两个数', r.stdout.slice(0, 200))
+    ok(/· 可立即做 3 张,超上限 2/.test(r.stdout), 'v0.17.7:积压那一行是人话:可立即做几张、上限是几', r.stdout.slice(0, 200))
   }
   { // 线别/时间筛选下横幅要给两个数:当前筛选可见数 + 全板数(守卫那条 notice 用的正是全板数)
     const { html } = gen({ soft: 1, hard: 9 })
@@ -4607,7 +4608,7 @@ console.log('T67 settleHold 14 天到期提醒')
     const a14 = runAudit(kb) // v0.17.5:守卫给「挂账到期 N」,天数与卡号在 audit 这边
     ok(/暂不收账最久已 14 天/.test(a14.stdout) && /BL-H/.test(a14.stdout), '满 14 天:一行,写清天数与卡号(天数说明白是最久那张的 —— 一句话安在几张卡头上就是假的)', (a14.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 160))
     ok(/重设|settleHold/.test(a14.stdout), '这一行顺带说清「续」与「收」各怎么做')
-    ok(/看板守卫:挂账到期 1 —— 详情 /.test(g14.stdout), 'v0.17.5:守卫那一行只有「挂账到期 1」', g14.stdout.slice(0, 200))
+    ok(/· 暂不收账满 14 天:BL-H/.test(g14.stdout), 'v0.17.7:守卫那一行是「暂不收账满 14 天」并点到卡号', g14.stdout.slice(0, 200))
     ok(!/"decision":\s*"block"/.test(g14.stdout), '到期提醒永不阻断')
     // 提醒不解除静音:这张卡照旧不进待收账那条,也照旧不出「PR 已合 · 待收账」芯片
     ok(!/待收账\)?:.*BL-H/.test(a14.stdout), '到期了也还是 hold —— 待收账那条不点它')
@@ -4619,8 +4620,8 @@ console.log('T67 settleHold 14 天到期提醒')
     wr(blP, many)
     const gN = runAudit(kb)
     ok(/…等 6 张/.test(gN.stdout) && (gN.stdout.match(/BL-H\d/g) || []).length === 5, '最多点名 5 张 + 总数(最久的排前面)', (gN.stdout.match(/暂不收账[^"\\]*/) || [''])[0].slice(0, 200))
-    ok(/看板守卫:挂账到期 6 —— 详情 /.test(runStop(NEW_SCRIPTS, fx.root).stdout),
-      'v0.17.5:一行里报的是全部 6 张(点名封顶 5 只管 audit 那段正文,不影响计数)')
+    ok(/· 暂不收账满 14 天:BL-H6、BL-H5、BL-H4 等 6 张/.test(runStop(NEW_SCRIPTS, fx.root).stdout),
+      'v0.17.7:那一行点名封顶 3 张(最久的排前面),剩下的只报总数 6')
     // 几张卡挂了不同的天数:句子里只有一个数(最久那张的),措辞得说清是谁的 —— 否则「已 41 天:
     // BL-H BL-H2 …」把最久那张的天数安在了每张卡头上,人会先去动其实没那么急的那几张。
     const lineN = (gN.stdout.match(/暂不收账[^"\\]*/) || [''])[0]
@@ -5022,7 +5023,7 @@ console.log('T69 前置依赖 after')
     const g = runStop(NEW_SCRIPTS, fx.root)
     const line = (runAudit(kb).stdout.match(/前置已清:[^\n]*/) || [''])[0] // v0.17.5:正文归 audit
     ok(g.status === 0 && !/"decision":\s*"block"/.test(g.stdout), '这条通知永不阻断收工')
-    ok(/看板守卫:前置已清 2 —— 详情 /.test(g.stdout), 'v0.17.5:守卫那一行只报「前置已清 2」', g.stdout.slice(0, 200))
+    ok(/· 前置已清可开工:BL-B、BL-A/.test(g.stdout), 'v0.17.7:守卫那一行点名两张(最近清的排前面)', g.stdout.slice(0, 200))
     ok(/BL-B/.test(line) && /BL-A/.test(line), '7 天内清掉的卡都点到(边界那天算在内)', line)
     ok(line.indexOf('BL-B') < line.indexOf('BL-A'), '最近清的排前面')
     ok(!/BL-C/.test(line), '30 天前清的:过了 7 天窗口,不再说')
@@ -5039,7 +5040,7 @@ console.log('T69 前置依赖 after')
     const gN = runStop(NEW_SCRIPTS, fx.root)
     const lineN = (runAudit(kb).stdout.match(/前置已清:[^\n]*/) || [''])[0]
     ok(/…等 7 张/.test(lineN) && (lineN.match(/BL-[MAB]/g) || []).length === 5, '最多点名 5 张 + 总数', lineN)
-    ok(/看板守卫:前置已清 7 · /.test(gN.stdout), 'v0.17.5:一行里报全部 7 张,点名封顶只管 audit 那段正文', gN.stdout.slice(0, 200))
+    ok(/· 前置已清可开工:BL-B、BL-M1、BL-M2 等 7 张/.test(gN.stdout), 'v0.17.7:那一行点名封顶 3 张,总数报全部 7 张', gN.stdout.slice(0, 200))
     // 积压那条也换了口径:等前置的不占额度
     const wipCfg = rd(cfgP); wipCfg.wip = { soft: 1, hard: 2 }; wr(cfgP, wipCfg)
     runGen(NEW_SCRIPTS, kb)
@@ -5209,8 +5210,8 @@ const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   wr(cardP('BL-1'), c1)
   const g1 = out(runStop(NEW_SCRIPTS, root))
   const a1 = runAudit(kb).stdout // v0.17.5:老卡那一档的正文归 audit,守卫只留「长正文 1」
-  ok(!g1.decision && /看板守卫:长正文 1 —— 详情 /.test(g1.systemMessage || ''),
-    '已提交的老卡:改长也只出那一行家务计数(不阻断)', JSON.stringify(g1).slice(0, 300))
+  ok(!g1.decision && /· 正文过长没拆 detail:1 张,最长 BL-1/.test(g1.systemMessage || ''),
+    '已提交的老卡:改长也只出家务那一行(不阻断)', JSON.stringify(g1).slice(0, 300))
   ok(/1 张卡的正文字段超过 800 字/.test(a1) && /最长:BL-1 的 approach/.test(a1),
     'audit 里那段正文形制一字不动(0.15.7 的一行版:张数 + 最长的那张)', a1.slice(0, 300))
 
@@ -5222,8 +5223,8 @@ const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   ok(/ddd\.mjs card set <卡号> detail/.test(g2.reason || '') && /≤2 句/.test(g2.reason || '') &&
      /结论先行/.test(g2.reason || '') && /时间线/.test(g2.reason || ''),
     '给的是确切补救:card set <id> detail,外加 question ≤2 句 / approach 结论先行 / note 时间线', (g2.reason || '').slice(0, 400))
-  ok(!/BL-9/.test(g2.systemMessage || '') && /看板守卫:长正文 1 —— 详情 /.test(g2.systemMessage || ''),
-    '两档不混:新卡进 reason(全文照旧),老卡那一格仍只数老卡', JSON.stringify(g2).slice(0, 300))
+  ok(!/BL-9/.test(g2.systemMessage || '') && /· 正文过长没拆 detail:1 张,最长 BL-1/.test(g2.systemMessage || ''),
+    '两档不混:新卡进 reason(全文照旧),老卡那一行仍只数老卡', JSON.stringify(g2).slice(0, 300))
 
   // ---- git add 过但还没 commit:判据是「进没进 HEAD」,不是「工作区干不干净」----
   git('add', 'app/kanban/cards/backlog/BL-9.json')
@@ -5257,8 +5258,8 @@ const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   git('add', '-A')
   git('commit', '-q', '-m', 'BL-9')
   const g8 = out(runStop(NEW_SCRIPTS, root))
-  ok(!g8.decision && /看板守卫:长正文 2 —— 详情 /.test(g8.systemMessage || ''),
-    '提交进 HEAD 之后不再拦,只并进老卡那一格的张数', JSON.stringify(g8).slice(0, 300))
+  ok(!g8.decision && /· 正文过长没拆 detail:2 张/.test(g8.systemMessage || ''),
+    '提交进 HEAD 之后不再拦,只并进老卡那一行的张数', JSON.stringify(g8).slice(0, 300))
   ok(/2 张卡的正文字段超过 800 字/.test(runAudit(kb).stdout), 'audit 里的张数与那一格是同一份结果')
 
   // ---- 两条阻断规则同时命中:合成一条 reason,孤儿 demo 在前 ----
@@ -5290,8 +5291,8 @@ const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   bl.items[0].date = yesterday
   wr(blP, bl)
   const b = out(runStop(NEW_SCRIPTS, root))
-  ok(!b.decision && /看板守卫:长正文 1 —— 详情 /.test(b.systemMessage || ''),
-    '同一张卡日期改成昨天 → 退回家务那一格(判据只有日期这一条,没有别的暗门)', JSON.stringify(b).slice(0, 300))
+  ok(!b.decision && /· 正文过长没拆 detail:1 张/.test(b.systemMessage || ''),
+    '同一张卡日期改成昨天 → 退回家务那一行(判据只有日期这一条,没有别的暗门)', JSON.stringify(b).slice(0, 300))
 }
 
 // ============ T72 版本转发(v0.16.2):产物比我新、本机装着不比产物旧的版本 → 整个 hook 交给它 ============
@@ -6167,8 +6168,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const msg1 = runAudit(kb).stdout // v0.17.5:谁写的几条在 audit 这边
     ok(msg1.includes('#277 新增 3 条未提交') && msg1.includes('tester-a 2') && msg1.includes('tester-b 1'),
       '还没提交的 jsonl:守卫一行说清哪个 PR、几条、谁写的', msg1.slice(0, 200))
-    ok(/看板守卫:未提交反馈 3\(#277\) —— 详情 /.test((JSON.parse(s1.stdout || '{}').systemMessage) || ''),
-      'v0.17.5:八类里只有这一类在一行里带 PR 号 —— 它关乎别人的数据', s1.stdout.slice(0, 200))
+    ok(/· 验收反馈没提交:3 条\(#277\)/.test((JSON.parse(s1.stdout || '{}').systemMessage) || ''),
+      'v0.17.7:八类里只有这一类点的是 PR 号不是卡号 —— 它关乎别人的数据', s1.stdout.slice(0, 200))
     git('add', '-A'); git('commit', '-q', '-m', 'feedback')
     const s2 = runStop(NEW_SCRIPTS, fx73.root)
     ok(!((JSON.parse(s2.stdout || '{}').systemMessage) || '').includes('未提交反馈') && !runAudit(kb).stdout.includes('验收反馈:'),
@@ -6177,7 +6178,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       '{"ts":"2026-09-10T13:00:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"verdict":"ok"}\n')
     const s3 = runStop(NEW_SCRIPTS, fx73.root)
     ok(runAudit(kb).stdout.includes('#277 新增 1 条未提交') &&
-       /看板守卫:未提交反馈 1\(#277\) —— 详情 /.test((JSON.parse(s3.stdout || '{}').systemMessage) || ''),
+       /· 验收反馈没提交:1 条\(#277\)/.test((JSON.parse(s3.stdout || '{}').systemMessage) || ''),
       '已跟踪文件后来又添的行,照样数得出来(git diff 认增行)', s3.stdout.slice(0, 200))
     {
       const c5 = rd(cfgP)
@@ -6211,7 +6212,7 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
       execFileSync('git', ['init', '-q'], { cwd: ng.root })
       const n2 = runStop(NEW_SCRIPTS, ng.root)
       ok(runAudit(ng.kb).stdout.includes('#277 新增 3 条未提交') &&
-         /看板守卫:未提交反馈 3\(#277\) —— 详情 /.test((JSON.parse(n2.stdout || '{}').systemMessage) || ''),
+         /· 验收反馈没提交:3 条\(#277\)/.test((JSON.parse(n2.stdout || '{}').systemMessage) || ''),
         '同一块板 git init 之后立刻报得出来 —— 上面那句沉默是「问不出」,不是这盘摆坏了',
         (JSON.parse(n2.stdout || '{}').systemMessage || '').slice(0, 160))
     }
@@ -6256,8 +6257,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const msg5 = runAudit(kb).stdout
     ok(msg5.includes('10 张') && msg5.includes('acc-feedback-prune.mjs'),
       '攒够 10 张可清的:守卫一行报数 + 那条命令(绝不自动删)', msg5.slice(0, 200))
-    ok(/ · 可清截图 10 —— 详情 /.test((JSON.parse(s5.stdout || '{}').systemMessage) || ''),
-      'v0.17.5:可清截图在那一行里排「未提交反馈」之后', s5.stdout.slice(0, 200))
+    ok(/· 验收反馈没提交:[^\n]*\n· 可清的验收截图:10 张/.test((JSON.parse(s5.stdout || '{}').systemMessage) || ''),
+      'v0.17.7:可清截图那一行排在「验收反馈没提交」之后', s5.stdout.slice(0, 200))
     const jsonlBefore = readFileSync(jsonlP, 'utf8')
     const dry = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'), '--dir', kb, '--dry-run'], { encoding: 'utf8' })
     ok(dry.status === 0 && count(dry.stdout, '将删 shots/acc-277') === 10 && dry.stdout.includes('一个字节没动'),
@@ -6344,8 +6345,16 @@ console.log('T70 英文串表')
   const aud = runAudit(kb).stdout // v0.17.5:这几段全文归 audit,守卫那头只剩一行计数
   ok(/Kanban guard/.test(aud) && /Prerequisites cleared/.test(aud) && /On settle hold/.test(aud) && /prose field over 800/.test(aud),
     '这一批 0.15.x/0.16.x 新键真被调用了一遍(前置已清 / 挂账到期 / 长正文 / 积压)', aud.slice(0, 400))
-  ok(/^Kanban guard: long prose 1 · to settle 1 · holds due 1 · prerequisites cleared 1 · backlog \d+\/0 — details: ddd audit$/.test(msg),
-    'v0.17.6:en 板上那一行也是 en 文案,次序与 zh 同一张 CHORE_KEYS,结尾同样不带路径', msg.slice(0, 300))
+  ok(new RegExp('^' + [
+    'Kanban guard · 5 chore categories \\(details: ddd audit\\)',
+    '· card prose too long, no detail: 1 card\\(s\\), longest BL-1',
+    '· every pull request merged, card not settled: BL-2',
+    '· on settle hold for 14 days: BL-3',
+    '· prerequisites cleared, ready to start: BL-4',
+    '· \\d+ card\\(s\\) can start now, over the limit of 0',
+  ].join('\n') + '$').test(msg),
+    'v0.17.7:en 板上那一段也是 en 人话标签(不是键名),次序与 zh 同一张 CHORE_KEYS', msg.slice(0, 400))
+  ok(!msg.includes('/') && !msg.includes('node '), 'en 板那一段同样不带路径、不带命令', msg.slice(0, 300))
   ok(!/[\u4e00-\u9fff]/.test(msg) && !/[\u4e00-\u9fff]/.test(aud),
     'en 板上的守卫通知与 audit 全文里一个中文字都不该有', ((msg + aud).match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
 }
@@ -6816,15 +6825,26 @@ console.log('T77 收工提醒分级压成一行')
   const dayAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return localDate(d) }
   const isoAgo = (n) => new Date(Date.now() - n * 86400000).toISOString()
   const msgOf = (r) => { try { return JSON.parse(r.stdout || '{}').systemMessage || '' } catch { return `NOT-JSON:${r.stdout}` } }
-  const lineOf = (r) => msgOf(r).split('\n').find((l) => l.startsWith('看板守卫:') && l.includes('详情')) || ''
+  // 0.17.7:家务不再是一行而是一段 —— 头行 +(每类一行),永远排在 systemMessage 的最后
+  const choreOf = (r) => {
+    const ls = msgOf(r).split('\n')
+    const i = ls.findIndex((l) => l.startsWith('看板守卫 · 家务'))
+    return i < 0 ? '' : ls.slice(i).join('\n')
+  }
   const BASE = { tier: '1', priority: 'high', area: 'x', source: 's', problem: 'p', approach: 'a' }
-  // 八个词按 CHORE_KEYS 的次序摆 —— 下面「只出现该类」与「次序固定」两组断言共读这一张表
-  const WORDS = ['长正文', '未提交反馈', '可清截图', '待收账', '收早了', '挂账到期', '前置已清', '积压']
-  const hit = (line) => WORDS.filter((w) => line.includes(w))
-  // 0.17.6:那一行每次收工都印,结尾只写 `ddd audit` —— 既不许出现 /scripts/ddd.mjs,
-  // 也不许出现任何以 / 打头的绝对路径(手机上一条绝对路径就占掉四行)
-  const noPath = (line) =>
-    line.endsWith(' —— 详情 ddd audit') && !line.includes('/scripts/ddd.mjs') && !/(^|\s)\//.test(line)
+  // 八个人话标签按 CHORE_KEYS 的次序摆 —— 下面「只出现该类」与「次序固定」两组断言共读这一张表
+  const WORDS = ['正文过长没拆 detail', '验收反馈没提交', '可清的验收截图', 'PR 全合了还没收账',
+    '已收但 PR 还开着', '暂不收账满 14 天', '前置已清可开工', '可立即做']
+  const hit = (blk) => WORDS.filter((w) => blk.includes(w))
+  // 这一段每次收工都印:0.17.6 起结尾只写 `ddd audit`(手机上一条绝对路径就占掉四行),
+  // 0.17.7 起连命令都不带 —— 怎么处理是 `ddd audit` 的活,这几行只说「是哪张卡」
+  const plain = (blk) => !blk.includes('/') && !blk.includes('node ')
+  /** 头行的 N 必须与底下的行数一致 —— 说「5 类」却只印 4 行,人会以为有一行被吞了 */
+  const headMatchesRows = (blk) => {
+    const ls = blk.split('\n')
+    const m = /^看板守卫 · 家务 (\d+) 类\(详情 ddd audit\)$/.exec(ls[0])
+    return Boolean(m) && Number(m[1]) === ls.length - 1 && ls.slice(1).every((l) => l.startsWith('· '))
+  }
   const relOf = (prs) => ({ stages: REL_MANIFEST.stages, releases: [], prs, syncedAt: null })
 
   /** 一块只摆了指定家务的板;没点到的档一律不触发(零命中的类别不该出现在那一行里) */
@@ -6860,45 +6880,46 @@ console.log('T77 收工提醒分级压成一行')
   const FB = (n, who = 'tester-a') => Array.from({ length: n },
     (_, i) => `{"ts":"2026-09-10T12:0${i}:00Z","pr":277,"item":"JJ","who":"${who}","rev":2,"verdict":"ok"}`).join('\n') + '\n'
 
-  { // ---- 八类各自单独触发:那一行里只出现它一个,零的类别一个字都不出 ----
+  { // ---- 八类各自单独触发:那一段只有头行 + 它那一行,零的类别一个字都不出 ----
     const only = [
-      ['长正文', '长正文 1', board('fx77-long', {
+      ['正文过长没拆 detail', '正文过长没拆 detail:1 张,最长 BL-1', board('fx77-long', {
         cfg: { richText: true },
         items: [{ id: 'BL-1', status: 'ready', date: dayAgo(1), title: '老卡长正文', ...BASE, problem: '正'.repeat(900) }],
       })],
-      ['未提交反馈', '未提交反馈 3(#277)', board('fx77-fb', { cfg: { acceptanceFeedback: true }, fb: FB(3) })],
-      ['可清截图', '可清截图 10', board('fx77-shots', {
+      ['验收反馈没提交', '验收反馈没提交:3 条(#277)', board('fx77-fb', { cfg: { acceptanceFeedback: true }, fb: FB(3) })],
+      ['可清的验收截图', '可清的验收截图:10 张', board('fx77-shots', {
         cfg: { acceptanceFeedback: true }, fb: FB(1), commit: true, shots: 10,
         rel: relOf([{ number: 226, state: 'merged', mergedAt: isoAgo(40), title: 'a' }]),
       })],
-      ['待收账', '待收账 1', board('fx77-settle', {
+      ['PR 全合了还没收账', 'PR 全合了还没收账:BL-S', board('fx77-settle', {
         rel: relOf([{ number: 226, state: 'merged', mergedAt: isoAgo(40), title: 'a' }]),
         items: [{ id: 'BL-S', status: 'ready', date: dayAgo(1), title: '待收', ...BASE, pr: 226 }],
       })],
-      ['收早了', '收早了 1', board('fx77-reopen', {
+      ['已收但 PR 还开着', '已收但 PR 还开着:BL-R', board('fx77-reopen', {
         rel: relOf([{ number: 230, state: 'open', mergedAt: null, title: 'b' }]),
         items: [{ id: 'BL-R', status: 'done', date: dayAgo(1), title: '收早了', ...BASE, pr: 230 }],
       })],
-      ['挂账到期', '挂账到期 1', board('fx77-hold', {
+      ['暂不收账满 14 天', '暂不收账满 14 天:BL-H', board('fx77-hold', {
         rel: relOf([{ number: 226, state: 'merged', mergedAt: isoAgo(40), title: 'a' }]),
         items: [{ id: 'BL-H', status: 'ready', date: dayAgo(1), title: '挂着', ...BASE, pr: 226, settleHold: '只落了一半', settleHoldAt: dayAgo(20) }],
       })],
-      ['前置已清', '前置已清 1', board('fx77-deps', {
+      ['前置已清可开工', '前置已清可开工:BL-D', board('fx77-deps', {
         rel: relOf([{ number: 227, state: 'merged', mergedAt: isoAgo(1), title: 'c' }]),
         items: [{ id: 'BL-D', status: 'ready', date: dayAgo(1), title: '刚解锁', ...BASE, after: ['#227'] }],
       })],
-      ['积压', '积压 1/0', board('fx77-wip', {
+      ['可立即做', '可立即做 1 张,超上限 0', board('fx77-wip', {
         cfg: { wip: { soft: 0, hard: 0 } },
         items: [{ id: 'BL-W', status: 'ready', date: dayAgo(1), title: '在建', ...BASE }],
       })],
     ]
-    for (const [word, cell, fx] of only) {
+    for (const [word, row, fx] of only) {
       const g = runStop(NEW_SCRIPTS, fx.root)
-      const line = lineOf(g)
-      ok(g.status === 0 && line === `看板守卫:${cell} —— 详情 ddd audit`,
-        `只有「${word}」时,那一行只有这一格,结尾就是 ddd audit`, JSON.stringify([line, msgOf(g).slice(0, 200)]))
-      ok(noPath(line), `那一行结尾是 ddd audit,不带 /scripts/ddd.mjs 也不带绝对路径(${word})`, JSON.stringify(line))
-      ok(hit(line).join(',') === word, `零的七类一个字都不出(${word})`, hit(line).join(','))
+      const blk = choreOf(g)
+      ok(g.status === 0 && blk === `看板守卫 · 家务 1 类(详情 ddd audit)\n· ${row}`,
+        `只有「${word}」时,那一段只有头行加它这一行`, JSON.stringify([blk, msgOf(g).slice(0, 200)]))
+      ok(plain(blk), `那一段不带路径、也不带命令(${word})`, JSON.stringify(blk))
+      ok(headMatchesRows(blk), `头行说的类数与底下的行数一致(${word})`, JSON.stringify(blk))
+      ok(hit(blk).join(',') === word, `零的七类一个字都不出(${word})`, hit(blk).join(','))
       ok(runAudit(fx.kb).stdout.includes('家务(1):'), `audit 那头把它算在家务一级(${word})`)
     }
   }
@@ -6921,18 +6942,29 @@ console.log('T77 收工提醒分级压成一行')
       fb: FB(1), commit: true, shots: 10, fbAppend: FB(3, 'tester-b'),
     })
     const g = runStop(NEW_SCRIPTS, fx.root)
-    const line = lineOf(g)
-    ok(line === '看板守卫:长正文 1 · 未提交反馈 3(#277) · 可清截图 10 · 待收账 1 · 收早了 1 · 挂账到期 1 · 前置已清 1 · 积压 4/0 —— 详情 ddd audit',
-      '八类同时命中:一行到底,次序照 CHORE_KEYS、分隔符恒是 ` · `,只有未提交反馈带 PR 号', JSON.stringify(line))
-    ok(noPath(line), '八类都在时那一行也不带路径(积压那格的 4/0 不算路径)', JSON.stringify(line))
-    ok(msgOf(g).split('\n').length === 1, '家务那八段在守卫这头合计只占一行(0.17.4 是八段)', JSON.stringify(msgOf(g).slice(0, 200)))
+    const blk = choreOf(g)
+    ok(blk === [
+      '看板守卫 · 家务 8 类(详情 ddd audit)',
+      '· 正文过长没拆 detail:1 张,最长 BL-1',
+      '· 验收反馈没提交:3 条(#277)',
+      '· 可清的验收截图:10 张',
+      '· PR 全合了还没收账:BL-S',
+      '· 已收但 PR 还开着:BL-R',
+      '· 暂不收账满 14 天:BL-H',
+      '· 前置已清可开工:BL-D',
+      '· 可立即做 4 张,超上限 0',
+    ].join('\n'),
+      '八类同时命中:每类一行,次序照 CHORE_KEYS,标签是人话、内容点到卡号', JSON.stringify(blk))
+    ok(plain(blk), '八类都在时那一段也不带路径、不带命令', JSON.stringify(blk))
+    ok(headMatchesRows(blk), '头行的 8 类与底下 8 行对得上', JSON.stringify(blk))
+    ok(msgOf(g).split('\n').length === 9, '家务那八段在守卫这头合计占九行:头行 + 每类一行(0.17.4 是八段全文)', JSON.stringify(msgOf(g).slice(0, 200)))
     // 同一块板两头对账:audit --json 的每一格数字与那一行里的数逐个相等
     const j = JSON.parse(runAudit(fx.kb, ['--json']).stdout)
     ok(j.chore.length === 8 && j.chore.map((e) => e.key).join(' ') === 'longText accFbUncommitted accFbPrunable settle reopen hold depsUnlocked wip',
       '--json 的 chore 是八条,键与次序就是 CHORE_KEYS', j.chore.map((e) => e.key).join(' '))
     ok(j.chore.map((e) => e.n).join(' ') === '1 3 10 1 1 1 1 4',
       'audit 与守卫共读同一份审计结果:同一块板上两边的数字逐格相等', j.chore.map((e) => `${e.key}=${e.n}`).join(' '))
-    ok(j.summary === line, '--json 里的 summary 就是守卫那一行本身(不是另算一遍)', JSON.stringify([j.summary, line]))
+    ok(j.summary === blk, '--json 里的 summary 就是守卫那一段本身(不是另算一遍)', JSON.stringify([j.summary, blk]))
     const fbRow = j.chore.find((e) => e.key === 'accFbUncommitted')
     ok(fbRow.prs.join(',') === '277' && fbRow.prTotal === 1 && fbRow.n === 3, '未提交反馈那格带的是 PR 号与条数', JSON.stringify(fbRow))
     ok(j.chore.find((e) => e.key === 'wip').hard === 0, '积压那格把阈值也带出来(一行里写成 N/阈值)')
@@ -6946,6 +6978,19 @@ console.log('T77 收工提醒分级压成一行')
     const before = sha(join(fx.kb, 'index.html'))
     runAudit(fx.kb)
     ok(sha(join(fx.kb, 'index.html')) === before, 'audit 真的只读:跑完产物一个字节没动')
+  }
+
+  { // ---- 卡号最多点 3 张,多的折成「等 N 张」(0.17.7 §9)----
+    // 点名是为了「不必先跑一条命令就知道是哪张卡」,不是为了列全 —— 列全那一行就长回一段。
+    const fx = board('fx77-cap', {
+      rel: relOf([{ number: 226, state: 'merged', mergedAt: isoAgo(40), title: 'a' }]),
+      items: ['BL-S1', 'BL-S2', 'BL-S3', 'BL-S4'].map((id) =>
+        ({ id, status: 'ready', date: dayAgo(1), title: `待收 ${id}`, ...BASE, pr: 226 })),
+    })
+    const blk = choreOf(runStop(NEW_SCRIPTS, fx.root))
+    ok(blk === '看板守卫 · 家务 1 类(详情 ddd audit)\n· PR 全合了还没收账:BL-S1、BL-S2、BL-S3 等 4 张',
+      '卡号封顶三张,剩下的只报总数;次序沿用该审计原本的排序', JSON.stringify(blk))
+    ok(plain(blk) && headMatchesRows(blk), '折过的那一行照样不带路径与命令,头行也照样对得上', JSON.stringify(blk))
   }
 
   { // ---- --line:只看该 session 标签的卡;不按线分的审计照旧全板算 ----
@@ -7015,7 +7060,7 @@ console.log('T77 收工提醒分级压成一行')
     ok(broken.some((l) => /current = 999/.test(l)) && broken.some((l) => /两份验收清单/.test(l)) &&
        broken.some((l) => /条目 id「a」重复/.test(l)) && broken.some((l) => /不存在的卡号/.test(l)),
       '坏了一级四条各出一段全文 —— 它平时恒为零,压成数字就是把它藏起来', (g.systemMessage || '').slice(0, 200))
-    ok(!/看板守卫:.*详情 /.test(g.systemMessage || ''), '这块板家务全零 → 那一行整条不出', (g.systemMessage || '').slice(0, 200))
+    ok(!/看板守卫 · 家务/.test(g.systemMessage || ''), '这块板家务全零 → 那一段整条不出', (g.systemMessage || '').slice(0, 200))
   }
 
   /**
@@ -7078,11 +7123,57 @@ console.log('T77 收工提醒分级压成一行')
       ok(/分支的工作区里有 1 处看板生成物改动/.test(msgNew) && /merge=ours/.test(msgNew) &&
          /当前分支 feat\/x 带着看板改动/.test(msgNew) && /acceptance-manifest\.json 的 current = 999/.test(msgNew),
         '摆盘先确认:分支 / 脏产物 / merge 驱动 / 验收清单四种「坏了」这一轮真的都出声了', msgNew.slice(0, 160))
-      ok(!/看板守卫:.*详情 /.test(msgNew), '这副盘面家务仍全零 —— 那一行整条不出,才比得出「坏了」的字节')
+      ok(!/看板守卫 · 家务/.test(msgNew), '这副盘面家务仍全零 —— 那一段整条不出,才比得出「坏了」的字节')
       const bare = (r, root, scripts) => (r.stdout || '').split(root).join('<ROOT>').split(scripts).join('<SCRIPTS>')
       ok(bare(oe, ba.root, oldScripts) === bare(of, bb.root, NEW_SCRIPTS) && (oe.status ?? 0) === (of.status ?? 0),
         '分支与生成物那几条「坏了」的次序与措辞也与 0.17.4 逐字节相同(只归一化两块板各自的路径)',
         JSON.stringify([bare(oe, ba.root, oldScripts).slice(0, 200), bare(of, bb.root, NEW_SCRIPTS).slice(0, 200)]))
+    }
+  }
+
+  { // ---- 与 0.17.6 的逐字节对照(0.17.7 只改家务那一段的说法,别的两级一个字节都不许动)----
+    const TAG = 'demo-driven-development--v0.17.6'
+    const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+    if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.6 逐字节对照本次不比`)
+    else {
+      const oldRoot = join(WORK, 'v0176')
+      mkdirSync(oldRoot, { recursive: true })
+      const tar = join(WORK, 'v0176.tar')
+      spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+      spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+      const oldScripts = join(oldRoot, 'scripts')
+      const runOld = (root) => spawnSync(process.execPath, [join(oldScripts, 'stop-hook.mjs')],
+        { encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: root } })
+      // ① 阻断两类 + 坏了四条、家务全零:整份 stdout 与 0.17.6 逐字节相同
+      const la = loadedBoard('fx77w-old', oldScripts), lb = loadedBoard('fx77w-new')
+      const oa = runOld(la.root), ob = runStop(NEW_SCRIPTS, lb.root)
+      ok(oa.stdout === ob.stdout && (oa.status ?? 0) === (ob.status ?? 0),
+        '阻断与坏了两级的输出与 0.17.6 逐字节相同(同一副盘面,两版跑出同一份 stdout)',
+        JSON.stringify([oa.stdout.slice(0, 200), ob.stdout.slice(0, 200)]))
+      // ② 三级同时命中:家务那一段之外(阻断的 reason + 坏了各段)仍逐字节相同
+      const mixBoard = (name, gen) => board(name, {
+        cfg: { richText: true, acceptanceTab: true },
+        acc: ACC_BAD, noAllow: true, gen,
+        items: [
+          { id: 'BL-N', status: 'ready', date: localDate(), title: '今天立的长正文', ...BASE, problem: '证'.repeat(900) },
+          { id: 'BL-OLD', status: 'ready', date: dayAgo(1), title: '老卡长正文', ...BASE, problem: '正'.repeat(900) },
+        ],
+      })
+      // 家务那一段永远排最后,两版的头都以「看板守卫」打头(旧版一行、新版一段)
+      const cut = (out) => {
+        const o = JSON.parse(out || '{}')
+        const ls = (o.systemMessage || '').split('\n')
+        const i = ls.map((l) => l.startsWith('看板守卫')).lastIndexOf(true)
+        return JSON.stringify({ reason: o.reason ?? null, decision: o.decision ?? null, broken: (i < 0 ? ls : ls.slice(0, i)).join('\n') })
+      }
+      const ma = mixBoard('fx77v-old', oldScripts), mb = mixBoard('fx77v-new')
+      const oc = runOld(ma.root), od = runStop(NEW_SCRIPTS, mb.root)
+      ok(choreOf(od).startsWith('看板守卫 · 家务 1 类') && /看板守卫:长正文 1/.test(JSON.parse(oc.stdout || '{}').systemMessage || ''),
+        '摆盘先确认:这副盘面三级同时命中,两版各自说了家务(旧一行 / 新一段)',
+        JSON.stringify([choreOf(od), (JSON.parse(oc.stdout || '{}').systemMessage || '').slice(-80)]))
+      ok(cut(oc.stdout) === cut(od.stdout) && (oc.status ?? 0) === (od.status ?? 0),
+        '家务也命中时,阻断的 reason 与坏了那几段仍与 0.17.6 逐字节相同 —— 0.17.7 改的只是家务怎么说',
+        JSON.stringify([cut(oc.stdout).slice(0, 200), cut(od.stdout).slice(0, 200)]))
     }
   }
 }

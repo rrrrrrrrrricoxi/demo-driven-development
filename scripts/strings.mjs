@@ -6,11 +6,19 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DEP_WORDS_ZH, depItemShort } from './deps.mjs'
+import { SETTLE_HOLD_DAYS } from './settle.mjs'
 
 /** 前置状态词的英文档(格式化函数与中文共用 depItemShort —— 一份实现,两种语言) */
 const DEP_WORDS_EN = { card: ['settled', 'not settled'], pr: ['merged', 'open'], tag: ['released', 'not released'], bad: ['', 'invalid'] }
 /** 守卫那行的一张卡:「BL-C132(#266 已合)」 */
 const depRow = (r, words, br = '()') => `${r.id}${br[0]}${r.items.map((x) => depItemShort(x, words)).join(' · ')}${br[1]}`
+
+/**
+ * 家务那几行里的卡号列表(v0.17.7)。点名封顶在 audits.mjs 的 CHORE_IDS(entry.ids 已切好),
+ * 剩下的只报个总数 —— 点名是为了认得出是哪张卡,不是为了把一段列表塞回这一行里。
+ */
+const zhCards = (e) => `${e.ids.join('、')}${e.n > e.ids.length ? ` 等 ${e.n} 张` : ''}`
+const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} in all` : ''}`
 
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
@@ -136,20 +144,22 @@ const zh = {
   // waiting > 0 才提前置那半句:板上一条 after 都没有时,这句与 0.15.x 一字不差
   wipOver: (n, hard, waiting = 0) =>
     `⚠ 看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
-  // v0.17.5:家务八类压成的那一行。每一格只给一个数 —— 数字就是索引,要正文去跑 audit。
-  // 次序由 audits.mjs 的 CHORE_KEYS 定,这里只管每一格怎么写字。
+  // v0.17.7:家务每类一行。标签用人话不用行话(「收早了」得先有人教才读得懂),内容点到卡号 ——
+  // 0.17.5 那版只给标签与计数,两头都落不到实处,读的人只能来问。
+  // 次序由 audits.mjs 的 CHORE_KEYS 定,这里只管每一行怎么写字;`· ` 前缀由 choreLine 统一加。
+  // 一律不带命令、不带路径、不解释怎么处理 —— 那是 `ddd audit` 的活。
   chore: {
-    longText: (e) => `长正文 ${e.n}`,
-    // 八类里只有这一类带对象(PR 号):它关乎别人的数据,光给个数判断不了该不该现在管
-    accFbUncommitted: (e) => `未提交反馈 ${e.n}(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
-    accFbPrunable: (e) => `可清截图 ${e.n}`,
-    settle: (e) => `待收账 ${e.n}`,
-    reopen: (e) => `收早了 ${e.n}`,
-    hold: (e) => `挂账到期 ${e.n}`,
-    depsUnlocked: (e) => `前置已清 ${e.n}`,
-    wip: (e) => `积压 ${e.n}/${e.hard}`,
+    longText: (e) => `正文过长没拆 detail:${e.n} 张,最长 ${e.worst}`,
+    // 八类里只有这一类点的是 PR 不是卡:它关乎别人的数据,不点号判断不了该不该现在管
+    accFbUncommitted: (e) => `验收反馈没提交:${e.n} 条(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
+    accFbPrunable: (e) => `可清的验收截图:${e.n} 张`,
+    settle: (e) => `PR 全合了还没收账:${zhCards(e)}`,
+    reopen: (e) => `已收但 PR 还开着:${zhCards(e)}`,
+    hold: (e) => `暂不收账满 ${SETTLE_HOLD_DAYS} 天:${zhCards(e)}`,
+    depsUnlocked: (e) => `前置已清可开工:${zhCards(e)}`,
+    wip: (e) => `可立即做 ${e.n} 张,超上限 ${e.hard}${e.waiting ? `(另 ${e.waiting} 张等前置)` : ''}`,
   },
-  choreLine: (parts, cmd) => `看板守卫:${parts.join(' · ')} —— 详情 ${cmd}`,
+  choreLine: (parts, cmd) => `看板守卫 · 家务 ${parts.length} 类(详情 ${cmd})\n${parts.map((p) => `· ${p}`).join('\n')}`,
   cardsDirMissing: (rel) =>
     `⚠ 看板守卫:config.cardsDir 开着,但卡目录 ${rel} 不在 —— gen 会硬失败,看板停在上一版。建目录或把 cardsDir 从 kanban.config.json 去掉。`,
   cardIdBad: (rows, total) =>
@@ -247,7 +257,7 @@ const zh = {
 其它:
   audit [--json] [--session <session 标签>]
       只读跑一遍看板审计,把三级(阻断 / 坏了 / 家务)的完整文案打全 —— 收工时守卫只把「家务」
-      八类压成一行计数,正文在这儿。不 gen、不改任何文件。
+      每类压成一行,正文在这儿。不 gen、不改任何文件。
       --session 只收窄按线分的那几类家务:长正文(老卡)、待收账、收早了、挂账到期、
       前置已清(--line 同义,仍接受)。阻断与坏了两级、积压、验收清单、分支、孤儿 demo 照旧全板算 ——
       守卫拦人不看线别,这几样跟着线缩就成了假的「没事」。
@@ -261,7 +271,7 @@ const zh = {
       head: (dir, session) => `看板审计:${dir}${session ? `(按线分的家务只看 session 标签「${session}」的卡;阻断 / 坏了 / 积压照旧全板)` : ''}\n只读:不重生成看板,也不改任何文件。`,
       clean: () => '三级都是零 —— 没有要处理的。',
       sec: { block: (n) => `阻断(${n}):`, broken: (n) => `坏了(${n}):`, chore: (n) => `家务(${n}):` },
-      tail: (cmd) => `收工时守卫把家务那八类压成一行计数,正文就是上面这些;要再看一遍:${cmd}`,
+      tail: (cmd) => `收工时守卫把家务那几类各压成一行,正文就是上面这些;要再看一遍:${cmd}`,
     },
     unknownFlag: (flag) => `ddd:不认识的旗子 ${flag}。看 --help;要把它当普通参数传就先写一个 -- 隔开。`,
     flagNeedsValue: (name) => `ddd:--${name} 后面要跟一个值。`,
@@ -588,17 +598,19 @@ const en = {
   },
   wipOver: (n, hard, waiting = 0) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  // v0.17.7:one plain-language line per chore, naming up to CHORE_IDS cards. No command, no path,
+  // no how-to-deal-with-it — that is what `ddd audit` is for.
   chore: {
-    longText: (e) => `long prose ${e.n}`,
-    accFbUncommitted: (e) => `uncommitted feedback ${e.n} (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
-    accFbPrunable: (e) => `prunable shots ${e.n}`,
-    settle: (e) => `to settle ${e.n}`,
-    reopen: (e) => `settled early ${e.n}`,
-    hold: (e) => `holds due ${e.n}`,
-    depsUnlocked: (e) => `prerequisites cleared ${e.n}`,
-    wip: (e) => `backlog ${e.n}/${e.hard}`,
+    longText: (e) => `card prose too long, no detail: ${e.n} card(s), longest ${e.worst}`,
+    accFbUncommitted: (e) => `acceptance feedback not committed: ${e.n} line(s) (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
+    accFbPrunable: (e) => `acceptance shots that can go: ${e.n}`,
+    settle: (e) => `every pull request merged, card not settled: ${enCards(e)}`,
+    reopen: (e) => `settled while a pull request is still open: ${enCards(e)}`,
+    hold: (e) => `on settle hold for ${SETTLE_HOLD_DAYS} days: ${enCards(e)}`,
+    depsUnlocked: (e) => `prerequisites cleared, ready to start: ${enCards(e)}`,
+    wip: (e) => `${e.n} card(s) can start now, over the limit of ${e.hard}${e.waiting ? ` (${e.waiting} more waiting on prerequisites)` : ''}`,
   },
-  choreLine: (parts, cmd) => `Kanban guard: ${parts.join(' · ')} — details: ${cmd}`,
+  choreLine: (parts, cmd) => `Kanban guard · ${parts.length} chore categor${parts.length === 1 ? 'y' : 'ies'} (details: ${cmd})\n${parts.map((p) => `· ${p}`).join('\n')}`,
   cardsDirMissing: (rel) =>
     `⚠ Kanban guard: config.cardsDir is set but the card directory ${rel} is not there — gen will fail hard and the board stays on its last version. Create the directory, or drop cardsDir from kanban.config.json.`,
   cardIdBad: (rows, total) =>
@@ -704,7 +716,7 @@ Cards:
 Other:
   audit [--json] [--session <session tag>]
       Run the board audits read-only and print all three levels (blocking / broken / chores) in
-      full. On Stop the guard squeezes the eight chore categories into a single counted line;
+      full. On Stop the guard squeezes each chore category into a single line;
       the prose lives here. Nothing is generated and no file is touched.
       --session narrows only the per-line chores: long prose on older cards, cards
       to settle, cards settled early, settle holds due, prerequisites cleared (--line is a
@@ -722,7 +734,7 @@ kanban.config.json). This command never commits — git add the card files yours
       head: (dir, session) => `Board audit: ${dir}${session ? ` (per-line chores limited to cards tagged session "${session}"; blocking, broken and the backlog count still cover the whole board)` : ''}\nRead-only: nothing is regenerated and no file is touched.`,
       clean: () => 'All three levels are empty — nothing to deal with.',
       sec: { block: (n) => `Blocking (${n}):`, broken: (n) => `Broken (${n}):`, chore: (n) => `Chores (${n}):` },
-      tail: (cmd) => `On Stop the guard squeezes those eight chore categories into one counted line; the prose above is what it stands for. To see it again: ${cmd}`,
+      tail: (cmd) => `On Stop the guard squeezes each of those chore categories into one line; the prose above is what it stands for. To see it again: ${cmd}`,
     },
     unknownFlag: (flag) => `ddd: unknown flag ${flag}. See --help; to pass it as a plain argument, put a -- in front of it.`,
     flagNeedsValue: (name) => `ddd: --${name} needs a value after it.`,

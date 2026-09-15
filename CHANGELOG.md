@@ -9,6 +9,57 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.7] - 2026-09-15
+
+### The stop notice names its cards
+
+0.17.5 squeezed the eight chore categories into a single line of labels and
+counts. It fit on a phone, and that was all it did. The labels were the
+guard's own jargon — "settled early", "holds due", "long prose" — and the
+counts named nothing, so the line answered neither "what is this" nor "is any
+of it mine". The only way to act on it was to run a command, or to ask
+someone. A notice that has to be explained before it can be read is not a
+short notice; it is a lost one.
+
+The chores now get one plain-language line each, under a counted header:
+
+```
+看板守卫 · 家务 5 类(详情 ddd audit)
+· 正文过长没拆 detail:9 张,最长 BL-28
+· 已收但 PR 还开着:BL-C74
+· 暂不收账满 14 天:BL-C25
+· 前置已清可开工:BL-C73、BL-C134
+· 可立即做 22 张,超上限 20
+```
+
+Five lines instead of one, and they can be read straight through. What the
+block still refuses to carry is a command, a path, or an explanation of how to
+deal with anything — that remains the job of `ddd audit`, whose full prose has
+not changed.
+
+### Changed
+- **Each chore category prints its own line.** The header is fixed —
+  `看板守卫 · 家务 N 类(详情 ddd audit)` — where N is the number of non-empty
+  categories; with all eight empty the block is not printed at all, exactly as
+  before. Each line is `· <plain label>:<content>`, in the same fixed order as
+  0.17.5 (the order of `CHORE_KEYS`), and each keeps the ordering its own audit
+  already used (oldest, or most recently cleared, first).
+- **The lines name cards.** Up to three card ids per line, the rest folded into
+  "and N in all"; the long-prose line names the longest card, and the
+  uncommitted-feedback line keeps naming pull requests, as it did before.
+  Naming is what makes the block actionable without a command: a count cannot
+  tell you whether any of it is yours.
+- **Labels are plain language, in both tables.** "settled early" became
+  "settled while a pull request is still open", "holds due" became "on settle
+  hold for 14 days", and so on; the English table carries plain English, not
+  the key names. The fourteen-day threshold is read from `SETTLE_HOLD_DAYS`
+  rather than written out twice.
+- The blocking and broken levels are byte-for-byte what 0.17.6 printed, pinned
+  by a test that extracts the 0.17.6 tag and runs both versions against the
+  same fixture. `gen.mjs` is untouched and the generated board is unchanged, so
+  upgrading to this version changes nothing but the version stamp and what the
+  guard says on Stop.
+
 ## [0.17.6] - 2026-09-15
 
 ### Who gets to sign the acceptance ledger
