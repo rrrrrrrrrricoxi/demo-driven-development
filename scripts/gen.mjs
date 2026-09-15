@@ -6453,8 +6453,17 @@ if (LAZY) {
   for (const f of ['decisions.html', 'backlog.html', 'archive.html', 'acceptance.html', 'release.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
   try { if (readdirSync(PARTS_DIR).length === 0) rmSync(PARTS_DIR, { recursive: true }) } catch {}
 }
+// v0.17.11:收尾这一行的「可立即做」与守卫同一把尺 —— ready 且前置已清才算,还等着前置的
+// 另报一个数。原来它数的是全部 ready,与守卫那条积压提醒差着等前置的那几张:同一块板同一时刻
+// 两个数,读的人只能猜哪个作数。板上一条 after 都没有时 TAIL_WAIT 恒 0,这一行一字不变。
+const TAIL_WAIT = b.items.filter((it) => it.status === 'ready' && depOpen(it)).length
+const tailCount = (g) => {
+  const n = b.items.filter((it) => it.status === g.id).length
+  if (g.id !== 'ready') return `${b.statuses[g.id]} ${n}`
+  return `${b.statuses[g.id]} ${n - TAIL_WAIT}${TAIL_WAIT ? `(另 ${TAIL_WAIT} 等前置)` : ''}`
+}
 console.log(
   `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${b.items.length} 条` +
-    `(${b.groups.map((g) => `${b.statuses[g.id]} ${b.items.filter((it) => it.status === g.id).length}`).join(' / ')})` +
+    `(${b.groups.map(tailCount).join(' / ')})` +
     `${ARCH ? `,其中 ${archItems.length} 张已归档` : ''} · 决策/Demo ${dm.entries.length} 条`,
 )

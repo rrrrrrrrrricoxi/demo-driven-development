@@ -142,6 +142,9 @@ const zh = {
   // waiting > 0 才提前置那半句:板上一条 after 都没有时,这句与 0.15.x 一字不差
   wipOver: (n, hard, waiting = 0) =>
     `⚠ 看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
+  // v0.17.11:没超线也报 —— 同一件事的另一副面孔,措辞与超线那条对齐,只是不再劝人先清一批。
+  wipUnder: (n, hard, waiting = 0) =>
+    `看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},上限 config.wip.hard = ${hard} —— 还没到线。v0.17.11 起这个数常驻:不必等到超线才知道手上还能接多少。`,
   // v0.17.7:标签用人话不用行话(「收早了」得先有人教才读得懂),内容点到卡号 —— 0.17.5 那版
   // 只给标签与计数,两头都落不到实处,读的人只能来问。
   // v0.17.8:每条压成「标签 + 空格 + 内容」,条内不再有冒号(冒号只在头里出现一次),附加信息进
@@ -157,7 +160,8 @@ const zh = {
     reopen: (e) => `已收但 PR 还开着 ${zhCards(e)}`,
     hold: (e) => `暂不收账满 ${SETTLE_HOLD_DAYS} 天 ${zhCards(e)}`,
     depsUnlocked: (e) => `前置已清可开工 ${zhCards(e)}`,
-    wip: (e) => `可立即做 ${e.n} 张超上限 ${e.hard}${e.waiting ? `(另 ${e.waiting} 张等前置)` : ''}`,
+    // v0.17.11:常驻。写成「N/上限」是为了一眼看出还剩多少额度;超了才多两个字「超上限」。
+    wip: (e) => `可立即做 ${e.n}/${e.hard}${e.n > e.hard ? ' 超上限' : ''}${e.waiting ? `(另 ${e.waiting} 张等前置)` : ''}`,
   },
   // v0.17.8:一个换行 = 一个「Stop says」气泡,§9 那六行在手机上是六个气泡,比一行还占地方 ——
   // 整段拼成一条,手机自己折行。头里不说「家务」:那是内部分级名,对读的人只是一个没来由的词。
@@ -598,6 +602,9 @@ const en = {
   },
   wipOver: (n, hard, waiting = 0) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  // v0.17.11: reported under the limit too — the same fact, minus the advice to clear the pile.
+  wipUnder: (n, hard, waiting = 0) =>
+    `Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, against config.wip.hard = ${hard} — under the limit. Since v0.17.11 this count is always reported, so the headroom is visible before the limit is hit.`,
   // v0.17.7:plain-language labels naming up to CHORE_IDS cards. No command, no path,
   // no how-to-deal-with-it — that is what `ddd audit` is for.
   // v0.17.8:label, a space, then the content — no colon inside an item (the header carries the
@@ -610,7 +617,8 @@ const en = {
     reopen: (e) => `settled while a pull request is still open ${enCards(e)}`,
     hold: (e) => `on settle hold for ${SETTLE_HOLD_DAYS} days ${enCards(e)}`,
     depsUnlocked: (e) => `prerequisites cleared, ready to start ${enCards(e)}`,
-    wip: (e) => `${e.n} card(s) can start now, over the limit of ${e.hard}${e.waiting ? ` (${e.waiting} more waiting on prerequisites)` : ''}`,
+    // v0.17.11: always on. "N/limit" shows the headroom at a glance; over it adds three words.
+    wip: (e) => `can start now ${e.n}/${e.hard}${e.n > e.hard ? ' over the limit' : ''}${e.waiting ? ` (${e.waiting} more waiting on prerequisites)` : ''}`,
   },
   // v0.17.8:every newline is its own "Stop says" bubble, so the whole notice is one line and the
   // phone wraps it. The header does not say "chores" — that is an internal tier name.
