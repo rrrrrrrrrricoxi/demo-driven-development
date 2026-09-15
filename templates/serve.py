@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ddd-serve v4
+# ddd-serve v5
 # 看板静态服(零依赖,no-cache,线程化 + gzip)。
 #
 #   用法:  python3 app/kanban/serve.py [PORT]
@@ -34,6 +34,12 @@
 #   没建时答空名册,否则页面以为这块板没有名册这回事,不问口令就署名,却在 mark 那儿被 403 卡死);
 #   没配口令(acceptanceFeedback: true)时 who 这条路压根不存在(501,与 v3 同一句),mark/shot 照 v3
 #   收任何名字,名册那份 GET 照旧当静态文件发 —— 老宿主逐响应零差异。
+#
+# v0.17.9 名册那条写口两处对齐(所以戳升 v5:同一个请求,v4 与 v5 的答复可能不一样):
+#   下限 —— 名字至少 2 个码点,与页面上 save() 那把尺同一个数(原来 1 个字也收,页面收不下的
+#   东西却进得了名册);去重 —— 名册里的条目也各过一遍 norm_who 再比,与 mark/shot 那道名册门
+#   同一把尺(原来拿归一后的名字比未归一的名册,手写进 git 的「甲乙 」会被再加一行)。
+#   acceptanceFeedback: true(没配口令)的板上这条路仍然不存在,逐响应与 v4 零差异。
 
 import functools
 import gzip
@@ -70,6 +76,10 @@ MAX_SHOT = 2 * 1024 * 1024  # 客户端已按长边 1280 / JPEG 0.8 压过,2 MB 
 MAX_MARK = 64 * 1024
 # 超限的请求体也照读照扔(至多这么多):不读完就答,客户端还在发,它看到的是断管不是那句 400
 DRAIN_MAX = 8 * 1024 * 1024
+# 名字两头的尺:上限 20、下限 2,都按**码点**数(不是字节,也不是 UTF-16 格)——
+# 页面上那只 save() 的下限就是 `Array.from(v).length < 2`,i.maxLength 那 40 格换算过来也是 20 码点。
+# 两处写死同一个数:名字在页面上过得去、到了写口却被退,人只会以为服务坏了。
+WHO_MIN = 2
 WHO_MAX = 20
 NOTE_MAX = 2000
 # Content-Type → (魔数, 扩展名):两者对不上就是 400,不看客户端说什么
@@ -385,15 +395,23 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         if not isinstance(data, dict):
             raise Rejected("请求体不是 JSON 对象")
         name = norm_who(data.get("name"))
-        if not 1 <= len(name) <= WHO_MAX:
-            raise Rejected("name 需 1–%d 字" % WHO_MAX)
+        # 下限与页面那只 save() 同一个数:len() 数的是码点,一个 emoji 算一个字(占两格是 UTF-16 的事,
+        # 与人看到的「几个字」无关)。页面收得下、写口退回去,人只会以为服务坏了。
+        if len(name) < WHO_MIN:
+            raise Rejected("名字至少 %d 个字" % WHO_MIN)
+        if len(name) > WHO_MAX:  # norm_who 已按码点切到 WHO_MAX;这一条是「哪天尺换了没换全」的兜底
+            raise Rejected("name 至多 %d 字" % WHO_MAX)
         check_wellformed(name, "name")
         got = data.get("pin")
         if not isinstance(got, str) or got != pin:
             time.sleep(1)  # 不锁、不计数、不记账:这一秒只防手滑连点(见文件头 v0.17.6 那段)
             raise Denied("口令不对")
         names = roster_names()
-        if name not in names:  # 去重:同一个人第二次输口令不会在名册里留两行
+        # 去重与 check_target 那道门用同一把尺:名册里的条目也各过一遍 norm_who 再比。名册可能是人
+        # 手写进 git 的,「甲 」入了册、「甲」再来投,拿未归一的串比就又加一行 —— 页面上这两个名字
+        # 长得一模一样,而账上从此是两个人。写回时旧条目一个字不动(名册只加不删,手写那份留着给人看),
+        # 新加的一律是归一后的名字。
+        if name not in [norm_who(n) for n in names]:
             names.append(name)
             roster_write(names)
         return {"names": names}
