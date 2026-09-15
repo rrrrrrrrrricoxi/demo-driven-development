@@ -9,6 +9,49 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.8] - 2026-09-15
+
+### One bubble, not six
+
+Claude Code renders every newline in a hook's `systemMessage` as its own
+"Stop says" bubble. 0.17.7 printed a counted header and one line per chore
+category, which reads well in a terminal and arrives on a phone as six stacked
+bubbles — more screen than the one line a phone would have wrapped by itself.
+The fix is not to say less. It is to stop breaking lines.
+
+The chores are back to a single unbroken line, with everything 0.17.7 added
+still in it — plain-language labels, named cards:
+
+```
+看板守卫 5 条提醒(详情 ddd audit):正文过长没拆 detail 9 张(最长 BL-28)· 已收但 PR 还开着 BL-C74 · 暂不收账满 14 天 BL-C25 · 前置已清可开工 BL-C73、BL-C142 · 可立即做 21 张超上限 20(另 1 张等前置)
+```
+
+The header no longer says "chores". Blocking, broken and chores are how the
+guard sorts its own work; a reader who meets the word on a phone has been
+handed a piece of the implementation instead of a reminder.
+
+### Changed
+- **The chore notice is one line with no newline in it.** The header is
+  `看板守卫 N 条提醒(详情 ddd audit):`, where N is the number of non-empty
+  categories; items are separated by ` · `, and each item is a plain label, a
+  space, and its content, with extras in parentheses. There is exactly one
+  colon in the whole line, in the header. Labels, the cap of three named cards,
+  the "and N in all" fold, and the refusal to carry a command or a path are all
+  unchanged from 0.17.7.
+- **Blocking and broken print as one line each, too.** Their internal newlines
+  become ` · `; the wording is untouched. Separate notices are still separated
+  by a newline — those are different things to say, and a bubble each is right.
+- **A successful forward is silent.** Since 0.16.2 a session bound to an older
+  plugin hands the whole hook to the newer install; it used to announce that on
+  every Stop. The point of forwarding is to make the version gap invisible, so
+  the announcement now goes away and the forwarded version's stdout, stderr and
+  exit code come back untouched. Failing to find a newer install still reports
+  itself — that one really does need someone to act.
+- The wording of every blocking and broken notice is pinned against the 0.17.7
+  tag: the same fixture run through both versions matches byte for byte once
+  newlines are folded. `gen.mjs` and `templates/serve.py` are untouched, so the
+  generated board is unchanged and no server needs restarting.
+
 ## [0.17.7] - 2026-09-15
 
 ### The stop notice names its cards
