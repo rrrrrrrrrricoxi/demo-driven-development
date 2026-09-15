@@ -17,7 +17,9 @@
 //      实现。各类审计做什么、为什么这么判,写在 audits.mjs 的文件头与各函数上;这里只负责
 //      「算出来之后怎么说」。
 //
-// 输出分三级(v0.17.5 评审稿;归级依据是「不处理会怎样」,不是严厉程度):
+// 输出分三级(v0.17.5 评审稿;归级依据是「不处理会怎样」,不是严厉程度)。三级各自都缩成「一段 =
+// 一条无换行的话」(v0.17.8):CC 把 systemMessage 里的每个换行渲染成一个独立的「Stop says」气泡,
+// 段内换行只会让手机上多出几个气泡 —— 见下面 oneLine。段与段之间照旧换行,那是不同性质的话。
 //   - **阻断**(孤儿 demo、新卡长正文无 detail):照旧全文,两副面孔 —— block 是拦下来时说的,
 //     warn 是同一次收工已经拦过一次时(stop_hook_active)降级放行说的。
 //   - **坏了**(卡目录缺 / 卡号非法 / 卡 JSON 坏 / 验收清单坏·重复 PR·重复条目·未知卡号 /
@@ -25,11 +27,12 @@
 //     外加下面 ① 那几条重生成副产品:戳更新、安装异常、非主线不重渲、无戳自愈、gen 跑失败):
 //     照旧各出一段全文。这一级平时恒为零 —— 一出现就是真坏了,压成数字等于把它藏起来。
 //   - **家务**(长正文老卡、验收反馈未提交、可清截图、待收账、收早了、挂账到期、前置已清、
-//     积压超阈,共八类):压成每类一行(v0.17.7)。头一行「看板守卫 · 家务 N 类(详情 ddd audit)」,
-//     其下每类一行「· 人话标签:内容」,内容点到卡号(最多三张,多的写「等 N 张」)。零的类别不出现,
-//     八类全零这一段整条不出。理由:它们平时常有、多半还是别条线的账,每条会话每次收工全文灌一遍,
-//     等于人人为别人的家务活付 token。0.17.5 那版只给标签与计数,读的人既不懂行话也不知道是哪张卡,
-//     压过头了;现在给的是「是哪张卡、要不要现在管」,怎么处理照旧走 `ddd audit`。
+//     积压超阈,共八类):八类合压成一条(v0.17.8)。头是「看板守卫 N 条提醒(详情 ddd audit):」
+//     ——「家务」是内部分级名,不露给用户;其后各条以「 · 」相隔,条内「人话标签 + 空格 + 内容」,
+//     内容点到卡号(最多三张,多的写「等 N 张」)。零的类别不出现,八类全零这一条整条不出。理由:
+//     它们平时常有、多半还是别条线的账,每条会话每次收工全文灌一遍,等于人人为别人的家务活付 token。
+//     0.17.5 那版只给标签与计数,读的人既不懂行话也不知道是哪张卡;0.17.7 给了每类一行,人话与卡号
+//     都对了,却换来六个气泡。现在人话与卡号照留、气泡只剩一个,怎么处理照旧走 `ddd audit`。
 //
 // plugin 化改造(设计 §6):
 //   - 反向探测:detect() 找不到 kanban.config.json → 静默 exit 0(非 DDD 项目零打扰)。
@@ -38,7 +41,8 @@
 //   - 版本转发(v0.16.2):hook 进程绑在起 session 那一版上,升级 plugin 后不重启 session,守卫
 //     就一直是旧的 —— 而旧 gen 不许盖新板(上面的戳一票否决),看板在这个 session 里彻底停更。
 //     本机已经装了不比产物旧的版本时没必要停:把整个 hook(stdin / env / cwd 原样)交给那一版的
-//     stop-hook.mjs,它的 stdout 与退出码原样带回来,顺带在输出里说一行「已转发到 vX」。
+//     stop-hook.mjs,它的 stdout 与退出码原样带回来。v0.17.8 起转发成功一个字都不说 —— 转发的意义
+//     就是让版本差异隐形,每次收工重复报一遍等于没隐形;转发不出去那一档照旧报错。
 //     只转发一次(DDD_HOOK_FORWARDED);读不到安装表 / 没有更新的安装 → 什么都不做,退回旧行为。
 //     gen.mjs 自己那条拒绝不动:人手跑一个旧路径的 gen,照旧该被拒。
 //
@@ -121,25 +125,26 @@ function newerInstall(minVer, selfVer) {
       env: { ...process.env, DDD_HOOK_FORWARDED: to.version },
     })
     if (!r.error) { // 起不来(node 没了 / 权限)才当没转发过,退回下面的旧行为
-      const note = S.hookForwarded(to.version, MY_VER)
-      const code = r.status ?? 0
+      // v0.17.8:转发成功一个字都不说。转发的意义就是让版本差异隐形,而这句每次收工都重复一遍 ——
+      // 说到第三遍它已经不是提示,只是噪音。新版守卫的 stdout / stderr / 退出码原样带回,不加不减。
+      // 转发不出去(本机没有更新的安装)那一档照旧报错:那是真要人升级或重启,不能吞。
       if (r.stderr) process.stderr.write(r.stderr)
-      let payload = null
-      // 退出码非零那一档,CC 只读 stderr、stdout 被忽略 —— 那种时候转发这行只能走 stderr
-      if (code === 0) { try { payload = JSON.parse((r.stdout || '').trim() || '{}') } catch {} }
-      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-        payload.systemMessage = payload.systemMessage ? `${note}\n${payload.systemMessage}` : note
-        process.stdout.write(JSON.stringify(payload))
-      } else {
-        if (r.stdout) process.stdout.write(r.stdout) // 认不出的 stdout 原样透传,不吞
-        process.stderr.write(`${note}\n`)
-      }
-      process.exit(code)
+      if (r.stdout) process.stdout.write(r.stdout)
+      process.exit(r.status ?? 0)
     }
   }
 }
 
 const mtime = (p) => { try { return statSync(p).mtimeMs } catch { return 0 } }
+
+/**
+ * 一段话缩成一条(v0.17.8 §10)。Claude Code 把 `systemMessage` 里的每个换行渲染成一个独立的
+ * 「Stop says」气泡 —— 段内换一次行,手机上就多一个气泡,比一整段还占地方。所以段内的换行一律
+ * 换成「 · 」,一段 = 一条 = 一个气泡;段与段之间才留换行(那是不同性质的话,各占一个才对)。
+ * 只动标点不动内容:每行先去掉两头空白(全文里的缩进是给换行排版用的,拼成一条就成了多余空格),
+ * 空行丢掉,其余逐字节照旧。
+ */
+const oneLine = (s) => String(s).split('\n').map((x) => x.trim()).filter(Boolean).join(' · ')
 
 // ---- 这棵树现在在哪条分支上(v0.17.4 §1)。一次算清,①(要不要重渲)与分支/生成物审计共读 ----
 // 口径全在 board-branch-check.mjs:主线名怎么解析、游离 HEAD 算不算一个位置,都不在这儿再写一遍。
@@ -156,7 +161,7 @@ const CTX = makeCtx(KANBAN)
 const AUDIT = collect(CTX, S, { branch: BRANCH, gen: GEN })
 // 阻断项(孤儿 demo / 新卡长正文):每项两副面孔 —— block 是拦下来时说的,warn 是同一次收工已经
 // 拦过一次时(stop_hook_active)降级放行说的。多项合成一条 reason,免得一次只报得出一个。
-const blocks = pickLevel(AUDIT, 'block').map((e) => ({ block: e.text, warn: e.warn }))
+const blocks = pickLevel(AUDIT, 'block').map((e) => ({ block: oneLine(e.text), warn: oneLine(e.warn) }))
 const BROKEN = pickLevel(AUDIT, 'broken')
 // 非阻断通知。卡文件那几条先进去 —— gen 跑失败时要连它们一块喂回去,免得人一个一个试。
 const notices = BROKEN.filter((e) => CARD_FILE_KEYS.has(e.key)).map((e) => e.text)
@@ -201,7 +206,7 @@ if (existsSync(GEN)) {
     const err = (r.stderr || r.error?.message || '').toString()
     if (r.status !== 0) {
       // gen 只报得出第一个坏卡,已攒下的 notice(坏卡清单等)一并喂回去,免得一个一个试
-      const why = S.genFail(err.slice(0, 800)) + (notices.length ? '\n' + notices.join('\n') : '')
+      const why = [S.genFail(err.slice(0, 800)), ...notices].map(oneLine).join('\n')
       if (hook.stop_hook_active) { // 防死循环:同一次收工已拦过 → 降级警告放行
         console.log(JSON.stringify({ systemMessage: why }))
         process.exit(0)
@@ -216,9 +221,9 @@ if (existsSync(GEN)) {
   }
 }
 
-// ---- 出口:坏了一级各出全文,家务每类一行(v0.17.5 立,v0.17.7 改形)----
+// ---- 出口:坏了一级各出一条全文,家务八类合成一条(v0.17.5 立,v0.17.7 / v0.17.8 两度改形)----
 // 次序:卡文件那几条已在前面进过 notices(gen 失败要喂它们),其余坏了条目照 audits.mjs 的原序补上;
-// 家务那一段永远排最后 —— 它是索引不是内容,压在全文前面会把真坏了的那几条挤下去。
+// 家务那一条永远排最后 —— 它是索引不是内容,压在全文前面会把真坏了的那几条挤下去。
 for (const e of BROKEN) if (!CARD_FILE_KEYS.has(e.key)) notices.push(e.text)
 {
   const line = choreLine(AUDIT, S, auditCmd())
@@ -227,17 +232,20 @@ for (const e of BROKEN) if (!CARD_FILE_KEYS.has(e.key)) notices.push(e.text)
 
 // 阻断项合成一条(孤儿 demo 排最前 —— 它是最老、也最容易一步补掉的那条规矩;次序在 audits.mjs 定)
 
+// v0.17.8:每一段都先缩成一条(上面 oneLine 的理由);段与段之间照旧换行 —— 那才是该各占一个气泡的。
+const SAY = notices.map(oneLine)
+
 if (blocks.length === 0) {
-  if (notices.length) console.log(JSON.stringify({ systemMessage: notices.join('\n') }))
+  if (SAY.length) console.log(JSON.stringify({ systemMessage: SAY.join('\n') }))
   process.exit(0)
 }
 
 if (hook.stop_hook_active) { // 防死循环:同一次收工已拦过 → 全体降级成警告放行
-  console.log(JSON.stringify({ systemMessage: [...blocks.map((b) => b.warn), ...notices].join('\n') }))
+  console.log(JSON.stringify({ systemMessage: [...blocks.map((b) => b.warn), ...SAY].join('\n') }))
   process.exit(0)
 }
 console.log(JSON.stringify({
   decision: 'block',
   reason: blocks.map((b) => b.block).join('\n\n'),
-  ...(notices.length ? { systemMessage: notices.join('\n') } : {}),
+  ...(SAY.length ? { systemMessage: SAY.join('\n') } : {}),
 }))
