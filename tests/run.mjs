@@ -52,6 +52,11 @@
 //   分隔符固定、只有未提交反馈带 PR 号、结尾不带路径 / audit 与守卫共读同一份结果(同一块板
 //   两边数字逐格相等)/ --line 按 session 过滤而依赖图不跟着缩 / --json 形状 / audit 只读 /
 //   阻断与坏了两级、家务全零时的守卫 stdout 与产物都与 0.17.4 逐字节相同)等。
+// 时间线泳道按需加道(0.17.10:relPack / relPackChip 6 起步 12 封顶 / 第 7 条开新道而不是叠回去 /
+//   到顶的收进 hidden 走带右端一枚 +N / 同泳道两两 x 区间不交 / 带高随用到的道数 /
+//   A 档开着的 PR 右端不画帽、细线加 relhr-open 虚到右缘,已合的照旧两顶实心帽 /
+//   与 0.17.9 三层冻结:没开 releaseTab 的板整份逐字节相同、开了的板差异只落在这两处、
+//   ≤ 6 并发时老新 relgeom 逐字段相同)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
@@ -1881,7 +1886,17 @@ console.log('T41 时间线重做')
 {
   const { relAxis, relTicks, relBar, relPack, relGrid, relBandH, relWindow,
     relRegime, relSqSize, relChipW, relGridBig, relGridChip, relPackChip, relCaps, relChipPitch, CHIP_GAP } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
-  const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
+  const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, lanesMax: 12, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
+  // 同一条泳道上两两 [x, x+w] 不许相交 —— 「按需加道不再叠」这件事的尺子就是这一条
+  const noOverlap = (bars) => {
+    const by = {}
+    for (const b of bars) (by[b.lane] = by[b.lane] || []).push(b)
+    for (const lane of Object.keys(by)) {
+      const row = by[lane].slice().sort((a, b) => a.x - b.x)
+      for (let i = 1; i < row.length; i++) if (row[i].x < row[i - 1].x + row[i - 1].w) return false
+    }
+    return true
+  }
   const mkDays = (from, n) => {
     const out = [], t = Date.parse(from + 'T00:00:00Z')
     for (let i = 0; i < n; i++) out.push(new Date(t + i * 864e5).toISOString().slice(0, 10))
@@ -2002,12 +2017,40 @@ console.log('T41 时间线重做')
     ok(p.bars.filter((b) => b.n === 3)[0].lane === 0, '3 号回到第 0 条')
     ok(p.bars.every((b) => b.x === relBar(ax, items.filter((i) => i.n === b.n)[0].s, items.filter((i) => i.n === b.n)[0].e, O.min).x0),
       '打包用的 x 与画条用的 x 是同一份(estimate/real 两套是上一版撞车的根)')
-    { // 泳道封顶:20 条全重叠的 PR 也只占 6 条泳道 —— 展开后的高度与 PR 数无关
-      const many = []
-      for (let i = 1; i <= 20; i++) many.push({ n: i, s: '2026-08-01', e: '2026-08-09' })
-      const pm = relPack(many, ax, O)
-      ok(pm.used === O.lanes && pm.bars.length === 20, `20 条全重叠 → 封顶 ${pm.used} 条泳道,一条都没丢`)
-      ok(pm.bars.every((b) => b.lane < O.lanes), '没有一条越过泳道上限')
+    { // 泳道按需加道(v0.17.10):6 是起步不是上限,加到 lanesMax 12 封顶,再放不下的收进 hidden
+      const over = (n) => {
+        const many = []
+        for (let i = 1; i <= n; i++) many.push({ n: i, s: '2026-08-01', e: '2026-08-09' })
+        return relPack(many, ax, O)
+      }
+      const p6 = over(6), p7 = over(7), p12 = over(12), p13 = over(13), p20 = over(20)
+      ok(p6.used === 6 && p6.hidden.length === 0, '6 条全重叠 = 起步那 6 道,一条不折', `${p6.used} 道`)
+      ok(p7.used === 7 && p7.bars.length === 7 && p7.hidden.length === 0,
+        '第 7 条重叠的开第 7 道(从前它被塞回最早空出来的那条,叠在别人身上)', `${p7.used} 道 / ${p7.bars.length} 条`)
+      ok(p7.bars.filter((b) => b.n === 7)[0].lane === 6, '第 7 条落在第 6 号泳道(新开的那条),不是回到 0')
+      ok(p12.used === 12 && p12.bars.length === 12 && p12.hidden.length === 0,
+        '12 条全重叠 → 开到 12 道,一条都没折', `${p12.used} 道 / 折 ${p12.hidden.length}`)
+      ok(p13.used === 12 && p13.bars.length === 12 && p13.hidden.map((x) => x.n).join(',') === '13',
+        '第 13 条到顶了:不画,收进 hidden(不再叠在第 12 条上)', `折 ${JSON.stringify(p13.hidden.map((x) => x.n))}`)
+      ok(noOverlap(p13.bars), '画出来的 12 条:同一泳道上两两 x 区间不相交')
+      ok(p20.used === O.lanesMax && p20.hidden.length === 8 && p20.bars.length === 12,
+        '20 条全重叠 → 12 道画满、8 条走 +N(展开后的高度仍有上界)', `${p20.used} 道 / 折 ${p20.hidden.length}`)
+      ok(p20.bars.every((b) => b.lane < O.lanesMax), '没有一条越过 lanesMax')
+      { // 长短不一、疏密混杂的一批:加道之后同泳道照样两两不交,而排得开的仍旧共用一道
+        const mix = []
+        for (let i = 0; i < 9; i++) mix.push({ n: 100 + i, s: '2026-08-01', e: '2026-08-09' })
+        mix.push({ n: 200, s: '2026-08-01', e: '2026-08-02' }, { n: 201, s: '2026-08-06', e: '2026-08-08' })
+        const pm = relPack(mix, ax, O)
+        ok(noOverlap(pm.bars) && pm.hidden.length === 0, '疏密混杂的 11 条:一条不折,同泳道两两不交', `${pm.used} 道`)
+        ok(pm.bars.filter((b) => b.n === 201)[0].lane === pm.bars.filter((b) => b.n === 200)[0].lane,
+          '左右分得开的两条照旧共用一道(加道只发生在真放不下时)')
+      }
+      // 带高随实际用到的道数走:不拥挤的带一个像素不动,拥挤的那条才长高
+      ok(relBandH(p6.used, 0, O, true) === 30 + 14 + 6 * 13 + 2 + 6, '6 道的带高 = 起步那档,与 0.17.9 相同',
+        String(relBandH(p6.used, 0, O, true)))
+      ok(relBandH(p7.used, 0, O, true) === relBandH(p6.used, 0, O, true) + 13, '开第 7 道 = 带高正好多一行')
+      ok(relBandH(p13.used, 0, O, true) === 30 + 14 + 12 * 13 + 2 + 6 && relBandH(p13.used, 0, O, true) === 208,
+        '12 道封顶的带高 = 208px(上界,再多的走 +N 不再长高)', String(relBandH(p13.used, 0, O, true)))
     }
   }
   { // 当天开当天合:按号横排,不再竖着堆
@@ -2104,16 +2147,21 @@ console.log('T41 时间线重做')
         const two = relPackChip([{ n: 1, s: '2026-08-25', e: '2026-08-26' }, { n: 2, s: '2026-08-30', e: '2026-09-01' }], ax2, 42, O)
         ok(two.used === 1 && two.rows.every((r) => r.lane === 0), '左右分得开的两组并作一行(带高因此比一组一行更省)', two.used + ' 行')
       }
-      { // 行数封顶:一堆各不相同、还都压着最后一天的跨度也只占 6 行(展开高度有上界不因芯片而破)
+      { // 行数按需加(v0.17.10):与 relPack 同一条规矩 —— 6 起步、12 封顶、到顶的收进 hidden
         const wide = mkDays('2026-08-25', 8)
         const ax2 = relAxis(wide, {}, O, 1600)
-        const mm = []
-        for (let i = 0; i < 7; i++) mm.push({ n: 100 + i, s: wide[i], e: wide[7] })
-        for (let i = 0; i < 7; i++) mm.push({ n: 200 + i, s: wide[i], e: wide[7], open: true })
-        const mp = relPackChip(mm, ax2, 42, O)
-        ok(mp.rows.length === 14 && mp.used === O.lanes, '14 组各占一份,但行数封顶 6 —— 再挤也不让一条带长到看不完',
-          mp.rows.length + ' 组 / ' + mp.used + ' 行')
-        ok(mp.rows.every((r) => r.lane < O.lanes), '没有一组越过行数上限')
+        const chipRows = (n) => { // n 组各不相同、还都压着最后一天的跨度 → 横向谁也让不开谁
+          const mm = []
+          for (let i = 0; i < n; i++) mm.push({ n: 100 + i, s: wide[i % 7], e: wide[7], open: i % 2 === 1 })
+          return relPackChip(mm, ax2, 42, O)
+        }
+        const c7 = chipRows(7), c14 = chipRows(14)
+        ok(c7.used === 7 && c7.rows.length === 7 && c7.hidden.length === 0,
+          '芯片档第 7 组也开第 7 行(不再叠回已有的行)', c7.used + ' 行 / 折 ' + c7.hidden.length)
+        ok(c14.used === O.lanesMax && c14.rows.length === 12 && c14.hidden.length === 2,
+          '14 组:画 12 行、余下 2 个 PR 走 +N(行数仍有上界)', c14.used + ' 行 / 折 ' + c14.hidden.length)
+        ok(c14.rows.every((r) => r.lane < O.lanesMax), '没有一组越过 lanesMax')
+        ok(c14.hidden.every((x) => typeof x.n === 'number'), 'hidden 收的是 PR 条目本身(+N 要按号列清单)')
       }
       ok(p.rows[0].cx === 604 && p.rows[0].x1 === 604 && p.rows[0].x0 === 205,
         '合了的:芯片落在合并日那一格,细线从开 PR 那天牵到芯片',
@@ -2194,7 +2242,7 @@ console.log('T41 时间线重做')
   }
 }
 { // gen 侧:带的烤入 / 视图钮 / 窗口芯片 / 几何内联 / 关档冻结
-  const { relAxis, relTicks, relBar, relWindow } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+  const { relAxis, relTicks, relBar, relWindow, relCaps } = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
   const fx41 = mkFixture('fx41', { 's.html': demoHtml('s') })
   const cfgP = join(fx41.kb, 'kanban.config.json'), idxP = join(fx41.kb, 'index.html')
   const relP = join(fx41.kb, 'release-manifest.json')
@@ -2264,6 +2312,35 @@ console.log('T41 时间线重做')
     ok(on.includes('--rellane: var(--accent)') && on.includes('.relwk { position: absolute; height: 1px'),
       '泳道色顺手落一份 --rellane:细线要 background、‹ 与虚边芯片要 color,同一个色不新造')
     ok(on.includes('放大') || on.includes('带号芯片'), '图例里说了这件事(不然那句「方块 = 当天开当天合」在放大档下就是假的)')
+  }
+  { // 泳道按需加道 + 开着的 PR 右端虚边(v0.17.10)
+    ok(/var TL = \{[^\n]*lanes: 6, lanesMax: 12,/.test(on),
+      'TL:lanes 6 = 起步(也是轴宽那道加宽的分母),lanesMax 12 = 上限,两个数各只写这一处',
+      (on.split('\n').find((l) => l.includes('var TL = {')) || '').trim())
+    ok(on.includes('.relhr.relhr-open { background: repeating-linear-gradient(90deg, var(--rellane) 0 3px, transparent 3px 5px); }'),
+      '虚边只把实心换成 3px 实 / 2px 空,颜色照旧吃 --rellane(不为「还开着」新造一个色)')
+    // 把产物里那只真 tlCap 抠出来跑:源码读着对,不等于画出来的帽与线对
+    const src = on.slice(on.indexOf('    function tlCap('), on.indexOf('    function tlChip('))
+    const capOf = new Function('relCaps', 'tlBar', 'tlA', 'TL',
+      src + '\nreturn tlCap')(relCaps, () => 'SOLID', (d, g, q, cls, style, txt) => txt, { row: 13 })
+    const draw = (state, clip = false, w = 400) =>
+      capOf({ x: 300, w: w, lane: 0, item: { d: { s: state } } }, { sg: 'dev', q: 4 }, 30, false, 28, clip)
+    const merged = draw('merged'), opened = draw('open')
+    ok(count(merged, 'class="relcp"') === 2 && !merged.includes('relhr-open')
+      && merged.includes('<i class="relhr" style="left:28px;width:344px"></i>'),
+      '已合的照旧:两顶实心帽 + 中间 344px 的细线(与 0.17.9 逐字节相同)', merged)
+    ok(count(opened, 'class="relcp"') === 1 && opened.includes('<i class="relhr relhr-open" style="left:28px;width:372px"></i>'),
+      '还开着的:右端不画帽,细线一路虚到右缘(28 + 372 = 400 = 条宽)', opened)
+    ok(opened.indexOf('relcp') < opened.indexOf('relhr'), '左端那顶实心帽照旧在(改的只是右端)')
+    const clipped = draw('open', true)
+    ok(clipped.includes('<i class="relcx">‹</i>') && clipped.includes('<i class="relhr relhr-open" style="left:10px;width:390px"></i>'),
+      '左端被窗口裁掉又还开着:左边一个 ‹、右边虚到右缘,两端各说各的')
+    ok(draw('open', false, 40) === 'SOLID' && draw('merged', false, 40) === 'SOLID',
+      '短到两顶帽要碰上:两种状态都照旧退回一整条(那时虚边由 .relpb.open 的虚框兜着)')
+    ok(on.includes('if (mp.hidden.length) body.push(tlOvf(foldNs(mp.hidden, 0), g, anc(mp.hidden[0].d), ax.W - cw + 4, top + 1, cw - 8))'),
+      '12 道仍放不下的:带右端一枚 +N,走的是当日那组同一只 tlOvf(号在 data-relfold 上列全)')
+    ok(on.includes('var mcnt = mp.hidden.length'), '副标题那句「跨天 N 个」把折掉的也算进去(不然那几条等于凭空消失)')
+    ok(on.includes('var mp = !op ? { used: 0, bars: [], hidden: [] }'), '折叠着的带:mp 也是同一副形状,hidden 不会是 undefined')
   }
   { // 字幕:五档都由 relWindow 现算,当日那档塌成单日形制。取的是壳里那一行真代码
     const line = on.split('\n').find((l) => l.includes('dnr.textContent ='))
@@ -7868,6 +7945,108 @@ console.log('T81 review 四条小修(0.17.9)')
         '落盘那几行账也一样(归一化时刻后逐字节相同)')
     } finally {
       so.proc.kill('SIGKILL'); sn.proc.kill('SIGKILL')
+    }
+  }
+}
+
+// ============ T82 与 0.17.9 的冻结对照(泳道按需加道 / 开着的 PR 虚边)============
+// 这一版只该动时间线里那两处。尺子分三层:没开发布进度的板整份产物不许动一个字节;
+// 开了的板差异只许落在这两处;几何层则直接拿老 relgeom 与新 relgeom 对跑 ——
+// 画面的「逐字节不变」最终是几何说了算,而 ≤ 6 并发时它必须逐字段相同。
+console.log('T82 与 0.17.9 的冻结对照')
+{
+  const TAG = 'demo-driven-development--v0.17.9'
+  const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.9 冻结对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v0179')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v0179.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const oldScripts = join(oldRoot, 'scripts')
+    const norm = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
+    { // ① 没开发布进度的板:整份产物归一化版本戳之后逐字节相同(时间线一个字都不进这种板)
+      const a = mkFixture('fx82-old', { 's.html': demoHtml('s') })
+      const b = mkFixture('fx82-new', { 's.html': demoHtml('s') })
+      runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
+      ok(norm(join(a.kb, 'index.html')).join('\n') === norm(join(b.kb, 'index.html')).join('\n'),
+        '没开 releaseTab 的板:归一化版本戳后,产物与 0.17.9 逐字节相同')
+    }
+    { // ② 开了发布进度的板:差异只落在泳道与虚边这两处(逐行做多重集差,行号整体后移不算差异)
+      const mk = (name, scripts) => {
+        const fx = mkFixture(name, { 's.html': demoHtml('s') })
+        const cfgP = join(fx.kb, 'kanban.config.json')
+        const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+        cfg.releaseTab = true
+        writeFileSync(cfgP, JSON.stringify(cfg))
+        writeFileSync(join(fx.kb, 'release-manifest.json'), JSON.stringify({
+          stages: REL_MANIFEST.stages,
+          releases: [{ tag: 'v0.0.1', at: '2026-07-14T06:00:00Z' }],
+          prs: [
+            { number: 40, title: '开着的', state: 'open', draft: false, base: 'main', branch: 'f/a', url: 'https://github.com/o/r/pull/40', createdAt: '2026-08-24T01:00:00Z', mergedAt: null, closedAt: null, cards: [] },
+            { number: 39, title: '已合未发', state: 'merged', draft: false, base: 'main', branch: 'f/b', url: 'https://github.com/o/r/pull/39', createdAt: '2026-08-21T01:00:00Z', mergedAt: '2026-08-22T01:00:00Z', closedAt: null, cards: [] },
+          ],
+          syncedAt: '2026-08-26T02:00:00Z',
+        }))
+        runGen(scripts, fx.kb)
+        return norm(join(fx.kb, 'index.html')).map((l) => l.trim())
+      }
+      const oldIdx = mk('fx82r-old', oldScripts), newIdx = mk('fx82r-new', NEW_SCRIPTS)
+      const gone = onlyIn(oldIdx, newIdx), add = onlyIn(newIdx, oldIdx)
+      // 一把尺认这两处:泳道打包那几只、tlCap 的帽与线、TL 的两个数,以及讲这件事的注释。
+      // `j = 0` 与孤零零的 `}` 是老那支「塞进最早空出来的泳道」被删掉后剩下的两行。
+      const MARK = /lanes|hidden|bars|rows|ends|relPack|relCaps|relhr|relcp|tlCap|tlOvf|mcnt|opn|data-relfold|v0\.17\.10|泳道|封了顶|并发|宁可两条挨一下|塞进最早空出来|副标题|未画|轴宽|颜色同线|右端|细线|图例|^j = 0$|^\}$|^var i, j, k,/
+      ok(gone.length === 27 && gone.every((l) => MARK.test(l)),
+        '开了 releaseTab 的板:没了的 27 行全属于泳道打包与 tlCap 这两处',
+        `${gone.length} / ${JSON.stringify(gone.filter((l) => !MARK.test(l))).slice(0, 300)}`)
+      ok(add.length === 41 && add.every((l) => MARK.test(l)),
+        '新增的 41 行也全属于这两处(别处一个字节不动)',
+        `${add.length} / ${JSON.stringify(add.filter((l) => !MARK.test(l))).slice(0, 300)}`)
+      ok(!oldIdx.some((l) => l.includes('relhr-open')) && newIdx.filter((l) => l.includes('relhr-open')).length === 2,
+        'relhr-open 是这一版新造的,产物里只有两处:CSS 那条与 tlCap 那一句')
+    }
+    { // ③ 几何层:≤ 6 并发时,老 relgeom 与新 relgeom 逐字段相同(画面的冻结最终由它说了算)
+      const oldG = await import(join(oldScripts, 'relgeom.mjs'))
+      const newG = await import(join(NEW_SCRIPTS, 'relgeom.mjs'))
+      const O = { lbl: 200, base: 14, slot: 12, quiet: 5, lanes: 6, lanesMax: 12, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3 }
+      const days = []
+      for (let i = 0; i < 30; i++) days.push(new Date(Date.parse('2026-08-01T00:00:00Z') + i * 864e5).toISOString().slice(0, 10))
+      const counts = {}
+      for (const d of days) counts[d] = 3
+      const axO = oldG.relAxis(days, counts, O, 1800), axN = newG.relAxis(days, counts, O, 1800)
+      ok(JSON.stringify(axO) === JSON.stringify(axN), '轴:一个像素没动(ceil(当日数 / lanes) 仍按起步值 6 算)')
+      // 并发正好顶到 6 的一批:五条长短错开的 + 一条被窗口左缘裁掉的 + 三条晚到的(排回前几道)
+      const multi = []
+      for (let i = 0; i < 5; i++) multi.push({ n: 10 + i, s: days[i], e: days[20 + i], open: i % 3 === 0 })
+      multi.push({ n: 50, s: '2026-07-01', e: days[3], open: false })
+      for (let i = 0; i < 3; i++) multi.push({ n: 30 + i, s: days[26], e: days[28], open: false })
+      const strip = (o) => { const c = { ...o }; delete c.hidden; return JSON.stringify(c) }
+      const pO = oldG.relPack(multi, axO, O), pN = newG.relPack(multi, axN, O)
+      ok(strip(pO) === strip(pN) && pN.hidden.length === 0 && pN.used === 6,
+        'relPack 顶到 6 道:used / bars 与 0.17.9 逐字段相同,一条不折', `${pN.used} 道 / 折 ${pN.hidden.length}`)
+      // 芯片档一组一行,同样摆到正好 6 行:三组晚到的各自成组,横向让得开就排回前几行
+      const chipMulti = [{ n: 10, s: days[0], e: days[20], open: true }, { n: 11, s: days[1], e: days[21], open: false },
+        { n: 12, s: days[1], e: days[21], open: false }, { n: 13, s: days[2], e: days[22], open: false },
+        { n: 50, s: '2026-07-01', e: days[3], open: false }]
+      const cO = oldG.relPackChip(chipMulti, axO, 42, O), cN = newG.relPackChip(chipMulti, axN, 42, O)
+      ok(strip(cO) === strip(cN) && cN.hidden.length === 0 && cN.used <= 6,
+        'relPackChip 同样逐字段相同,一组不折', `${cN.used} 行 / 折 ${cN.hidden.length}`)
+      const byDay = { [days[5]]: [{ n: 1 }, { n: 2 }, { n: 3 }], [days[9]]: [{ n: 4 }] }
+      ok(JSON.stringify(oldG.relGrid(byDay, axO, O)) === JSON.stringify(newG.relGrid(byDay, axN, O))
+        && JSON.stringify(oldG.relGridChip(byDay, axO, 42)) === JSON.stringify(newG.relGridChip(byDay, axN, 42))
+        && JSON.stringify(oldG.relGridBig(byDay, axO, 20, O)) === JSON.stringify(newG.relGridBig(byDay, axN, 20, O)),
+        '当天开当天合那三档:一个字段都没动(这一版没碰它们)')
+      let sameH = true, sameC = true
+      for (let m = 0; m <= 6; m++) for (let s = 0; s <= 6; s++) {
+        if (oldG.relBandH(m, s, O, true, 22, 22) !== newG.relBandH(m, s, O, true, 22, 22)) sameH = false
+        if (oldG.relBandH(m, s, O, false) !== newG.relBandH(m, s, O, false)) sameH = false
+      }
+      for (const w of [30, 60, 61, 100, 400]) for (const clip of [false, true]) {
+        if (JSON.stringify(oldG.relCaps(300, w, 28, clip)) !== JSON.stringify(newG.relCaps(300, w, 28, clip))) sameC = false
+      }
+      ok(sameH, '带高:0…6 道的每一格都与 0.17.9 相同(高度随用到的道数走,这一条本来就是老口径)')
+      ok(sameC, 'relCaps:一个数都没动(开着的右端不画帽是 tlCap 的事,几何不为此分叉)')
     }
   }
 }

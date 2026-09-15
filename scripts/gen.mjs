@@ -4675,6 +4675,9 @@ const REL_CSS = !REL ? '' : `
   .relcp { top: 0; height: 11px; border-radius: 3px; background: var(--rellane); }
   .relpb.open .relcp { border: 1px dashed var(--card); } /* 还开着:虚边留在帽上 */
   .relhr { top: 4px; height: 2px; background: var(--rellane); }
+  /* 还开着的(v0.17.10):右端不封帽,细线一路虚到右缘 —— 三档口径一致「右端有实心帽 = 已合并」。
+     颜色同线,只把实心换成 3px 实 / 2px 空,不为「还开着」新造一个色 */
+  .relhr.relhr-open { background: repeating-linear-gradient(90deg, var(--rellane) 0 3px, transparent 3px 5px); }
   .relcx, .relwx { font-size: 12px; font-weight: 700; line-height: 11px; color: var(--rellane); }
   .relcx { left: 0; }
   .relwx { position: absolute; }
@@ -4815,8 +4818,9 @@ const REL_JS = !REL ? '' : `
     function md(s) { return String(s).slice(5, 10) }
     // 锚点日与 gen 烤日桶时同一条规则:开着看 createdAt,合了看 mergedAt,关掉看 closedAt
     function anc(d) { return String(d.s === 'open' ? d.c : d.m || d.x || d.c).slice(0, 10) }
-    // 时间线的全部尺寸都在这一处:轴(lbl/base/slot/quiet)、泳道(lanes/row/min/gap)、带(head/sub/pad)
-    var TL = { lbl: ${REL_GUT}, base: 14, slot: 12, quiet: 5, lanes: 6, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48, chip: ${REL_CHIP} }
+    // 时间线的全部尺寸都在这一处:轴(lbl/base/slot/quiet)、泳道(lanes/lanesMax/row/min/gap)、带(head/sub/pad)
+    // lanes = 泳道起步数(也是轴宽 ceil(当日数 / lanes) 那道加宽的分母),lanesMax = 按需加到头的上限
+    var TL = { lbl: ${REL_GUT}, base: 14, slot: 12, quiet: 5, lanes: 6, lanesMax: 12, row: 13, head: 30, sub: 14, pad: 6, min: 10, gap: 3, axh: 26, tick: 48, chip: ${REL_CHIP} }
     var DAYC = {}, byG = {} // 全局日计数(轴宽只看它,展开/折叠/筛选都不让轴跳)与带 → PR
     for (i = 0; i < G.length; i++) for (var gd in G[i].d) DAYC[gd] = (DAYC[gd] || 0) + G[i].d[gd]
     for (i = 0; i < D.length; i++) { if (!byG[D[i].gp]) byG[D[i].gp] = []; byG[D[i].gp].push(D[i]) }
@@ -4851,13 +4855,18 @@ const REL_JS = !REL ? '' : `
       return tlA(bb.item.d, g, q, 'relpb', 'left:' + bb.x + 'px;top:' + (top + bb.lane * rowS + 1)
         + 'px;width:' + size + 'px;height:' + size + 'px', '')
     }
-    function tlCap(bb, g, top, q, size, clip) { // 横杠退成两端实心 + 细线;左端被裁就画一个 ‹
-      var c = relCaps(bb.x, bb.w, size, clip)
+    // 横杠退成两端实心 + 细线;左端被裁就画一个 ‹。
+    // 还开着的(v0.17.10)右端不画帽:细线一路虚到右缘,与基础档 / 芯片档同一句口径 ——
+    // 右端有实心帽 = 已合并。从前这一档给开着的也封一顶实心帽,与合并帽无异,
+    // 图例那句「虚边 = 还开着」在 A 档就是假的,两条并排时更像一个 PR 长了两个头。
+    function tlCap(bb, g, top, q, size, clip) {
+      var c = relCaps(bb.x, bb.w, size, clip), opn = bb.item.d.s === 'open'
       if (c.solid) return tlBar(bb, g, top, q, true) // 短到两顶帽要碰上:那时它本来就没虚长,原样一整条
       return tlA(bb.item.d, g, q, 'relpb relcb', 'left:' + bb.x + 'px;top:' + (top + bb.lane * TL.row) + 'px;width:' + bb.w + 'px',
         (c.aw ? '<i class="relcp" style="left:0;width:' + c.aw + 'px"></i>' : '<i class="relcx">‹</i>')
-        + '<i class="relhr" style="left:' + (c.lx - bb.x) + 'px;width:' + c.lw + 'px"></i>'
-        + '<i class="relcp" style="left:' + (c.b - bb.x) + 'px;width:' + c.bw + 'px"></i>')
+        + '<i class="relhr' + (opn ? ' relhr-open' : '') + '" style="left:' + (c.lx - bb.x)
+        + 'px;width:' + (opn ? bb.w - (c.lx - bb.x) : c.lw) + 'px"></i>'
+        + (opn ? '' : '<i class="relcp" style="left:' + (c.b - bb.x) + 'px;width:' + c.bw + 'px"></i>'))
     }
     function tlChip(it, g, x, y, q, cw) { // 号直接写在图上:不用悬停也不用点就知道是谁
       return tlA(it.d, g, q, 'relpb relchip', 'left:' + x + 'px;top:' + y + 'px;width:' + cw + 'px', '#' + it.d.n)
@@ -5008,13 +5017,14 @@ const REL_JS = !REL ? '' : `
           if (q && pass(d)) hit++
         }
         var op = !!bOpen[g.g]
-        var mp = !op ? { used: 0, bars: [] } : reg === 2 ? relPackChip(multi, ax, cw, TL) : relPack(multi, ax, TL)
+        var mp = !op ? { used: 0, bars: [], hidden: [] } : reg === 2 ? relPackChip(multi, ax, cw, TL) : relPack(multi, ax, TL)
         var sg2 = !op ? { used: 0, bars: [] }
           : reg === 2 ? relGridChip(byDay, ax, cw) : reg === 1 ? relGridBig(byDay, ax, size, TL) : relGrid(byDay, ax, TL)
         var H = relBandH(mp.used, sg2.used, TL, op, rowM, rowS)
-        // 副标题数的是 PR 数,不是画出来的字形数:芯片档里跨天那组按行分,当日那组还含一枚 +N
-        var mcnt = 0, scnt = 0
-        if (mp.rows) { for (j = 0; j < mp.rows.length; j++) mcnt += mp.rows[j].list.length } else mcnt = mp.bars.length
+        // 副标题数的是 PR 数,不是画出来的字形数:芯片档里跨天那组按行分,当日那组还含一枚 +N;
+        // 泳道加到头仍没画出来的那几条也算在里头 —— 副标题说的是「这条带有多少跨天 PR」
+        var mcnt = mp.hidden.length, scnt = 0
+        if (mp.rows) { for (j = 0; j < mp.rows.length; j++) mcnt += mp.rows[j].list.length } else mcnt += mp.bars.length
         for (j = 0; j < sg2.bars.length; j++) scnt += sg2.bars[j].more || 1
         // 触发面 = 整格(role/tabindex/aria/title/data 都挂这一层),里头那两行只是字:
         // 展开后带头底下那片底色也是这条带,只有文字那几行能点就是「看着能点、点了不动」
@@ -5049,6 +5059,9 @@ const REL_JS = !REL ? '' : `
             else for (j = 0; j < mp.bars.length; j++) {
               body.push(reg === 1 ? tlCap(mp.bars[j], g, top, q, size, mp.bars[j].item.s < ax.t0) : tlBar(mp.bars[j], g, top, q, true))
             }
+            // 道加到头(TL.lanesMax)仍放不下的:带的右端一枚「+N 条未画」,与当日那组同一副形制,
+            // 号在 data-relfold 上列全 —— 折了几条不说清楚,那几条就等于凭空消失了
+            if (mp.hidden.length) body.push(tlOvf(foldNs(mp.hidden, 0), g, anc(mp.hidden[0].d), ax.W - cw + 4, top + 1, cw - 8))
             top += mp.used * rowM + 2
           }
           if (sg2.used) {
