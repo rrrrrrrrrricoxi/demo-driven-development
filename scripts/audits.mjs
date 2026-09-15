@@ -123,10 +123,9 @@ export function makeCtx(kanbanDir, { session = '' } = {}) {
     if (COMMITTED !== undefined) return COMMITTED
     COMMITTED = null
     if (CARDS_DIR) {
-      const r = spawnSync('git', ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', CARDS_DIR],
-        { cwd: KANBAN, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-      if (!r.error && r.status === 0) {
-        COMMITTED = new Set(r.stdout.split('\0').filter(Boolean).map((p) => p.split('/').slice(-2).join('/')))
+      const out = gitq(['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', CARDS_DIR]) // 问不出就是 null,与上面同一把尺
+      if (out !== null) {
+        COMMITTED = new Set(out.split('\0').filter(Boolean).map((p) => p.split('/').slice(-2).join('/')))
       }
     }
     return COMMITTED

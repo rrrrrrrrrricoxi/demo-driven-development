@@ -9,6 +9,42 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.9] - 2026-09-15
+
+### Review follow-ups
+
+Four small things a code review found in 0.17.8: one duplicated helper, two
+rulers that did not match the page they serve, and one place where the one-line
+treatment was applied to text nobody renders as bubbles.
+
+### Fixed
+- **`committedCards` reuses `gitq`.** The card-freshness audit spawned its own
+  `git ls-tree` and repeated the ten lines above it that already decide what a
+  failed git call means; it now calls the helper, with the same behaviour —
+  a failed call is `null`, and empty output is still an empty set.
+- **The roster de-duplicates on the same ruler as the gate.** `POST
+  /api/acceptance/who` compared the normalized name against the raw roster, so
+  a hand-written entry with a trailing space (`"tester-a "`) got a second line
+  for the same person; each entry now goes through `norm_who` before the
+  comparison, while existing entries are written back untouched.
+- **The server's floor for a name is two code points, like the page's.** The
+  write port accepted a single character although the sign-in box refuses one,
+  and the floor is now a named constant next to the ceiling of 20; a name below
+  it is a 400 saying `名字至少 2 个字`, counted in code points, so one emoji is
+  one character and not two.
+- **Blocking reasons keep their line breaks.** `oneLine` belongs to the
+  `systemMessage` text, where a newline costs a bubble; the blocking text lands
+  in `decision.reason`, which is not rendered that way, and folding a per-line
+  list into ` · - a · - b` only made it harder to read.
+
+### Upgrading
+`templates/serve.py` moves to `# ddd-serve v5` because the write port's
+behaviour changed. Hosts that run their own copy should overwrite
+`app/kanban/serve.py` with the template and restart the server; boards with
+`acceptanceFeedback: true` (no pin) have no `who` route at all and answer every
+request exactly as v4 did, which is pinned by running both versions against the
+same fixture. `gen.mjs` is untouched, so the generated board is unchanged.
+
 ## [0.17.8] - 2026-09-15
 
 ### One bubble, not six

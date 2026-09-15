@@ -152,6 +152,15 @@ const req = async (base, path, opt) => {
   try { json = JSON.parse(text) } catch {}
   return { status: r.status, text, json, headers: r.headers }
 }
+/**
+ * 两份文本按行做多重集差:x 里有而 y 里没有的那些行(重复行按次数算)。
+ * 行号整体后移不算差异 —— 只看「哪些行没了 / 哪些行是新的」,冻结类断言全用它。
+ */
+const onlyIn = (x, y) => {
+  const c = new Map()
+  y.forEach((l) => c.set(l, (c.get(l) || 0) + 1))
+  return x.filter((l) => { const n = c.get(l) || 0; if (n) { c.set(l, n - 1); return false } return true })
+}
 const touch = (p) => { const t = new Date(Date.now() + 5); utimesSync(p, t, t) }
 const readDemo = (kb, f) => readFileSync(join(kb, 'demos', f), 'utf8')
 
@@ -5225,8 +5234,9 @@ const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
     '给的是确切补救:card set <id> detail,外加 question ≤2 句 / approach 结论先行 / note 时间线', (g2.reason || '').slice(0, 400))
   ok(!/BL-9/.test(g2.systemMessage || '') && /正文过长没拆 detail 1 张\(最长 BL-1\)/.test(g2.systemMessage || ''),
     '两档不混:新卡进 reason(全文照旧),老卡那一条仍只数老卡', JSON.stringify(g2).slice(0, 300))
-  ok(!(g2.reason || '').includes('\n'),
-    'v0.17.8:阻断那一段也是一条无换行的话(段内换行换成「 · 」,措辞一个字没改)', (g2.reason || '').slice(0, 300))
+  ok((g2.reason || '').includes('\n') && !/ · /.test(g2.reason || ''),
+    'v0.17.9:阻断那一段照旧保留原换行(0.17.8 曾把它压成一条 —— reason 落在 decision.reason,读它的是 Claude,不是气泡)',
+    (g2.reason || '').slice(0, 300))
 
   // ---- git add 过但还没 commit:判据是「进没进 HEAD」,不是「工作区干不干净」----
   git('add', 'app/kanban/cards/backlog/BL-9.json')
@@ -7181,36 +7191,62 @@ console.log('T77 收工提醒分级压成一行')
       spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
       spawnSync('tar', ['-xf', tar, '-C', oldRoot])
       const oldScripts = join(oldRoot, 'scripts')
-      const runOld = (root) => spawnSync(process.execPath, [join(oldScripts, 'stop-hook.mjs')],
-        { encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: root } })
-      // ⓪ 产物:gen.mjs 与 templates/ 一字未动,归一化版本戳之后与 0.17.7 逐字节相同
+      const runOld = (root, input = '{}') => spawnSync(process.execPath, [join(oldScripts, 'stop-hook.mjs')],
+        { encoding: 'utf8', input, env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: root } })
+      // ⓪ 产物:gen.mjs 一字未动,归一化版本戳之后与 0.17.7 逐字节相同
       const pa = mkFixture('fx77u-old', { 's.html': demoHtml('s') })
       const pb = mkFixture('fx77u-new', { 's.html': demoHtml('s') })
       runGen(oldScripts, pa.kb); runGen(NEW_SCRIPTS, pb.kb)
       const norm = (f) => readFileSync(f, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
       ok(norm(join(pa.kb, 'index.html')) === norm(join(pb.kb, 'index.html')),
         '归一化版本戳后,产物与 0.17.7 逐字节相同(这一版只改守卫怎么说话)')
-      ok(readFileSync(join(oldRoot, 'templates', 'serve.py'), 'utf8') === readFileSync(join(REPO, 'templates', 'serve.py'), 'utf8'),
-        'templates/serve.py 与 0.17.7 逐字节相同 —— 升这一版不必换模板、不必重启 8898')
-      // ① 阻断两类 + 坏了四条、家务全零:去掉换行后整份 stdout 与 0.17.7 逐字节相同
+      // serve.py:0.17.9 改了名册那条写口(名字下限 + 去重同一把尺),模板不再与 0.17.7 逐字节相同
+      // —— 但动的只该是那一处。逐行做多重集差:没了的只有旧戳与那三行,新增的每一行都属于这两处修错。
+      const srvOld = readFileSync(join(oldRoot, 'templates', 'serve.py'), 'utf8').split('\n')
+      const srvNew = readFileSync(join(REPO, 'templates', 'serve.py'), 'utf8').split('\n')
+      const srvGone = onlyIn(srvOld, srvNew), srvAdd = onlyIn(srvNew, srvOld)
+      ok(srvGone.length === 4 && srvGone.every((l) => /^# ddd-serve v4$/.test(l) ||
+          /1 <= len\(name\)/.test(l) || /name 需 1–/.test(l) || /if name not in names:/.test(l)),
+        'templates/serve.py:0.17.7 那版里只有 4 行没了(旧戳 + 名字下限那两行 + 未归一的去重那行)',
+        JSON.stringify(srvGone).slice(0, 300))
+      const SRV_MARK = /ddd-serve v5|v0\.17\.9|WHO_MIN|WHO_MAX|norm_who|码点|名字|名册|写口|save\(\)|同一把尺|acceptanceFeedback|^#$/
+      ok(srvAdd.length === 22 && srvAdd.every((l) => SRV_MARK.test(l)),
+        'templates/serve.py:新增的每一行也都属于这两处修错(别处一个字节不动)',
+        `${srvAdd.length} / ${JSON.stringify(srvAdd.filter((l) => !SRV_MARK.test(l))).slice(0, 300)}`)
+      ok(srvAdd.includes('# ddd-serve v5'),
+        'templates/serve.py 的戳升到 v5 —— 写口行为变了,宿主这一版要换模板、要重启 serve(0.17.8 那版正相反)')
+      // ① 阻断两类 + 坏了四条、家务全零。v0.17.9 起这一条拆成两把尺:reason 不再过 oneLine
+      // (它落在 decision.reason —— 喂给 Claude 的正文,不渲染成气泡,逐行清单压成一条反而读不动),
+      // 所以对 0.17.7 的尺子收回成「逐字节相同,含换行」;只有进 systemMessage 的那半仍是「去换行后相同」。
       const la = loadedBoard('fx77w-old', oldScripts), lb = loadedBoard('fx77w-new')
       const oa = runOld(la.root), ob = runStop(NEW_SCRIPTS, lb.root)
-      const reasonOld = JSON.parse(oa.stdout || '{}').reason || ''
-      const reasonNew = JSON.parse(ob.stdout || '{}').reason || ''
-      ok(reasonOld.includes('\n') && reasonOld.split('\n').length > reasonNew.split('\n').length,
+      const ja = JSON.parse(oa.stdout || '{}'), jb = JSON.parse(ob.stdout || '{}')
+      const reasonOld = ja.reason || '', reasonNew = jb.reason || ''
+      ok(reasonOld.includes('\n') && reasonOld.split('\n').length > 2,
         '摆盘先确认:0.17.7 这副盘面的阻断那两段本来就是多行的(不然下面那条等式是空跑)',
-        `${reasonOld.split('\n').length} → ${reasonNew.split('\n').length}`)
-      ok(foldOut(oa.stdout) === foldOut(ob.stdout) && (oa.status ?? 0) === (ob.status ?? 0),
-        '阻断与坏了两级:去掉换行后与 0.17.7 逐字节相同(同一副盘面,内容一个字都没改)',
-        JSON.stringify([foldOut(oa.stdout).slice(0, 220), foldOut(ob.stdout).slice(0, 220)]))
-      // 结构那一半:每一段都成了一条 —— systemMessage 里每一行都不含换行(按定义),reason 每段也是
-      const jb = JSON.parse(ob.stdout || '{}')
-      const msgNew2 = jb.systemMessage || ''
+        `${reasonOld.split('\n').length} 行`)
+      ok(reasonNew === reasonOld && ja.decision === jb.decision && (oa.status ?? 0) === (ob.status ?? 0),
+        '阻断的 reason 与 0.17.7 逐字节相同 —— 连换行都一样(0.17.8 曾把它压成一条,读的是 Claude 不是气泡)',
+        JSON.stringify([reasonOld.slice(0, 220), reasonNew.slice(0, 220)]))
+      const msgOld2 = ja.systemMessage || '', msgNew2 = jb.systemMessage || ''
+      ok(fold1(msgOld2) === fold1(msgNew2),
+        '坏了那一级进 systemMessage 的话:去掉换行后与 0.17.7 逐字节相同(同一副盘面,内容一个字都没改)',
+        JSON.stringify([fold1(msgOld2).slice(0, 220), fold1(msgNew2).slice(0, 220)]))
       ok(msgNew2.split('\n').every((l) => l === l.trim() && l.length > 0),
         '坏了那几条各占一行,没有缩进、没有空行 —— 缩进与空行在气泡里只会变成多余的空格', JSON.stringify(msgNew2.slice(0, 200)))
-      ok((jb.reason || '').split('\n\n').every((para) => !para.includes('\n')),
-        '阻断那两条各自也是一条无换行的话(两条之间照旧空一行 —— 那是两件事,各占一个气泡才对)',
-        JSON.stringify((jb.reason || '').slice(0, 220)))
+      ok(reasonNew.split('\n\n').some((para) => para.includes('\n')),
+        '阻断那两段里至少一段照旧是多行的(孤儿 demo 那种逐行清单,就该逐行列)',
+        JSON.stringify(reasonNew.slice(0, 220)))
+      // ①b warn 那一副面孔(同一次收工已拦过 → 降级放行):它落在 systemMessage,照旧一段一条
+      const wa = runOld(la.root, '{"stop_hook_active":true}')
+      const wb = runStop(NEW_SCRIPTS, lb.root, { input: '{"stop_hook_active":true}' })
+      const wOld = JSON.parse(wa.stdout || '{}').systemMessage || ''
+      const wNew = JSON.parse(wb.stdout || '{}').systemMessage || ''
+      ok(wOld.includes('\n') && fold1(wOld) === fold1(wNew) && (wa.status ?? 0) === (wb.status ?? 0),
+        '降级放行那一份:warn 去掉换行后与 0.17.7 逐字节相同', JSON.stringify([fold1(wOld).slice(0, 200), fold1(wNew).slice(0, 200)]))
+      ok(wNew.split('\n').every((l) => l === l.trim() && l.length > 0) && wNew.split('\n').length < wOld.split('\n').length,
+        'warn 照旧过 oneLine —— 每段缩成一条,行数比 0.17.7 少(systemMessage 里一个换行 = 一个气泡)',
+        `${wOld.split('\n').length} → ${wNew.split('\n').length}`)
       // ② 三级同时命中:家务那一条之外(阻断的 reason + 坏了各段)去掉换行后仍逐字节相同
       const mixBoard = (name, gen) => board(name, {
         cfg: { richText: true, acceptanceTab: true },
@@ -7225,7 +7261,8 @@ console.log('T77 收工提醒分级压成一行')
         const o = JSON.parse(out || '{}')
         const ls = (o.systemMessage || '').split('\n')
         const i = ls.map((l) => l.startsWith('看板守卫 ') || l.startsWith('看板守卫 · 家务')).lastIndexOf(true)
-        return JSON.stringify({ reason: fold1(o.reason ?? ''), decision: o.decision ?? null, broken: fold1((i < 0 ? ls : ls.slice(0, i)).join('\n')) })
+        // reason 不折(v0.17.9 起它保留原换行,尺子是逐字节);只有进 systemMessage 的那半才折
+        return JSON.stringify({ reason: o.reason ?? '', decision: o.decision ?? null, broken: fold1((i < 0 ? ls : ls.slice(0, i)).join('\n')) })
       }
       const ma = mixBoard('fx77v-old', oldScripts), mb = mixBoard('fx77v-new')
       const oc = runOld(ma.root), od = runStop(NEW_SCRIPTS, mb.root)
@@ -7234,7 +7271,7 @@ console.log('T77 收工提醒分级压成一行')
         '摆盘先确认:这副盘面三级同时命中,两版各自说了家务(旧一段两行 / 新一条)',
         JSON.stringify([choreOf(od), (JSON.parse(oc.stdout || '{}').systemMessage || '').slice(-80)]))
       ok(cut(oc.stdout) === cut(od.stdout) && (oc.status ?? 0) === (od.status ?? 0),
-        '家务也命中时,阻断的 reason 与坏了那几段去掉换行后仍与 0.17.7 逐字节相同 —— 这一版改的只是标点',
+        '家务也命中时:阻断的 reason 与 0.17.7 逐字节相同,坏了那几段去掉换行后也相同',
         JSON.stringify([cut(oc.stdout).slice(0, 220), cut(od.stdout).slice(0, 220)]))
       ok(!(JSON.parse(od.stdout || '{}').systemMessage || '').includes('家务'),
         '三级同时命中那一份 systemMessage 里也不出现「家务」', (JSON.parse(od.stdout || '{}').systemMessage || '').slice(-120))
@@ -7350,8 +7387,8 @@ console.log('T78 验收名册与口令')
   } else {
     cpSync(join(REPO, 'templates', 'serve.py'), join(kb, 'serve.py'))
     const srvSrc = readFileSync(join(kb, 'serve.py'), 'utf8')
-    ok(/^# ddd-serve v4$/m.test(srvSrc),
-      'serve.py 版本戳升到 v4(写口的形状变了:多一条 who,mark/shot 多一道名册门)')
+    ok(/^# ddd-serve v5$/m.test(srvSrc),
+      'serve.py 版本戳是 v5(v4 立了 who 这条写口,v0.17.9 又改了它的写口行为:名字下限与去重)')
     ok(!srvSrc.includes('ROSTER_FILE + ".tmp"') && srvSrc.includes('threading.get_ident()'),
       '名册的临时文件名带线程号:这台服务是线程化的,写死一个 .tmp 就是两个线程对写同一个文件')
     const srv = await startServe(kb)
@@ -7417,7 +7454,22 @@ console.log('T78 验收名册与口令')
       const w4 = await who({ name: '甲'.repeat(30), pin: '1111' })
       ok(w4.status === 200 && rd(rosP).names[2] === '甲'.repeat(20), '超过 20 字按码点切到 20(与 fbWhoNorm 同一把尺)')
       const w5 = await who({ name: '', pin: '1111' })
-      ok(w5.status === 400 && String(w5.json.error).includes('name'), '空名字:400(写法不对,不是「没这个份」)')
+      ok(w5.status === 400 && String(w5.json.error).includes('至少 2 个字'),
+        '空名字:400(写法不对,不是「没这个份」)—— v0.17.9 起说的是下限那句原话', w5.text.slice(0, 120))
+
+      // ③b v0.17.9 名字下限:与页面 save() 同一个数(2 个码点)。按码点不按 UTF-16 格 ——
+      // 一个 emoji 占两格却只是一个字;页面收不下的东西不该从写口溜进名册。
+      const w6 = await who({ name: '甲', pin: '1111' })
+      ok(w6.status === 400 && String(w6.json.error).includes('至少 2 个字') && rd(rosP).names.length === 3,
+        '单字名字:400 +「名字至少 2 个字」,名册一个字没长', `${w6.status} ${w6.text.slice(0, 120)}`)
+      const w7 = await who({ name: '甲乙', pin: '1111' })
+      ok(w7.status === 200 && rd(rosP).names.includes('甲乙'), '两个字:照收', w7.text.slice(0, 120))
+      const w8 = await who({ name: '🙂', pin: '1111' })
+      ok(w8.status === 400 && String(w8.json.error).includes('至少 2 个字'),
+        '一个 emoji:占两格,但按码点算只有 1 个字 —— 拒(尺子是码点,不是 UTF-16 格)', `${w8.status} ${w8.text.slice(0, 120)}`)
+      const w9 = await who({ name: '🙂🙂', pin: '1111' })
+      ok(w9.status === 200 && rd(rosP).names.includes('🙂🙂'),
+        '两个 emoji = 2 个码点:入册(按格数就成了 4,两把尺在这儿分得开)', w9.text.slice(0, 120))
 
       // ④ 口令不对:sleep 1s 再 403,名册一个字节不长
       {
@@ -7477,6 +7529,19 @@ console.log('T78 验收名册与口令')
           '归一只是把两边拉到同一把尺上,名册外的名字照样 403')
         const g = await req(srv.base, '/acceptance-roster.json')
         ok(g.status === 200 && g.json.names.length === 2, '名册读坏不了就照原样答(归一只发生在比的那一刻)')
+      }
+
+      // ⑧b v0.17.9:名册那条写口的去重也过同一只 norm_who。原来拿归一后的名字比**未归一**的名册,
+      // 于是手写进 git 的「甲乙 」会被再加一行 —— 页面上两个名字长得一模一样,账上从此是两个人。
+      {
+        wr(rosP, { names: ['甲乙 '] }) // 手敲 JSON 落下的尾空白
+        const w = await who({ name: '甲乙', pin: '1111' })
+        ok(w.status === 200 && rd(rosP).names.length === 1 && rd(rosP).names[0] === '甲乙 ',
+          '归一后已在册:不加第二行,旧条目也一个字不改(名册只加不删,手写那份留着给人看)',
+          `${w.status} ${JSON.stringify(rd(rosP).names)}`)
+        ok(JSON.stringify(w.json.names) === JSON.stringify(['甲乙 ']), '回的就是名册原样那一份', w.text.slice(0, 120))
+        ok((await mark({ pr: 277, item: 'JJ3', who: '甲乙', verdict: 'ok' })).status === 200,
+          '同一个名字在 mark 那道名册门也过得去 —— 写口与门这才是同一把尺')
       }
 
       // ⑨ 名册读坏了:答空名册,而不是把全板的人卡在 403 上没有出路
@@ -7671,12 +7736,7 @@ console.log('T80 换人不跳与 0.17.5 冻结对照')
     runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
     const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
     const oldL = ml(join(a.kb, 'index.html')), newL = ml(join(b.kb, 'index.html'))
-    // 按行做多重集差:行号整体后移不算差异,只看「哪些行没了 / 哪些行是新的」
-    const onlyIn = (x, y) => {
-      const c = new Map()
-      y.forEach((l) => c.set(l, (c.get(l) || 0) + 1))
-      return x.filter((l) => { const n = c.get(l) || 0; if (n) { c.set(l, n - 1); return false } return true })
-    }
+    // 按行做多重集差(onlyIn 在文件头,serve.py 那组冻结与这里共读同一份)
     const gone = onlyIn(oldL, newL), added = onlyIn(newL, oldL)
     ok(gone.length === 4, '0.17.5 那版里只有 4 行没了(副标题 1 行 + chip 那 3 行)', JSON.stringify(gone).slice(0, 300))
     ok(gone.every((l) => /\.accme \{|<span class="sess">|var close = function|else host\.appendChild/.test(l)),
@@ -7695,6 +7755,120 @@ console.log('T80 换人不跳与 0.17.5 冻结对照')
     runGen(oldScripts, oa.kb); runGen(NEW_SCRIPTS, ob.kb)
     ok(ml(join(oa.kb, 'index.html')).join('\n') === ml(join(ob.kb, 'index.html')).join('\n'),
       '冻结③:acceptanceFeedback 关着的板 —— 归一化版本戳后与 0.17.5 逐字节相同')
+  }
+}
+
+// ============ T81 review 四条小修(0.17.9)============
+// 四条里有两条在别处已经有人盯着:block 保留换行那条与 0.17.7 的冻结对照一起改在 T77,
+// 名字下限与名册去重那两条落在 T78 的活服务里(③b / ⑧b)。这儿收的是另外两件:
+// committedCards 不再自己 spawn 一遍 gitq 已经做过的事,以及「没配口令的板逐响应零变化」。
+console.log('T81 review 四条小修(0.17.9)')
+{
+  // ---- ① committedCards 复用 gitq:同一件事不写第二遍 ----
+  {
+    const src = readFileSync(join(NEW_SCRIPTS, 'audits.mjs'), 'utf8')
+    ok(count(src, "spawnSync('git'") === 2,
+      "audits.mjs 里 spawnSync('git') 只剩两处:gitq 一处、逐段审计那只 git 助手一处",
+      String(count(src, "spawnSync('git'")))
+    ok(/gitq\(\['ls-tree'/.test(src) && !/spawnSync\('git', \['ls-tree'/.test(src),
+      "committedCards 的 ls-tree 走 gitq —— 「跑不通就是 null」的判据只有那一份")
+
+    const { makeCtx } = await import('../scripts/audits.mjs')
+    const withCards = (name) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      const cfgP = join(fx.kb, 'kanban.config.json')
+      const c = JSON.parse(readFileSync(cfgP, 'utf8'))
+      c.cardsDir = 'cards'
+      writeFileSync(cfgP, JSON.stringify(c, null, 2) + '\n')
+      mkdirSync(join(fx.kb, 'cards', 'backlog'), { recursive: true })
+      writeFileSync(join(fx.kb, 'cards', 'backlog', 'BL-1.json'), JSON.stringify({ id: 'BL-1' }) + '\n')
+      const g = (...a) => execFileSync('git', a, { cwd: fx.root })
+      g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+      return { ...fx, g }
+    }
+    // 还没有 HEAD:ls-tree 跑不通 → null(「这块板问不出提交了没」)
+    const fa = withCards('fx81a')
+    ok(makeCtx(fa.kb).committedCards() === null,
+      'git 仓还没有 HEAD:committedCards() 是 null —— gitq 跑不通就是 null')
+    // 有 HEAD、卡一张没提交:git 答得出来(答的是「一行都没有」)→ 空集,不是 null。
+    // 这一格正是「if (out)」与「if (out !== null)」的分水岭:空输出是个确切答案,不是问不出。
+    const fb = withCards('fx81b')
+    writeFileSync(join(fb.kb, 'other.txt'), 'x\n')
+    fb.g('add', 'app/kanban/other.txt'); fb.g('commit', '-q', '-m', 'init')
+    const setB = makeCtx(fb.kb).committedCards()
+    ok(setB instanceof Set && setB.size === 0,
+      '有 HEAD、卡一张没提交:空集而不是 null(每张卡都还是「刚立的」)', String(setB && setB.size))
+    // 卡进了 HEAD:键取路径末两段
+    const fc = withCards('fx81c')
+    fc.g('add', '-A'); fc.g('commit', '-q', '-m', 'init')
+    const setC = makeCtx(fc.kb).committedCards()
+    ok(setC instanceof Set && setC.has('backlog/BL-1.json'),
+      '卡文件进了 HEAD:键是 <sub>/<id>.json', JSON.stringify([...(setC || [])]).slice(0, 120))
+  }
+
+  // ---- ② acceptanceFeedback: true(没配口令)的板:逐响应与 0.17.8 只差时刻 ----
+  // 名册那条写口只在配了口令时存在,所以这一版对「true 的板」该是零行为差 —— 不是靠读代码
+  // 确信,是拿 0.17.8 的 templates/serve.py 另起一台服务,同一副盘面、同一串请求,两边逐条比。
+  const TAG8 = 'demo-driven-development--v0.17.8'
+  const have8 = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG8}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!HAS_PY3 || !have8) {
+    ok(true, `本机没有 python3 或 ${TAG8}(浅克隆 / 未取 tag),true 板的逐响应对照本次跳过`)
+  } else {
+    const mkBoard = (name, servePy) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      writeFileSync(join(fx.kb, 'acceptance-manifest.json'), JSON.stringify({
+        current: 277,
+        lists: [{
+          pr: 277, revision: 2, title: '通扫收口',
+          groups: [{ id: 'J', title: 'J 组', tip: '' }],
+          items: [{ id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' }],
+        }],
+      }, null, 2) + '\n')
+      const cfgP = join(fx.kb, 'kanban.config.json')
+      const c = JSON.parse(readFileSync(cfgP, 'utf8'))
+      c.acceptanceTab = true; c.acceptanceFeedback = true
+      writeFileSync(cfgP, JSON.stringify(c, null, 2) + '\n')
+      runGen(NEW_SCRIPTS, fx.kb) // 产物两边同一份(gen.mjs 本版一字不动)
+      cpSync(servePy, join(fx.kb, 'serve.py'))
+      return fx
+    }
+    const old8 = join(WORK, 'serve-0178.py')
+    writeFileSync(old8, execFileSync('git', ['show', `${TAG8}:templates/serve.py`], { cwd: REPO, encoding: 'utf8' }))
+    const bo = mkBoard('fx81m-old', old8), bn = mkBoard('fx81m-new', join(REPO, 'templates', 'serve.py'))
+    const so = await startServe(bo.kb), sn = await startServe(bn.kb)
+    try {
+      const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(64)])
+      // 时刻归一:账里那个 ts 与截图文件名里的时刻,两台服务本就不可能一模一样
+      const nots = (s) => String(s).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, '<TS>').replace(/\d{8}T\d{6}/g, '<TS>')
+      const probe = async (base) => {
+        const rows = []
+        const post = (route, body) => req(base, route,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        const add = (label, r) => rows.push([label, r.status, nots(r.text)])
+        add('GET index', await req(base, '/index.html'))
+        add('GET 名册', await req(base, '/acceptance-roster.json'))
+        add('who 正常', await post('/api/acceptance/who', { name: 'tester-a', pin: '1111' }))
+        add('who 单字', await post('/api/acceptance/who', { name: '甲', pin: '1111' }))
+        add('mark 正常', await post('/api/acceptance/mark', { pr: 277, item: 'JJ3', who: 'tester-a', verdict: 'ok' }))
+        add('mark 单字 who', await post('/api/acceptance/mark', { pr: 277, item: 'JJ3', who: '甲', verdict: 'ok' }))
+        add('mark 生面孔', await post('/api/acceptance/mark', { pr: 277, item: 'JJ3', who: '路人乙', verdict: 'bad' }))
+        add('mark who 空', await post('/api/acceptance/mark', { pr: 277, item: 'JJ3', who: '', verdict: 'ok' }))
+        add('mark pr 不在清单', await post('/api/acceptance/mark', { pr: 999, item: 'JJ3', who: 'tester-a', verdict: 'ok' }))
+        add('shot', await req(base, '/api/acceptance/shot?pr=277&item=JJ3&who=tester-a',
+          { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: JPG }))
+        add('别的 POST 路径', await req(base, '/api/nope', { method: 'POST', body: '{}' }))
+        return rows
+      }
+      const ro = await probe(so.base), rn = await probe(sn.base)
+      ok(JSON.stringify(ro) === JSON.stringify(rn),
+        '没配口令的板:11 条请求的状态码与正文(归一化时刻后)与 0.17.8 逐条相同 —— 名字下限那两条改的只是 who 那条写口,而它在这种板上根本不存在',
+        JSON.stringify(ro.filter((r, i) => JSON.stringify(r) !== JSON.stringify(rn[i])).map((r) => r[0])).slice(0, 300))
+      ok(nots(readFileSync(join(bo.kb, 'acceptance-feedback.jsonl'), 'utf8')) ===
+         nots(readFileSync(join(bn.kb, 'acceptance-feedback.jsonl'), 'utf8')),
+        '落盘那几行账也一样(归一化时刻后逐字节相同)')
+    } finally {
+      so.proc.kill('SIGKILL'); sn.proc.kill('SIGKILL')
+    }
   }
 }
 

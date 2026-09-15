@@ -161,7 +161,10 @@ const CTX = makeCtx(KANBAN)
 const AUDIT = collect(CTX, S, { branch: BRANCH, gen: GEN })
 // 阻断项(孤儿 demo / 新卡长正文):每项两副面孔 —— block 是拦下来时说的,warn 是同一次收工已经
 // 拦过一次时(stop_hook_active)降级放行说的。多项合成一条 reason,免得一次只报得出一个。
-const blocks = pickLevel(AUDIT, 'block').map((e) => ({ block: oneLine(e.text), warn: oneLine(e.warn) }))
+// v0.17.9:两副面孔各按各的去处排版 —— block 落在 decision.reason(喂给 Claude 的正文,不渲染成
+// 气泡),孤儿 demo 那种逐行清单压成「 · - a · - b」反而读不动,所以原样保留换行;只有进
+// systemMessage 的 warn 才归 oneLine 管(那儿一个换行 = 一个气泡)。
+const blocks = pickLevel(AUDIT, 'block').map((e) => ({ block: e.text, warn: oneLine(e.warn) }))
 const BROKEN = pickLevel(AUDIT, 'broken')
 // 非阻断通知。卡文件那几条先进去 —— gen 跑失败时要连它们一块喂回去,免得人一个一个试。
 const notices = BROKEN.filter((e) => CARD_FILE_KEYS.has(e.key)).map((e) => e.text)
