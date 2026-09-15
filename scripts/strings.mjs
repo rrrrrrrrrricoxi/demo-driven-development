@@ -391,6 +391,7 @@ const zh = {
     applyMergeDriver: '[apply] ± git config merge.ours.driver true(仓库本地)',
     // v0.17.0:反馈截图默认不进 git。init 只说这一行 —— 宿主的 .gitignore 是人的文件,不替人加行。
     planAccFbIgnore: '[plan] 提醒:config 开着 acceptanceFeedback,验收反馈截图默认不进 git —— 请自行在 .gitignore 加一行 `app/kanban/shots/acc-*`(要留证的图改名去掉 acc- 前缀,再挂进卡的 shots 字段)',
+    planAccFbPin: '[plan] 提醒:config 开着 acceptanceFeedback 但没配口令,今天谁都能在验收账上署任何名 —— 要的话在 kanban.config.json 里把它写成 `"acceptanceFeedback": { "pin": "1111" }`(4 位数字,新名字输一次即进 app/kanban/acceptance-roster.json;已在名册的人照旧不问)。init 不替你改这份文件',
     planServeStale: (have, want) => `[plan] 提醒:app/kanban/serve.py 是 ${have || '更早的版本'}(plugin 模板已是 ${want})—— 新写口(如 v0.17.0 的验收反馈)只在新版里。要升:先看自己有没有改过那份,没改就用 plugin templates/serve.py 覆盖并重启 serve`,
     planSettingsAdd: (items) =>
       `[plan] .claude/settings.json 将并入 permissions.deny(去重,不动其他键):\n${items.map((d) => `  + ${d}`).join('\n')}`,
@@ -848,6 +849,7 @@ kanban.config.json). This command never commits — git add the card files yours
     applyGitattr: (file, n) => `[apply] ± ${file} (appended ${n} line(s): generated board files marked as derived state)`,
     applyMergeDriver: '[apply] ± git config merge.ours.driver true (repository-local)',
     planAccFbIgnore: '[plan] Note: acceptanceFeedback is on in the config, and acceptance feedback shots stay out of git by default — add `app/kanban/shots/acc-*` to your .gitignore yourself (to keep one as evidence, rename it without the acc- prefix and put it in a card\'s shots field)',
+    planAccFbPin: '[plan] Note: acceptanceFeedback is on but no pin is configured, so anyone can sign the acceptance ledger under any name — to require one, write it as `"acceptanceFeedback": { "pin": "1111" }` in kanban.config.json (four digits; a new name is asked once and then joins app/kanban/acceptance-roster.json, while names already on the roster are never asked). init does not edit that file for you',
     planServeStale: (have, want) => `[plan] Note: app/kanban/serve.py is ${have || 'an earlier version'} while the plugin template is ${want} — the newer write endpoints (v0.17.0 acceptance feedback) only exist in the newer one. To upgrade: check whether you have edited your copy, and if not, overwrite it from the plugin's templates/serve.py and restart the server`,
     planSettingsAdd: (items) =>
       `[plan] .claude/settings.json will gain permissions.deny entries (deduped, other keys untouched):\n${items.map((d) => `  + ${d}`).join('\n')}`,
@@ -989,6 +991,7 @@ const genZh = {
   accManifestMissing: (err) => `kanban.config.json 开了 acceptanceTab,但看板目录的 acceptance-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/acceptance-manifest.json;不想开就把 acceptanceTab 去掉)`,
   relManifestMissing: (err) => `kanban.config.json 开了 releaseTab,但看板目录的 release-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/release-manifest.json,内容由 scripts/pr-sync.mjs 填;不想开就把 releaseTab 去掉)`,
   accFeedbackNeedsTab: () => 'kanban.config.json 开了 acceptanceFeedback,但没开 acceptanceTab —— 反馈是挂在验收行上的,没有验收 tab 就无处可挂,本次按关处理(要用就把 acceptanceTab 也设成 true)',
+  accFbBadPin: (v) => `kanban.config.json 的 acceptanceFeedback 写成了对象,但 pin 不是 4 位数字字符串:${v} —— 两种写法只有两种:true(不要口令,谁都能署名)或 { "pin": "1111" }(新名字要这 4 位才进验收名册)。不硬报错就得悄悄当「没配口令」,而那正是人以为配上了的那一档`,
   relStagesNoDev: () => 'release-manifest.json 的 stages 里没有 id 为 "dev" 的段:dev(开着的 PR)是必备段,宿主可以只列两段但不能省掉 dev(缺 test = 合了即发,是允许的)',
   cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json 配了 cardsDir = "${dir}"(一卡一文件),${file} 里却还留着 ${key} 数组 —— 两处都能写的字段迟早对不上。卡的真源是 ${dir}/ 下的文件,把头文件的 ${key} 删掉(或跑 scripts/cards-join.mjs 合回单文件并去掉 cardsDir)`,
   cardsDirMissing: (rel) => `kanban.config.json 配了 cardsDir,但卡目录 ${rel} 不在(相对看板目录)—— 建目录并把卡放进去,或把 cardsDir 去掉退回单文件形制`,
@@ -1029,6 +1032,7 @@ const genEn = {
   accManifestMissing: (err) => `kanban.config.json enables acceptanceTab, but the board's acceptance-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/acceptance-manifest.json; drop acceptanceTab to turn the tab off)`,
   relManifestMissing: (err) => `kanban.config.json enables releaseTab, but the board's release-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/release-manifest.json, filled in by scripts/pr-sync.mjs; drop releaseTab to turn the tab off)`,
   accFeedbackNeedsTab: () => 'kanban.config.json enables acceptanceFeedback but not acceptanceTab — shared feedback hangs off acceptance checklist rows, so with no acceptance tab there is nothing to hang it on. Treated as off for this run (set acceptanceTab to true as well to use it)',
+  accFbBadPin: (v) => `kanban.config.json writes acceptanceFeedback as an object, but its "pin" is not a 4-digit string: ${v} — there are exactly two shapes: true (no pin, anyone may sign) or { "pin": "1111" } (a new name needs those four digits to enter the acceptance roster). Anything else would have to be read as "no pin configured", which is precisely the case where someone believes one is`,
   relStagesNoDev: () => 'release-manifest.json has no stage with id "dev": dev (open pull requests) is required. A board may list only two stages, but not drop dev (dropping test — "merged means shipped" — is fine)',
   cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json sets cardsDir = "${dir}" (one file per card), yet ${file} still has a ${key} array — two writable places for the same field drift apart sooner or later. The cards live under ${dir}/; delete ${key} from the header file (or run scripts/cards-join.mjs to go back to single files and drop cardsDir)`,
   cardsDirMissing: (rel) => `kanban.config.json sets cardsDir, but the card directory ${rel} is not there (relative to the kanban directory) — create it and put the cards in, or drop cardsDir to stay on single-file manifests`,

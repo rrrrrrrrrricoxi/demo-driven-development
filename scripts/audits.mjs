@@ -23,6 +23,7 @@ import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } fro
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, daysBetween, localDate, scanCardDir } from './cards.mjs'
 import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
 import { GEN_RE, dirtyBoardFiles, genAttrPaths } from './board-branch-check.mjs'
+import { accFeedback } from './accfb.mjs'
 import { ACC_FB_PRUNE_DAYS, ACC_FB_PRUNE_MIN, prunable } from './acc-feedback-prune.mjs'
 
 /** 三份头文件 →(文件, 数组键, 卡目录子目录);cardsDir 开着时后两者的真源在卡目录 */
@@ -313,7 +314,7 @@ export function auditRichText(ctx, S) {
  */
 export function auditAccFeedback(ctx, S) {
   const out = []
-  if (ctx.cfg.acceptanceFeedback !== true) return out
+  if (!accFeedback(ctx.cfg).on) return out // v0.17.6:开关两种写法(true / { pin }),读法只有 accfb.mjs 一处
   const fbPath = join(ctx.dir, 'acceptance-feedback.jsonl')
   if (!existsSync(fbPath)) return out
   // (a) 未提交的新增行:git diff 认得已跟踪文件的增行;还没 add 过的整份文件全算新增

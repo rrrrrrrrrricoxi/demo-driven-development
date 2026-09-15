@@ -26,7 +26,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback`, `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -220,6 +220,50 @@ then the board says so where it happens, and it says which of the two it is: a
 sentence instead of the status code; a `ddd-serve v2` refuses only the retraction
 with a 400 about the `verdict` enum, and the row keeps the server's own sentence
 and appends the fix — overwrite `serve.py` from the plugin and restart.
+
+## Acceptance roster and pin (optional)
+
+With `acceptanceFeedback: true`, anyone who can open the board can sign the
+ledger under any name. On a trusted network that is not a security hole, but it
+is a discipline hole: the acceptance ledger is a record, and who gets to appear
+in it should be somebody's decision. Write the key as an object instead —
+
+```json
+"acceptanceFeedback": { "pin": "1111" }
+```
+
+— and the board grows a roster. `app/kanban/acceptance-roster.json` is a plain
+`{"names": […]}` file that lives in git; the ledger accepts only the names in
+it. Signing under a name already on the roster is unchanged — no pin, no extra
+click, and switching back to a name you used before never asks either. A name
+that is *not* on the roster gets one more box on the same line, four digits
+wide, labelled 新名字要口令: enter the pin and the name joins the roster, and
+whatever you had just clicked is recorded right after. A wrong pin leaves a grey
+口令不对 inside the right edge of that box and keeps it open; Esc cancels the
+whole signing. No dialog is ever raised.
+
+The pin is checked by the server, not the page: it is never baked into the
+generated HTML, and `POST /api/acceptance/who` (`{name, pin}`) is the only way
+into the roster. A wrong pin sleeps one second and answers 403 — no lockout, no
+counter, since the trust boundary is still the network and that second only
+blunts a slipped finger. With a pin configured, `mark` and `shot` answer 403 for
+any `who` outside the roster; with `acceptanceFeedback: true` those two behave
+exactly as they did in 0.17.0, the `who` endpoint answers 404, and the generated
+board carries not one byte of the roster code. The roster only grows: to remove
+somebody, edit the file and commit it, the same discipline as the ledger itself.
+Names are normalised the same way signatures are (control characters dropped,
+trimmed, cut to 20 code points), so the roster and the ledger always compare the
+same string. The pin must be a 4-digit string; any other shape is a hard error
+from both `gen` and `serve.py` rather than a silent fallback to "no pin", which
+is precisely the case where somebody believes one is set.
+
+Both sides need the newer pieces: the endpoint ships with `serve.py` version
+`# ddd-serve v4`, and the roster flow is baked by the 0.17.6 generator. A board
+whose `serve.py` is still older keeps working — the page cannot fetch a roster,
+so it never asks for a pin, exactly as before — and `kanban-init` prints a line
+when yours is behind. The pin lives in git next to the board; it is a doorbell,
+not a secret, and anything that needs to be a real secret needs a different
+design.
 
 ## Release progress (optional)
 

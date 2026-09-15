@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ddd-serve v3
+# ddd-serve v4
 # 看板静态服(零依赖,no-cache,线程化 + gzip)。
 #
 #   用法:  python3 app/kanban/serve.py [PORT]
@@ -25,6 +25,13 @@
 #
 # v0.17.1 判定即勾选:verdict 枚举多一个 "none"(撤回判定)—— 撤回不是删行,是再追加一条,
 #   两条都留着。账只增不删这条口径没变,别的校验、跨站门、截图规则一个字没动。
+#
+# v0.17.6 名册与口令(只在 acceptanceFeedback 写成 {"pin": "1111"} 时存在):
+#   谁能在验收账上出现,应该有人点头。名册是 acceptance-roster.json(进 git),往里加人要那 4 位口令:
+#   第三个写口 /api/acceptance/who 收 {name, pin} —— 口令对就把归一后的名字并进名册并回整份名册,
+#   不对就 sleep 1s 再 403(不锁、不计数:信任边界仍在网络层,这一秒只防手滑连点)。
+#   配了口令之后,mark 与 shot 只收名册里的名字(否则 403);没配口令(acceptanceFeedback: true)时
+#   who 口 404、mark/shot 照 v3 收任何名字 —— 老宿主零差异。
 
 import functools
 import gzip
@@ -47,9 +54,12 @@ COMPRESSIBLE = {".html", ".htm", ".css", ".js", ".json", ".jsonl", ".svg", ".md"
 
 # ---- 验收反馈共享(opt-in)----
 FEEDBACK_FILE = os.path.join(ROOT, "acceptance-feedback.jsonl")
+ROSTER_FILE = os.path.join(ROOT, "acceptance-roster.json")
 SHOTS_DIR = os.path.join(ROOT, "shots")
 MARK_ROUTE = "/api/acceptance/mark"
 SHOT_ROUTE = "/api/acceptance/shot"
+WHO_ROUTE = "/api/acceptance/who"
+PIN_RE = re.compile(r"^[0-9]{4}$")
 MAX_SHOT = 2 * 1024 * 1024  # 客户端已按长边 1280 / JPEG 0.8 压过,2 MB 是兜底不是目标
 MAX_MARK = 64 * 1024
 # 超限的请求体也照读照扔(至多这么多):不读完就答,客户端还在发,它看到的是断管不是那句 400
@@ -63,13 +73,63 @@ IMAGE_TYPES = {
 }
 
 
-def feedback_on():
-    """每次请求现读 config —— 开关拨一下不必重启服务;读不到 = 关。"""
+class BadConfig(Exception):
+    """config 里的 acceptanceFeedback 写坏了 → 500 + 一句说清(悄悄当没配 = 谁都能署名)。"""
+
+
+def feedback_cfg():
+    """每次请求现读 config —— 开关拨一下不必重启服务;读不到 = 关。
+
+    两种写法(与 plugin scripts/accfb.mjs 同一套规则,那边是 JS 这边是 Python):
+      true              → (True, "")     不要口令,v0.17.0 起的行为
+      {"pin": "1111"}   → (True, "1111") 新名字进名册要这 4 位
+    写成对象但 pin 不是 4 位数字串 → BadConfig(不猜、不退化成「没口令」)。
+    """
     try:
         with open(os.path.join(ROOT, "kanban.config.json"), "rb") as f:
-            return json.load(f).get("acceptanceFeedback") is True
+            v = json.load(f).get("acceptanceFeedback")
     except (OSError, ValueError):
-        return False
+        return (False, "")
+    if v is True:
+        return (True, "")
+    if isinstance(v, dict):
+        pin = v.get("pin")
+        if not isinstance(pin, str) or not PIN_RE.match(pin):
+            raise BadConfig(
+                "kanban.config.json 的 acceptanceFeedback.pin 必须是 4 位数字字符串(如 \"1111\"),"
+                "现在是 %s —— 两种写法只有两种:true(不要口令)或 { \"pin\": \"1111\" }" % json.dumps(pin, ensure_ascii=False))
+        return (True, pin)
+    return (False, "")
+
+
+def norm_who(v):
+    """名字归一:清控制字符、去首尾空白、按码点切 20(与页面上那只 fbWhoNorm 同一套)。"""
+    s = "" if v is None else str(v)
+    s = "".join(c for c in s if not (ord(c) < 32 or ord(c) == 127))
+    return s.strip()[:WHO_MAX]  # Python 的 str 本来就按码点索引,切不出半个 emoji
+
+
+def roster_names():
+    """名册里的名字(缺席 / 坏 JSON = 空名册)。"""
+    try:
+        with open(ROSTER_FILE, "rb") as f:
+            o = json.load(f)
+    except (OSError, ValueError):
+        return []
+    names = o.get("names") if isinstance(o, dict) else None
+    return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
+
+
+def roster_write(names):
+    """整份重写(名册是一份 JSON,不像账那样只追加):先写临时文件再 rename —— 半截名册不会露出来。
+
+    ponytail:读—改—写之间没有锁,两个人同一秒加名字理论上会掉一个。加名字是一辈子一次的动作,
+    现在按这个量级不值得上锁;真要上,给 ROSTER_FILE 配一把 O_EXCL 的锁文件即可。
+    """
+    body = (json.dumps({"names": names}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    tmp = ROSTER_FILE + ".tmp"
+    write_fd(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644), body)
+    os.replace(tmp, ROSTER_FILE)
 
 
 def acc_lists():
@@ -139,6 +199,10 @@ class Rejected(Exception):
     """校验失败 → 400 + 一句原因(不吞错,页面上直接显示这句)。"""
 
 
+class Denied(Exception):
+    """这一笔本身合格,但这个人没这个份 → 403(口令不对 / 名字未在名册)。"""
+
+
 def check_wellformed(s, label):
     """人写的那两段字(who / note)编不编得成 UTF-8。
 
@@ -184,20 +248,31 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
-    # ---- 验收反馈共享:两个只追加的写口(acceptanceFeedback 关着时不存在)----
+    # ---- 验收反馈共享:三个写口(acceptanceFeedback 关着时不存在;who 还要配了口令才存在)----
     def do_POST(self):
         route = urlsplit(self.path).path
-        if route not in (MARK_ROUTE, SHOT_ROUTE):
+        if route not in (MARK_ROUTE, SHOT_ROUTE, WHO_ROUTE):
             return self.send_error(501, "Unsupported method ('POST')")  # 与没有 do_POST 时同一句
-        if not feedback_on():
+        try:
+            on, pin = feedback_cfg()
+        except BadConfig as e:
+            return self.reply_json(500, {"error": str(e)})
+        if not on:
             return self.reply_json(404, {"error": "acceptanceFeedback 未开(kanban.config.json)"})
         bad = self.cross_site()
         if bad:
             return self.reply_json(403, {"error": bad})
+        if route == WHO_ROUTE and not pin:  # 没配口令 = 没有名册这套机制,这条路压根不存在
+            return self.reply_json(404, {"error": "这块板没配验收口令(kanban.config.json 的 acceptanceFeedback.pin)"})
         try:
-            body = self.post_mark() if route == MARK_ROUTE else self.post_shot()
+            if route == WHO_ROUTE:
+                body = self.post_who(pin)
+            else:
+                body = self.post_mark(pin) if route == MARK_ROUTE else self.post_shot(pin)
         except Rejected as e:
             return self.reply_json(400, {"error": str(e)})
+        except Denied as e:
+            return self.reply_json(403, {"error": str(e)})
         except (OSError, UnicodeError) as e:  # 落盘失败 / 编不出字节:都不吞,页面上要看得见
             return self.reply_json(500, {"error": "写入失败:%s" % e})
         self.reply_json(200, body)
@@ -243,7 +318,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         return self.rfile.read(n)
 
     @staticmethod
-    def check_target(pr, item, who):
+    def check_target(pr, item, who, pin):
         """三个必填字段的校验;返回规整后的 (pr, item, who, 清单 revision)。"""
         lists = acc_lists()
         try:
@@ -262,9 +337,38 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         if any(ord(c) < 32 or ord(c) == 127 for c in who):
             raise Rejected("who 含控制字符")
         check_wellformed(who, "who")
+        # 配了口令的板:账上只认名册里的名字。名字进名册走 /api/acceptance/who(要口令),
+        # 这里不归一化再比 —— 名册存的就是页面归一后的那个串,比不上就是没进过名册
+        if pin and who not in roster_names():
+            raise Denied("「%s」未在名册 —— 先在署名那格输一次口令,把名字加进 acceptance-roster.json" % who)
         return pr, item, who, rev
 
-    def post_mark(self):
+    def post_who(self, pin):
+        """名字进名册(v0.17.6):口令对才收,收下即回整份名册。名册只加不删 —— 删名改文件再提交。"""
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":  # 与 mark 同一条理由:simple type 不走预检,跨站一行 fetch 就能加人
+            raise Rejected("Content-Type 只收 application/json")
+        try:
+            data = json.loads(self.read_body(MAX_MARK).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise Rejected("请求体不是合法 JSON")
+        if not isinstance(data, dict):
+            raise Rejected("请求体不是 JSON 对象")
+        name = norm_who(data.get("name"))
+        if not 1 <= len(name) <= WHO_MAX:
+            raise Rejected("name 需 1–%d 字" % WHO_MAX)
+        check_wellformed(name, "name")
+        got = data.get("pin")
+        if not isinstance(got, str) or got != pin:
+            time.sleep(1)  # 不锁、不计数、不记账:这一秒只防手滑连点(见文件头 v0.17.6 那段)
+            raise Denied("口令不对")
+        names = roster_names()
+        if name not in names:  # 去重:同一个人第二次输口令不会在名册里留两行
+            names.append(name)
+            roster_write(names)
+        return {"names": names}
+
+    def post_mark(self, pin):
         # 认死 application/json:text/plain 那几个是 CORS simple type,浏览器发它们不走预检,
         # 跨站的一行 fetch 就能落一条署他人名的验收结论。要 application/json 就得先过预检,
         # 而这台服务对 OPTIONS 答 501 —— 跨站那条路到此为止(shot 口本来就靠 image/* 走这条理)。
@@ -277,7 +381,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             raise Rejected("请求体不是合法 JSON")
         if not isinstance(data, dict):
             raise Rejected("请求体不是 JSON 对象")
-        pr, item, who, rev = self.check_target(data.get("pr"), data.get("item"), data.get("who"))
+        pr, item, who, rev = self.check_target(data.get("pr"), data.get("item"), data.get("who"), pin)
         verdict = data.get("verdict")
         if verdict is None:
             verdict = ""
@@ -313,10 +417,10 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         append_line(FEEDBACK_FILE, line)
         return line  # 返回写入的那一行,页面直接并进本地视图
 
-    def post_shot(self):
+    def post_shot(self, pin):
         q = parse_qs(urlsplit(self.path).query)
         pick = lambda k: (q.get(k) or [None])[0]
-        pr, item, _who, _rev = self.check_target(pick("pr"), pick("item"), pick("who"))
+        pr, item, _who, _rev = self.check_target(pick("pr"), pick("item"), pick("who"), pin)
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype not in IMAGE_TYPES:
             raise Rejected("Content-Type 只收 image/jpeg 与 image/png")
@@ -347,8 +451,15 @@ def main():
     with ThreadingServer(("0.0.0.0", PORT), handler) as httpd:
         # 端口取真正绑上的那个:传 0 时由内核分配,横竖要打印得出来才连得上
         port = httpd.server_address[1]
-        fb = ",反馈写口" if feedback_on() else ""
+        warn = ""
+        try:
+            on, pin = feedback_cfg()
+            fb = (",反馈写口" + ("+口令" if pin else "")) if on else ""
+        except BadConfig as e:  # 起得来、板照看,但写口会一路 500 —— 把原因先说在这儿
+            fb, warn = "", f"⚠ {e}"
         print(f"看板 → http://0.0.0.0:{port}/  (root={ROOT}, no-cache, gzip, threaded{fb})", flush=True)
+        if warn:
+            print(warn, flush=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
