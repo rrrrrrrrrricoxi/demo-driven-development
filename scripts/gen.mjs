@@ -2740,19 +2740,21 @@ const accCurHtml = (() => {
   </section>`
 })()
 
+// v0.17.6:验收 tab 标题下那行副标题,反馈开着时说人话 —— 原来那句把清单文件名、revision、
+// serve.py 三个开发词汇摆给用户看,而用户要知道的只有两件事:这些字别人看得见、清单改版旧判定作废。
+// 出处(文件在哪、怎么改 revision)归 README,不占用户那一行。关着的那档一个字不动(它本来就只说勾选)。
 // 身份芯片(反馈共享开着时):「我是 甲 · 换人」。名字存这台浏览器,gen 期一个字都不知道。
 // v0.17.3:常显,未署名时烤的就是「未署名 · 署名」—— 署名得在动手之前就能被看见、被点到,
 // 而不是等第一次点 ✓ 才由一句话冒出来问。
 const ACC_ME_CHIP = !AFB ? '' : `
     <span class="accme" data-accme><span class="accmen">未署名</span><button type="button" class="accmeb" data-accwho>署名</button></span>`
-const ACC_FB_SESS = !AFB ? '' : ' · 判定(✓/✕)、备注与截图经本机的 <code>serve.py</code> 共享给同看板的人'
 // 无写口时那一行灰字(运行期才知道有没有写口,所以烤成 hidden,降级时才亮)
 const ACC_DEG = !AFB ? '' : `
   <p class="accdeg" data-accdeg hidden>这台看板没有写口,判定只存在这台浏览器里 —— 要两人互见,请经 <code>serve.py</code>(0.17.0 起)打开。</p>`
 const acceptancePane = !ACC ? '' : `
   <div class="topbar">
     <h1>${esc(BRAND)} · 验收</h1>
-    <span class="sess">清单源 <code>acceptance-manifest.json</code> · ${!AFB ? '勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定存 <code>acceptance-feedback.jsonl</code>(改 <code>revision</code> 即作废旧账)'}${ACC_FB_SESS}</span>${ACC_ME_CHIP}
+    <span class="sess">${!AFB ? '清单源 <code>acceptance-manifest.json</code> · 勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废'}</span>${ACC_ME_CHIP}
   </div>${ACC_DEG}${accCurHtml}${ACC_CUR ? accListHtml(ACC_CUR) : ''}${accQueueLists.length ? `
   <details class="accfold"><summary>排队中 <span class="mut">${accQueueLists.length} 份清单</span></summary>${accQueueLists.map(accListHtml).join('')}
   </details>` : ''}${accDoneLists.length ? `

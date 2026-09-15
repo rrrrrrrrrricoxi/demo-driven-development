@@ -7312,6 +7312,63 @@ console.log('T78 验收名册与口令')
   }
 }
 
+// ============ T79 验收 tab 副标题说人话(0.17.6 两处小修之一)============
+// 病例:标题下那行原来是「清单源 acceptance-manifest.json · 判定存 acceptance-feedback.jsonl
+// (改 revision 即作废旧账)· 判定(✓/✕)、备注与截图经本机的 serve.py 共享给同看板的人」——
+// 三个开发词汇(文件名 / revision / serve.py)摆给用户看,而用户要知道的只有两件事。
+console.log('T79 验收副标题说人话')
+{
+  const fx79 = mkFixture('fx79', { 's.html': demoHtml('s') })
+  const kb = fx79.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  wr(join(kb, 'acceptance-manifest.json'), {
+    current: 277,
+    lists: [{
+      pr: 277, revision: 2, title: '通扫收口',
+      groups: [{ id: 'J', title: 'J 组', tip: '' }],
+      items: [{ id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' }],
+    }],
+  })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const off = readFileSync(idxP, 'utf8')
+  // 验收 pane 的标题下那一行 = 「… · 验收</h1>」之后第一只 .sess
+  const sub = (html) => {
+    const at = html.indexOf('· 验收</h1>')
+    const m = at < 0 ? null : /<span class="sess">([\s\S]*?)<\/span>/.exec(html.slice(at))
+    return m ? m[1] : ''
+  }
+  ok(sub(off).includes('清单源 <code>acceptance-manifest.json</code>') && sub(off).includes('勾选存这台浏览器'),
+    '只开验收 tab(没开反馈共享)那一档:副标题一个字都没动 —— 这一版只修反馈开着的那句', sub(off).slice(0, 120))
+
+  cfg.acceptanceFeedback = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const on = readFileSync(idxP, 'utf8')
+  const s1 = sub(on)
+  ok(s1 === '判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废',
+    '反馈开着:副标题就是这一句人话(两件事,一个开发词汇都不带)', s1)
+  for (const word of ['acceptance-manifest.json', 'acceptance-feedback.jsonl', 'revision', 'serve.py', '<code>']) {
+    ok(!s1.includes(word), `副标题里不出现「${word}」—— 出处归 README,不占用户那一行`)
+  }
+  ok(!on.includes('判定(✓/✕)、备注与截图经本机的') && !on.includes('判定存 <code>acceptance-feedback.jsonl</code>'),
+    '旧那两截(serve.py 那句 + 判定存 jsonl 那句)全页一个字都不剩')
+
+  // 配了口令的板走同一句(副标题与口令无关,两种写法一个样)
+  cfg.acceptanceFeedback = { pin: '1111' }
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sub(readFileSync(idxP, 'utf8')) === s1, '配了口令的板:同一句(副标题与口令无关)')
+
+  // 页底那行出处(<code>gen.mjs</code> 生成自 …)照旧在 —— 开发词汇没有被删掉,只是搬离了用户那一行
+  ok(readFileSync(idxP, 'utf8').includes('<p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code>'),
+    '页底那行出处照旧:文件名不是不能说,是不该摆在标题下第一行')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })
