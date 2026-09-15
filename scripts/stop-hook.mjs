@@ -120,7 +120,7 @@ function newerInstall(minVer, selfVer) {
       env: { ...process.env, DDD_HOOK_FORWARDED: to.version },
     })
     if (!r.error) { // 起不来(node 没了 / 权限)才当没转发过,退回下面的旧行为
-      const note = S.hookForwarded(to.version, MY_VER, STAMP)
+      const note = S.hookForwarded(to.version, MY_VER)
       const code = r.status ?? 0
       if (r.stderr) process.stderr.write(r.stderr)
       let payload = null
@@ -220,7 +220,7 @@ if (existsSync(GEN)) {
 // 家务那一行永远排最后 —— 它是索引不是内容,压在全文前面会把真坏了的那几条挤下去。
 for (const e of BROKEN) if (!CARD_FILE_KEYS.has(e.key)) notices.push(e.text)
 {
-  const line = choreLine(AUDIT, S, auditCmd(SELF_DIR))
+  const line = choreLine(AUDIT, S, auditCmd())
   if (line) notices.push(line)
 }
 

@@ -49,7 +49,7 @@
 //   转发那行说清去了哪一版 / DDD_HOOK_FORWARDED 刹得住真递归 / 装的比产物旧·version 非数字·
 //   projectPath 不是这个项目·读不到安装表 各自退回今天的拒降级 / 产物不比我新时根本不查表)、
 // 收工提醒分级压成一行(0.17.5:八类家务各自单独触发 → 那一行里只有它一格 / 八类同时 → 次序与
-//   分隔符固定、只有未提交反馈带 PR 号、<plugin> 路径填实 / audit 与守卫共读同一份结果(同一块板
+//   分隔符固定、只有未提交反馈带 PR 号、结尾不带路径 / audit 与守卫共读同一份结果(同一块板
 //   两边数字逐格相等)/ --line 按 session 过滤而依赖图不跟着缩 / --json 形状 / audit 只读 /
 //   阻断与坏了两级、家务全零时的守卫 stdout 与产物都与 0.17.4 逐字节相同)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -1381,8 +1381,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
     '一行到底:不报字数,也不铺逐卡清单(v0.15.7)', a1.stdout.slice(0, 260))
   ok(/⚠ 看板守卫:1 张卡的正文字段超过 800 字/.test(a1.stdout),
     '非阻断通知带 ⚠ 前缀(与其它 notice 同一形制;阻断的那几条才不带)', a1.stdout.slice(0, 260))
-  ok(/^\{"systemMessage":"看板守卫:长正文 1 —— 详情 node .*\/scripts\/ddd\.mjs audit"\}$/.test(g1.stdout.trim()),
-    'v0.17.5:守卫那头只剩一行「长正文 1」,路径填实(全文归 ddd audit)', g1.stdout.slice(0, 260))
+  ok(/^\{"systemMessage":"看板守卫:长正文 1 —— 详情 ddd audit"\}$/.test(g1.stdout.trim()),
+    'v0.17.6:守卫那头只剩一行「长正文 1」,结尾只写 ddd audit(全文归 ddd audit)', g1.stdout.slice(0, 260))
 
   // ---- 终态卡不点名(v0.15.6,TERMINAL 与 settle.mjs 同一份口径)----
   bl.items.push({ id: 'BL-9', status: 'done', priority: Object.keys(bl.priorities)[0], tier: '1', title: 'e',
@@ -5328,7 +5328,9 @@ console.log('T72 守卫转发到更新的安装')
   const m1 = (() => { try { return JSON.parse(r1.stdout || '{}').systemMessage || '' } catch { return 'NOT-JSON:' + r1.stdout } })()
   ok(r1.status === 0 && /MARKER-99/.test(m1), '产物 99.9.9 + 本机装着 99.9.9 → 整个 hook 转发过去,新版的 stdout 原样带回',
     `${r1.status} ${(r1.stdout || '').slice(0, 300)}`)
-  ok(m1.startsWith('看板守卫已转发到已安装的 v99.9.9'), '输出里说了一行「已转发到已安装的 v99.9.9」——不说,人只会以为守卫串了味', m1.slice(0, 120))
+  ok(m1.split('\n')[0] === `守卫已转发到 v99.9.9(本 session 绑 v${MY_VER};不必重启)`,
+    'v0.17.6:转发那句缩成一行「守卫已转发到 v99.9.9(本 session 绑 vX;不必重启)」——不说,人只会以为守卫串了味', m1.slice(0, 160))
+  ok(!/看板产物已是|下面这段是新版守卫的输出/.test(m1), 'v0.17.6:第三个版本号与那半句解释都去了(每次收工都印,只留有人看的两个数)', m1.slice(0, 160))
   ok(/fwd=99\.9\.9/.test(m1), '子进程拿到 DDD_HOOK_FORWARDED(它再遇到同样的局面就不会二次转发)', m1.slice(0, 200))
   ok(/stdin=\{\}/.test(m1), 'stdin 原样交过去(不重新序列化,免得丢掉本版不认识的字段)', m1.slice(0, 200))
   ok(m1.includes(`cwd=${process.cwd()}`), 'cwd 也照原样(转发的是整个 hook,不是只把 gen 换个版本跑)', m1.slice(0, 200))
@@ -6342,8 +6344,8 @@ console.log('T70 英文串表')
   const aud = runAudit(kb).stdout // v0.17.5:这几段全文归 audit,守卫那头只剩一行计数
   ok(/Kanban guard/.test(aud) && /Prerequisites cleared/.test(aud) && /On settle hold/.test(aud) && /prose field over 800/.test(aud),
     '这一批 0.15.x/0.16.x 新键真被调用了一遍(前置已清 / 挂账到期 / 长正文 / 积压)', aud.slice(0, 400))
-  ok(/^Kanban guard: long prose 1 · to settle 1 · holds due 1 · prerequisites cleared 1 · backlog \d+\/0 — details: node .*ddd\.mjs audit$/.test(msg),
-    'v0.17.5:en 板上那一行也是 en 文案,次序与 zh 同一张 CHORE_KEYS', msg.slice(0, 300))
+  ok(/^Kanban guard: long prose 1 · to settle 1 · holds due 1 · prerequisites cleared 1 · backlog \d+\/0 — details: ddd audit$/.test(msg),
+    'v0.17.6:en 板上那一行也是 en 文案,次序与 zh 同一张 CHORE_KEYS,结尾同样不带路径', msg.slice(0, 300))
   ok(!/[\u4e00-\u9fff]/.test(msg) && !/[\u4e00-\u9fff]/.test(aud),
     'en 板上的守卫通知与 audit 全文里一个中文字都不该有', ((msg + aud).match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
 }
@@ -6819,6 +6821,10 @@ console.log('T77 收工提醒分级压成一行')
   // 八个词按 CHORE_KEYS 的次序摆 —— 下面「只出现该类」与「次序固定」两组断言共读这一张表
   const WORDS = ['长正文', '未提交反馈', '可清截图', '待收账', '收早了', '挂账到期', '前置已清', '积压']
   const hit = (line) => WORDS.filter((w) => line.includes(w))
+  // 0.17.6:那一行每次收工都印,结尾只写 `ddd audit` —— 既不许出现 /scripts/ddd.mjs,
+  // 也不许出现任何以 / 打头的绝对路径(手机上一条绝对路径就占掉四行)
+  const noPath = (line) =>
+    line.endsWith(' —— 详情 ddd audit') && !line.includes('/scripts/ddd.mjs') && !/(^|\s)\//.test(line)
   const relOf = (prs) => ({ stages: REL_MANIFEST.stages, releases: [], prs, syncedAt: null })
 
   /** 一块只摆了指定家务的板;没点到的档一律不触发(零命中的类别不该出现在那一行里) */
@@ -6889,8 +6895,9 @@ console.log('T77 收工提醒分级压成一行')
     for (const [word, cell, fx] of only) {
       const g = runStop(NEW_SCRIPTS, fx.root)
       const line = lineOf(g)
-      ok(g.status === 0 && line === `看板守卫:${cell} —— 详情 node ${join(NEW_SCRIPTS, 'ddd.mjs')} audit`,
-        `只有「${word}」时,那一行只有这一格,且 <plugin> 路径填实`, JSON.stringify([line, msgOf(g).slice(0, 200)]))
+      ok(g.status === 0 && line === `看板守卫:${cell} —— 详情 ddd audit`,
+        `只有「${word}」时,那一行只有这一格,结尾就是 ddd audit`, JSON.stringify([line, msgOf(g).slice(0, 200)]))
+      ok(noPath(line), `那一行结尾是 ddd audit,不带 /scripts/ddd.mjs 也不带绝对路径(${word})`, JSON.stringify(line))
       ok(hit(line).join(',') === word, `零的七类一个字都不出(${word})`, hit(line).join(','))
       ok(runAudit(fx.kb).stdout.includes('家务(1):'), `audit 那头把它算在家务一级(${word})`)
     }
@@ -6915,8 +6922,9 @@ console.log('T77 收工提醒分级压成一行')
     })
     const g = runStop(NEW_SCRIPTS, fx.root)
     const line = lineOf(g)
-    ok(line === `看板守卫:长正文 1 · 未提交反馈 3(#277) · 可清截图 10 · 待收账 1 · 收早了 1 · 挂账到期 1 · 前置已清 1 · 积压 4/0 —— 详情 node ${join(NEW_SCRIPTS, 'ddd.mjs')} audit`,
+    ok(line === '看板守卫:长正文 1 · 未提交反馈 3(#277) · 可清截图 10 · 待收账 1 · 收早了 1 · 挂账到期 1 · 前置已清 1 · 积压 4/0 —— 详情 ddd audit',
       '八类同时命中:一行到底,次序照 CHORE_KEYS、分隔符恒是 ` · `,只有未提交反馈带 PR 号', JSON.stringify(line))
+    ok(noPath(line), '八类都在时那一行也不带路径(积压那格的 4/0 不算路径)', JSON.stringify(line))
     ok(msgOf(g).split('\n').length === 1, '家务那八段在守卫这头合计只占一行(0.17.4 是八段)', JSON.stringify(msgOf(g).slice(0, 200)))
     // 同一块板两头对账:audit --json 的每一格数字与那一行里的数逐个相等
     const j = JSON.parse(runAudit(fx.kb, ['--json']).stdout)

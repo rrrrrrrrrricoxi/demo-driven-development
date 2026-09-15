@@ -99,6 +99,16 @@ the same discipline the ledger itself follows.
   Python. A `pin` that is not a 4-digit string is a hard error from both `gen`
   and the write endpoints rather than a quiet fallback to "no pin" — which is
   precisely the case where somebody believes one is set.
+- **The two lines the Stop guard prints on every wrap-up lost their paths.** The
+  chore line from 0.17.5 ends at `—— 详情 ddd audit` (`— details: ddd audit`)
+  with no install path in it. 0.17.5 filled the guard's own absolute path in;
+  on a phone that wrapped to four lines, every Stop, for a command whose
+  location is already documented here and in the board section of a project's
+  `CLAUDE.md`. And the forwarding notice from 0.16.2 — three version numbers and
+  a sentence explaining that what followed came from a newer guard — is now one
+  line: `守卫已转发到 vX(本 session 绑 vY;不必重启)`. Both languages changed,
+  and the tests assert the chore line ends at `ddd audit` and carries no
+  absolute path anywhere in it.
 
 ### Frozen
 - A board with `acceptanceFeedback: true` gets the two fixes above and nothing
