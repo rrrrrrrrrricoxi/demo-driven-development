@@ -9,6 +9,32 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.11] - 2026-09-16
+
+### The count of what can be started is always reported
+
+`可立即做 N 张超上限 M` only appeared once the ready count was already over
+`config.wip.hard`. The one number people steer the backlog by was therefore
+missing at exactly the moment there was still room to take work on: it spoke
+only when it was too late to act on it. It is now a standing item, always last.
+
+### Changed
+- **`auditWip` produces one entry on every board that sets `config.wip`.** Under
+  the limit it reads `可立即做 N/M`; over it, `可立即做 N/M 超上限`. Either way,
+  `(另 K 张等前置)` follows when some `ready` cards are still waiting on an
+  `after`. The header count (`N 条提醒`) includes it, and since `wip` is last in
+  `CHORE_KEYS` the item is always last on the line — when the other seven chores
+  are empty, the notice is the header plus this one item. `ddd audit`'s full text
+  and `--json` carry it on the same terms, `--json` still with `n`, `hard` and
+  `waiting`. A board with no `config.wip` says nothing about it, byte for byte as
+  before.
+- **`gen`'s closing line measures with the guard's ruler.** It counted every
+  `ready` card as startable, so the same board at the same moment reported two
+  different numbers, one from `gen` and one from the guard. It now counts `ready`
+  cards whose prerequisites are cleared and reports the rest separately:
+  `backlog 21 条(可立即做 20(另 1 等前置) / …)`. Only that one `console.log`
+  changed — the generated board is byte-identical.
+
 ## [0.17.10] - 2026-09-16
 
 ### One pull request, one head

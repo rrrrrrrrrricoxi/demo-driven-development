@@ -1855,7 +1855,7 @@ console.log('T40 积压提醒 wip')
     const ra = runAudit(fx40.kb)
     ok(r.status === 0, '积压审计不阻断收工(exit 0)', `${r.status} ${r.stderr.slice(0, 200)}`)
     ok(ra.stdout.includes('ready)的卡有 3 张') && ra.stdout.includes('config.wip.hard = 2'), '守卫点名 ready 数与 hard 阈值')
-    ok(/可立即做 3 张超上限 2/.test(r.stdout), 'v0.17.8:积压那一条是人话:可立即做几张、上限是几', r.stdout.slice(0, 200))
+    ok(/可立即做 3\/2 超上限/.test(r.stdout), 'v0.17.11:积压那一条写成「可立即做 N/上限」,超了才多两个字', r.stdout.slice(0, 200))
   }
   { // 线别/时间筛选下横幅要给两个数:当前筛选可见数 + 全板数(守卫那条 notice 用的正是全板数)
     const { html } = gen({ soft: 1, hard: 9 })
@@ -1868,11 +1868,16 @@ console.log('T40 积压提醒 wip')
     ok(run(2, 'hard', {}) === '可做的卡 2 张(全板 3) · 超过 9 —— 先清一些再立新卡', '红档同样两个数')
     ok(run(3, '', {}) === '', '没超阈值仍是空串(横幅自己 hidden)')
   }
-  { // 没超 hard 就不该有 notice
+  { // 没超 hard 也照报一个数(v0.17.11 改口:原来它只在超线时出声,不超线就整条消失)
     gen({ soft: 1, hard: 9 })
     touch(join(fx40.kb, 'index.html'))
     const r = runStop(NEW_SCRIPTS, fx40.root)
-    ok(!r.stdout.includes('config.wip.hard'), '没超 hard:守卫一声不吭')
+    ok(/可立即做 3\/9/.test(r.stdout) && !r.stdout.includes('超上限'),
+      'v0.17.11:没超 hard 照样报「可立即做 3/9」,只是不带「超上限」', r.stdout.slice(0, 300))
+    ok(!r.stdout.includes('config.wip.hard'), '守卫那一条照旧不露配置键名 —— 那是 ddd audit 全文的事')
+    const raU = runAudit(fx40.kb).stdout
+    ok(raU.includes('可立即做(ready)的卡有 3 张,上限 config.wip.hard = 9') && raU.includes('还没到线'),
+      '没超线那条的 audit 全文:只陈述数与上限,不劝人先清一批', raU.slice(0, 300))
   }
   // 撤掉 wip → 回冻结基线
   delete cfg.wip
@@ -6448,12 +6453,13 @@ console.log('T70 英文串表')
     ' · every pull request merged, card not settled BL-2',
     ' · on settle hold for 14 days BL-3',
     ' · prerequisites cleared, ready to start BL-4',
-    ' · \\d+ card\\(s\\) can start now, over the limit of 0',
+    ' · can start now \\d+/0 over the limit',
   ].join('') + '$').test(msg),
     'v0.17.8:en 板那一条也是一条无换行的 en 人话(不是键名),次序与 zh 同一张 CHORE_KEYS', msg.slice(0, 400))
   ok(!msg.includes('\n'), 'v0.17.8:en 板那一条同样整条无换行 —— 一个换行就是一个 Stop says 气泡', JSON.stringify(msg))
   ok(!/\bchores?\b/i.test(msg), 'v0.17.8:en 板的头里也不出现 chore —— 那是内部分级名,不露给用户', msg.slice(0, 200))
-  ok(!msg.includes('/') && !msg.includes('node '), 'en 板那一条同样不带路径、不带命令', msg.slice(0, 300))
+  ok(!msg.replace(/\d+\/\d+/g, '').includes('/') && !msg.includes('node '),
+    'en 板那一条同样不带路径、不带命令(v0.17.11 起积压那条里的「N/上限」是数不是路径)', msg.slice(0, 300))
   ok(!/[\u4e00-\u9fff]/.test(msg) && !/[\u4e00-\u9fff]/.test(aud),
     'en 板上的守卫通知与 audit 全文里一个中文字都不该有', ((msg + aud).match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
 }
@@ -6952,7 +6958,9 @@ console.log('T77 收工提醒分级压成一行')
   const hit = (blk) => WORDS.filter((w) => blk.includes(w))
   // 这一段每次收工都印:0.17.6 起结尾只写 `ddd audit`(手机上一条绝对路径就占掉四行),
   // 0.17.7 起连命令都不带 —— 怎么处理是 `ddd audit` 的活,这几行只说「是哪张卡」
-  const plain = (blk) => !blk.includes('/') && !blk.includes('node ')
+  // v0.17.11:积压那条写成「可立即做 N/上限」,斜杠不再等于路径 —— 尺子改成「先扣掉两边都是数字的
+  // 那种斜杠,剩下的一个都不许有」,路径照样当场红。
+  const plain = (blk) => !blk.replace(/\d+\/\d+/g, '').includes('/') && !blk.includes('node ')
   /** 头里的 N 必须与「 · 」隔开的条数一致 —— 说「5 条」却只有 4 条,人会以为有一条被吞了 */
   const headMatchesParts = (blk) => {
     const m = /^看板守卫 (\d+) 条提醒\(详情 ddd audit\):(.+)$/.exec(blk)
@@ -7025,7 +7033,7 @@ console.log('T77 收工提醒分级压成一行')
         rel: relOf([{ number: 227, state: 'merged', mergedAt: isoAgo(1), title: 'c' }]),
         items: [{ id: 'BL-D', status: 'ready', date: dayAgo(1), title: '刚解锁', ...BASE, after: ['#227'] }],
       })],
-      ['可立即做', '可立即做 1 张超上限 0', board('fx77-wip', {
+      ['可立即做', '可立即做 1/0 超上限', board('fx77-wip', {
         cfg: { wip: { soft: 0, hard: 0 } },
         items: [{ id: 'BL-W', status: 'ready', date: dayAgo(1), title: '在建', ...BASE }],
       })],
@@ -7071,7 +7079,7 @@ console.log('T77 收工提醒分级压成一行')
       '已收但 PR 还开着 BL-R',
       '暂不收账满 14 天 BL-H',
       '前置已清可开工 BL-D',
-      '可立即做 4 张超上限 0',
+      '可立即做 4/0 超上限',
     ].join(' · '),
       '八类同时命中:合成一条,次序照 CHORE_KEYS,标签是人话、内容点到卡号,条间以「 · 」相隔', JSON.stringify(blk))
     ok(plain(blk), '八类都在时那一条也不带路径、不带命令', JSON.stringify(blk))
@@ -7352,6 +7360,139 @@ console.log('T77 收工提醒分级压成一行')
         JSON.stringify([cut(oc.stdout).slice(0, 220), cut(od.stdout).slice(0, 220)]))
       ok(!(JSON.parse(od.stdout || '{}').systemMessage || '').includes('家务'),
         '三级同时命中那一份 systemMessage 里也不出现「家务」', (JSON.parse(od.stdout || '{}').systemMessage || '').slice(-120))
+    }
+  }
+
+  // ============ 0.17.11:积压计数常驻,固定排在最后一条 ============
+  // 原来「可立即做 N 张超上限 M」只在 N > hard 时出现:不超线整条就消失,而靠这个数治板的人
+  // 恰恰是平时想知道「手上还能接多少」。改成常驻 —— 只对配了 config.wip 的板,没配的一个字不变。
+  {
+    const relOpen = relOf([{ number: 230, state: 'open', mergedAt: null, title: 'b' }])
+    const relDone = relOf([{ number: 226, state: 'merged', mergedAt: isoAgo(40), title: 'a' }])
+    const card = (id, extra = {}) => ({ id, status: 'ready', date: dayAgo(1), title: `在建 ${id}`, ...BASE, ...extra })
+    /** 一块只有积压这一类家务的板:n 张能立即做的 + waiting 张还等着开着的 #230 */
+    const wipBoard = (name, hard, n, waiting) => board(name, {
+      cfg: { wip: { soft: 0, hard } }, rel: relOpen,
+      items: [
+        ...Array.from({ length: n }, (_, i) => card(`BL-W${i}`)),
+        ...Array.from({ length: waiting }, (_, i) => card(`BL-Q${i}`, { after: ['#230'] })),
+      ],
+    })
+
+    { // ---- 四种组合(没超线 / 超线 × 没人等前置 / 有人等前置)各自的文案 ----
+      const CASES = [
+        ['没超线、没人等前置', wipBoard('fx83-a', 5, 2, 0), '可立即做 2/5'],
+        ['没超线、有人等前置', wipBoard('fx83-b', 5, 2, 1), '可立即做 2/5(另 1 张等前置)'],
+        ['超线、没人等前置', wipBoard('fx83-c', 1, 2, 0), '可立即做 2/1 超上限'],
+        ['超线、有人等前置', wipBoard('fx83-d', 1, 2, 1), '可立即做 2/1 超上限(另 1 张等前置)'],
+      ]
+      for (const [word, fx, row] of CASES) {
+        const blk = choreOf(runStop(NEW_SCRIPTS, fx.root))
+        ok(blk === `看板守卫 1 条提醒(详情 ddd audit):${row}`, `积压那一条:${word}`, JSON.stringify(blk))
+        ok(plain(blk) && headMatchesParts(blk) && oneColon(blk),
+          `照旧不带路径与命令、头也对得上(${word})—— 「N/上限」里的斜杠是数不是路径`, JSON.stringify(blk))
+        ok(hit(blk).join(',') === '可立即做', `零的七类照旧一个字都不出(${word})`, hit(blk).join(','))
+      }
+      // --json 的那一格:没超线也在,三个数齐全(守卫那条只印两个,第三个数得从这儿取)
+      const fxB = CASES[1][1]
+      const j = JSON.parse(runAudit(fxB.kb, ['--json']).stdout)
+      const row = j.chore.find((e) => e.key === 'wip')
+      ok(j.chore.length === 1 && row && row.n === 2 && row.hard === 5 && row.waiting === 1,
+        '--json:没超线也有这一格,n / hard / waiting 三个数齐全', JSON.stringify(j.chore))
+      ok(j.summary === '看板守卫 1 条提醒(详情 ddd audit):可立即做 2/5(另 1 张等前置)',
+        '--json 的 summary 就是守卫那一条本身(不是另算一遍)', JSON.stringify(j.summary))
+      const a = runAudit(fxB.kb).stdout
+      ok(a.includes('家务(1):') && a.includes('可立即做(ready 且前置已清)的卡有 2 张,另有 1 张 ready 还等着前置,上限 config.wip.hard = 5'),
+        'audit 全文里这一条也总在:没超线那版陈述数与上限', a.slice(-400))
+      ok(!a.includes('⚠ 看板守卫:可立即做'),
+        '没超线那版不挂 ⚠、也不劝人先清一批 —— 没到线的数是给人心里有底的,不是警报', a.slice(-300))
+    }
+
+    { // ---- 固定排最后一条,头里的 N 把它算进去 ----
+      const fx = board('fx83-last', {
+        cfg: { wip: { soft: 0, hard: 9 } }, rel: relDone,
+        items: [card('BL-S', { pr: 226 }), card('BL-W')],
+      })
+      const blk = choreOf(runStop(NEW_SCRIPTS, fx.root))
+      ok(blk === '看板守卫 2 条提醒(详情 ddd audit):PR 全合了还没收账 BL-S · 可立即做 2/9',
+        '积压固定排在最后一条(CHORE_KEYS 的末位),头里的 N 把它算进去', JSON.stringify(blk))
+    }
+
+    // ---- 没配 config.wip 的板:守卫与 audit 里一个字都不出 ----
+    const noWip = board('fx83-off-new', { rel: relDone, items: [card('BL-S', { pr: 226 })] })
+    ok(choreOf(runStop(NEW_SCRIPTS, noWip.root)) === '看板守卫 1 条提醒(详情 ddd audit):PR 全合了还没收账 BL-S',
+      '没配 config.wip 的板:那一条里一个「可立即做」都没有', JSON.stringify(choreOf(runStop(NEW_SCRIPTS, noWip.root))))
+    ok(!JSON.parse(runAudit(noWip.kb, ['--json']).stdout).chore.some((e) => e.key === 'wip'),
+      '没配 config.wip 的板:audit 那头也没有这一格(常驻只对配了的板常驻)')
+
+    { // ---- gen 收尾那一行:与守卫同一把尺(ready 且前置已清),等前置的另报一个数 ----
+      const many = (name) => board(name, {
+        rel: relOpen,
+        items: [...Array.from({ length: 20 }, (_, i) => card(`BL-G${i}`)), card('BL-GW', { after: ['#230'] })],
+      })
+      const tailOf = (r) => (r.stdout || '').trim().split('\n').pop()
+      const fx = many('fx83-gen')
+      const line = tailOf(runGen(NEW_SCRIPTS, fx.kb))
+      ok(line.includes('backlog 21 条(可立即做 20(另 1 等前置) / 等外部 0 / 推后 0 / 已落地 0)'),
+        'gen 收尾行与守卫同一把尺:21 张 ready 里 1 张等前置 → 可立即做 20(另 1 等前置)', line)
+      // K = 0 就不出括号(板上一条 after 都没有的项目,这一行一字不变)
+      const line0 = tailOf(runGen(NEW_SCRIPTS, noWip.kb))
+      ok(line0.includes('backlog 1 条(可立即做 1 / 等外部 0') && !line0.includes('等前置'),
+        '没有卡等前置时不出括号', line0)
+    }
+
+    { // ---- 与 0.17.10 的对照:没配 wip 的板逐字节相同;配了的板只差这一条;板上一个像素不动 ----
+      const TAG = 'demo-driven-development--v0.17.10'
+      const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+      if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.10 对照本次不比`)
+      else {
+        const oldRoot = join(WORK, 'v01710')
+        mkdirSync(oldRoot, { recursive: true })
+        const tar = join(WORK, 'v01710.tar')
+        spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+        spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+        const oldScripts = join(oldRoot, 'scripts')
+        const runOld = (root) => spawnSync(process.execPath, [join(oldScripts, 'stop-hook.mjs')],
+          { encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS, CLAUDE_PROJECT_DIR: root } })
+        const bare = (r, root, scripts) => (r.stdout || '').split(root).join('<ROOT>').split(scripts).join('<SCRIPTS>')
+        // ① 没配 wip:守卫整份 stdout 逐字节相同(没配这个键的板零差异)
+        const offOld = board('fx83-off-old', { gen: oldScripts, rel: relDone, items: [card('BL-S', { pr: 226 })] })
+        const oa = runOld(offOld.root), ob = runStop(NEW_SCRIPTS, noWip.root)
+        ok(bare(oa, offOld.root, oldScripts) === bare(ob, noWip.root, NEW_SCRIPTS) && (oa.status ?? 0) === (ob.status ?? 0),
+          '没配 config.wip 的板:守卫整份输出与 0.17.10 逐字节相同(先把两块板各自的路径归一)',
+          JSON.stringify([bare(oa, offOld.root, oldScripts).slice(0, 240), bare(ob, noWip.root, NEW_SCRIPTS).slice(0, 240)]))
+        // ② 配了 wip:差异只有末尾新增的这一条(以及头里那个 +1 的数)
+        const onBoard = (name, gen) => board(name, {
+          gen, cfg: { wip: { soft: 0, hard: 9 } }, rel: relDone,
+          items: [card('BL-S', { pr: 226 }), card('BL-W')],
+        })
+        const wa = onBoard('fx83-on-old', oldScripts), wb = onBoard('fx83-on-new')
+        const oldBlk = choreOf(runOld(wa.root)), newBlk = choreOf(runStop(NEW_SCRIPTS, wb.root))
+        ok(oldBlk === '看板守卫 1 条提醒(详情 ddd audit):PR 全合了还没收账 BL-S',
+          '摆盘先确认:同一块板 0.17.10 只说一条 —— 没超线,积压那条整条不出', JSON.stringify(oldBlk))
+        ok(newBlk === `${oldBlk.replace('1 条提醒', '2 条提醒')} · 可立即做 2/9`,
+          '配了 wip 的板:与 0.17.10 的差异只在这一条(别的条一个字没动)', JSON.stringify([oldBlk, newBlk]))
+        // ③ gen 只改那一行 console.log:产物归一化版本戳后逐字节相同,而那一行确实变了
+        const genOld = board('fx83-gen-old', {
+          gen: oldScripts, rel: relOpen,
+          items: [...Array.from({ length: 20 }, (_, i) => card(`BL-G${i}`)), card('BL-GW', { after: ['#230'] })],
+        })
+        const genNew = board('fx83-gen-new', {
+          rel: relOpen,
+          items: [...Array.from({ length: 20 }, (_, i) => card(`BL-G${i}`)), card('BL-GW', { after: ['#230'] })],
+        })
+        const tailOf = (r) => (r.stdout || '').trim().split('\n').pop()
+        const oldTail = tailOf(runGen(oldScripts, genOld.kb)), newTail = tailOf(runGen(NEW_SCRIPTS, genNew.kb))
+        ok(/backlog 21 条\(可立即做 21 \//.test(oldTail),
+          '摆盘先确认:0.17.10 那一行把等前置的也算进「可立即做」(21),与守卫差着一张', oldTail)
+        ok(/backlog 21 条\(可立即做 20\(另 1 等前置\) \//.test(newTail), '同一块板,这一版报 20 + 另 1 等前置', newTail)
+        const normIdx = (f) => readFileSync(f, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+        for (const f of ['index.html', join('parts', 'backlog.html')]) {
+          const oldP = join(genOld.kb, f), newP = join(genNew.kb, f)
+          ok(existsSync(oldP) === existsSync(newP) && (!existsSync(oldP) || normIdx(oldP) === normIdx(newP)),
+            `板上一个字节没动:${f} 归一化版本戳后与 0.17.10 逐字节相同(这一版只改 gen 收尾那一行 console.log)`)
+        }
+      }
     }
   }
 }

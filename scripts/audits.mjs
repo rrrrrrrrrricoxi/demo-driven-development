@@ -10,7 +10,8 @@
 //                 清单引用未知卡号 / 分支工作区里有生成物改动 / 生成物处在冲突里 /
 //                 .gitattributes 写了 merge=ours 而驱动未配 / 看板改动落在非主线分支。
 //   家务 chore  —— 平时常有,是每条线各自的日常账,谁在意谁去看:长正文(老卡)、验收反馈未提交、
-//                 可清截图、待收账、收早了、挂账到期、前置已清、积压超阈 —— 共八类,顺序见 CHORE_KEYS。
+//                 可清截图、待收账、收早了、挂账到期、前置已清、积压计数 —— 共八类,顺序见 CHORE_KEYS。
+//                 (积压那一类自 v0.17.11 起常驻:配了 config.wip 的板每次收工都报一个「可立即做 N/上限」。)
 //
 // 「产物版本戳更新 / plugin 安装异常 / 非主线不重渲 / 无戳自愈 / gen 跑失败」那几条不在这份模块里:
 // 它们不是审计结论,是「要不要重生成」那一步的副产品(audit 只读、从不 gen,根本算不出它们),
@@ -461,7 +462,9 @@ export function auditBoardBranch(ctx, S, branch) {
 }
 
 /**
- * 积压审计(家务,v0.13.0,只在 config.wip 配了对象时跑):ready 超 hard 就报一个数。
+ * 积压审计(家务,v0.13.0,只在 config.wip 配了对象时跑):报一个「可立即做 N/上限」。
+ * v0.17.11 改口:配了 wip 就常驻一条,不再只在 N > hard 时出声 —— 这个数是拿来治板的,
+ * 不超线就消失,等于只在来不及的时候才说话,平时手上还能接多少便无从把握。
  * 与卡上的横幅同一口径(只数 ready),但守卫看的是全线别的总数 —— 分线别的账在页面上看。
  * 正因为口径是全板的,--line 在这儿不收窄:阈值 config.wip.hard 是全板的一个数,
  * 分子跟着线缩、分母不缩,报出来的 `N/阈值` 就没法读,还会把真超阈的板报成没事。
@@ -478,7 +481,7 @@ export function auditWip(ctx, S) {
     ? ready.filter((it) => openCount(afterStates(it, ctx.depCtx()))).length
     : 0
   const n = ready.length - waiting
-  if (n > hard) out.push({ key: 'wip', level: 'chore', n, hard, waiting, text: S.wipOver(n, hard, waiting) })
+  out.push({ key: 'wip', level: 'chore', n, hard, waiting, text: n > hard ? S.wipOver(n, hard, waiting) : S.wipUnder(n, hard, waiting) })
   return out
 }
 
@@ -552,6 +555,8 @@ export const pickLevel = (entries, level) => entries.filter((e) => e.level === l
 /**
  * 家务那一条(0.17.5 §1 立的一行 → 0.17.7 §9 每类一行 → 0.17.8 §10 收回一条)。零的类别不出现;
  * 八类全零则返回 ''(整条不出)。类别次序固定 —— 这一条每次收工都出,次序一变人就得重读一遍。
+ * v0.17.11:积压(CHORE_KEYS 的末位,所以永远排在最后)在配了 config.wip 的板上常驻,
+ * 于是这类板上这一条恒出 —— 其余七类全零时,它就是头 + 那一条积压。没配 wip 的板一个字不变。
  *
  * 0.17.5 那版是「标签 + 计数」,压过头了:标签是行话、数字又不点名,读的人两头都落不到实处。
  * 0.17.7 改成每类一行,人话与卡号都有了,可 Claude Code 把 `systemMessage` 里的每个换行渲染成一个
