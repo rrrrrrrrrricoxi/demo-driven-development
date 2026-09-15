@@ -27,6 +27,7 @@ import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { accFeedback } from './accfb.mjs'
 import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFrom, depItemText, openCount, reverseAfter } from './deps.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
@@ -844,8 +845,15 @@ const accWarn = (msg) => console.warn(`[gen] ⚠ acceptance-manifest:${msg}`)
 // acceptance-feedback.jsonl,页面轮询同一份文件,两个人各自的浏览器上看见的是同一份账。
 // 这一行的样子与所有计数跟着「我的判定」走(0.17.0 那只私有勾选框就此退场)。gen 仍不读时钟、不联网:
 // 烤进产物的只有控件与那段运行时,数据一律运行期取。关(缺省)= 下面每个注入点都是空串,逐字节冻结。
-const AFB = ACC && cfg.acceptanceFeedback === true
-if (cfg.acceptanceFeedback === true && !ACC) console.warn(`[gen] ⚠ ${GS.accFeedbackNeedsTab()}`)
+// v0.17.6:开关有两种写法(true / { pin }),读法只有一处 —— accfb.mjs,gen 与守卫与 init 共用。
+// 口令本身一个字都不烤进产物:页面是拿它去问服务端,不是拿它去比对。
+const AFB_CFG = accFeedback(cfg)
+if (AFB_CFG.bad) throw new Error(GS.accFbBadPin(JSON.stringify(AFB_CFG.badPin)))
+const AFB = ACC && AFB_CFG.on
+// 名册那套(v0.17.6)只有配了口令的板才烤:acceptanceFeedback: true 的板(白泽等)产物里
+// 一个字节都不该多出来 —— 它们今天的行为就是「谁都能署名」,这一版不改它。
+const AFB_PIN = AFB && AFB_CFG.pin !== ''
+if (AFB_CFG.on && !ACC) console.warn(`[gen] ⚠ ${GS.accFeedbackNeedsTab()}`)
 // 清单规整:pr 串(锚与 localStorage 键)、revision(改动即作废旧勾选)、分组/条目/数据块。
 // 软校验一律 console.warn 不阻断 —— 清单是人写的正文,坏一条不该把整块板打死。
 const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
@@ -2732,19 +2740,21 @@ const accCurHtml = (() => {
   </section>`
 })()
 
+// v0.17.6:验收 tab 标题下那行副标题,反馈开着时说人话 —— 原来那句把清单文件名、revision、
+// serve.py 三个开发词汇摆给用户看,而用户要知道的只有两件事:这些字别人看得见、清单改版旧判定作废。
+// 出处(文件在哪、怎么改 revision)归 README,不占用户那一行。关着的那档一个字不动(它本来就只说勾选)。
 // 身份芯片(反馈共享开着时):「我是 甲 · 换人」。名字存这台浏览器,gen 期一个字都不知道。
 // v0.17.3:常显,未署名时烤的就是「未署名 · 署名」—— 署名得在动手之前就能被看见、被点到,
 // 而不是等第一次点 ✓ 才由一句话冒出来问。
 const ACC_ME_CHIP = !AFB ? '' : `
     <span class="accme" data-accme><span class="accmen">未署名</span><button type="button" class="accmeb" data-accwho>署名</button></span>`
-const ACC_FB_SESS = !AFB ? '' : ' · 判定(✓/✕)、备注与截图经本机的 <code>serve.py</code> 共享给同看板的人'
 // 无写口时那一行灰字(运行期才知道有没有写口,所以烤成 hidden,降级时才亮)
 const ACC_DEG = !AFB ? '' : `
   <p class="accdeg" data-accdeg hidden>这台看板没有写口,判定只存在这台浏览器里 —— 要两人互见,请经 <code>serve.py</code>(0.17.0 起)打开。</p>`
 const acceptancePane = !ACC ? '' : `
   <div class="topbar">
     <h1>${esc(BRAND)} · 验收</h1>
-    <span class="sess">清单源 <code>acceptance-manifest.json</code> · ${!AFB ? '勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定存 <code>acceptance-feedback.jsonl</code>(改 <code>revision</code> 即作废旧账)'}${ACC_FB_SESS}</span>${ACC_ME_CHIP}
+    <span class="sess">${!AFB ? '清单源 <code>acceptance-manifest.json</code> · 勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废'}</span>${ACC_ME_CHIP}
   </div>${ACC_DEG}${accCurHtml}${ACC_CUR ? accListHtml(ACC_CUR) : ''}${accQueueLists.length ? `
   <details class="accfold"><summary>排队中 <span class="mut">${accQueueLists.length} 份清单</span></summary>${accQueueLists.map(accListHtml).join('')}
   </details>` : ''}${accDoneLists.length ? `
@@ -2867,7 +2877,12 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accfbzoom img { max-width: 92vw; max-height: 88vh; border-radius: 6px; }
   .accfbzx { position: absolute; top: 12px; right: 16px; appearance: none; border: 0; background: none;
      font-size: 24px; line-height: 1; color: #fff; cursor: pointer; }
-  .accme { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--mut); }
+  /* v0.17.6:这枚 chip 的高度两态一致 —— 输入框换上来时它不许比现在高一分,否则点一下「换人」
+     整块板从这一行往下集体下移一截(min-height 取的就是 11.5px 那行字的行盒,只入不出) */
+  .accme { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--mut);
+     min-height: 19px; align-self: center; }
+  /* chip 里那只输入框是矮版:行高与内边距压到 17px 外高,塞得进上面那 19px */
+  .accme .accwhoi { width: 150px; font-size: 11px; line-height: 15px; padding: 0 7px; }
   .accmeb { appearance: none; border: 0; background: none; font: inherit; font-size: 11px; padding: 0;
      color: var(--accent); cursor: pointer; }
   /* 署名就地问(v0.17.3):一行输入框,落在行下那句灰字的位置,或顶上 chip 旁边 —— 不弹系统对话框 */
@@ -2881,7 +2896,14 @@ const ACC_FB_CSS = !AFB ? '' : `
   /* 少于 2 个码点时框内右缘那句灰字(v0.17.4);出现时把正文挤开,免得压在人刚打的字上 */
   .accwhomin { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 10px;
      font-style: normal; color: var(--faint); pointer-events: none; }
-  .accwhow.short .accwhoi { padding-right: 122px; }
+  .accwhow.short .accwhoi { padding-right: 122px; }${!AFB_PIN ? '' : `
+  /* 名字不在名册里时同一行多出来的那格 4 位口令(v0.17.6);错了在框内右缘出一行灰字,框不关 */
+  .accwhopi { flex: none; width: 108px; font: inherit; font-size: 12px; line-height: 20px; padding: 2px 8px;
+     border: 1px solid var(--line-strong); border-radius: 7px; background: var(--card); color: var(--ink); }
+  .accitem input.accwhopi { width: 108px; height: auto; margin: 0; } /* 同 .accwhoi:躲开 .accitem input 那条 15×15 */
+  .accwhow.bad .accwhopi { padding-right: 58px; }
+  /* 同 .accwhoi:chip 里用矮版。宽度要容得下「4 位数字 + 右缘那句灰字」,窄了数字会被挤没 */
+  .accme .accwhopi { width: 120px; font-size: 11px; line-height: 15px; padding: 0 7px; }`}
   .accwhoh { font-size: 10.5px; color: var(--faint); }
   /* 第一次署名落地后那一行一次性确认(v0.17.4):行里与顶部 chip 下各一份,「改」就地开同一只框 */
   .accwhook { margin: 7px 0 0; font-size: 11px; color: var(--mut); }
@@ -3109,7 +3131,15 @@ const ACC_FB_JS = !AFB ? '' : `
     }
     function accFbSendable(nowrite, probed) { // 无写口那条路不发请求 —— 但每次开页留一次试探,写口回来了就自己接上
       return !nowrite || !probed
-    }
+    }${!AFB_PIN ? '' : `
+    // v0.17.6:这一次署名该不该问口令。三种情形一律不问 —— 写不进共享账(降级,名册无从谈起)、
+    // 这块板没有名册这套机制(宿主 serve.py 还是老版 / 名册还没建)、名字本来就在名册里(换回旧名同理)。
+    // 剩下的那一种就是「新名字要人点头」。
+    function accFbPinNeed(sendable, hasRoster, names, name) {
+      if (!sendable || !hasRoster) return false
+      for (var i = 0; i < (names || []).length; i++) if (String(names[i]) === String(name)) return false
+      return true
+    }`}
     function accFbNoWrite(status) { // 这个状态码是不是「这儿根本没有写口」(而不是这一笔不合格)
       return status === 404 || status === 405 || status === 501
     }
@@ -3250,12 +3280,48 @@ const ACC_FB_JS = !AFB ? '' : `
       chip.querySelector('.accmen').textContent = FB_WHO ? '我是 ' + FB_WHO : '未署名'
       chip.querySelector('[data-accwho]').textContent = FB_WHO ? '换人' : '署名'
     }
+    // 换人时顶栏那一行不许跳:chip 的两格让位给输入框(hidden,不是 remove —— 名字还要写回去),
+    // 框一走就原样露回来。按「现查」写而不记在闭包里:那只框可能被搬去别的行(见 fbWhoAsk 开头),
+    // 收拾残局的不一定是当初藏它的那一次调用。
+    function fbChipHide() { fbChipToggle(true) }
+    function fbChipShow() { fbChipToggle(false) }
+    function fbChipToggle(hide) {
+      var c = document.querySelector('[data-accme]')
+      if (!c) return
+      var n = c.querySelector('.accmen'), b = c.querySelector('[data-accwho]')
+      if (n) n.hidden = hide
+      if (b) b.hidden = hide
+    }
     function fbWhoNorm(v) {
       // 按码点切,不按 UTF-16 格:第 20 格正好落在一个 emoji 的代理对中间时,slice 会切出半个字,
       // 服务端 json.dumps().encode('utf-8') 上炸掉,连接被掐,页面还误报成「你的 serve.py 太旧」
       return Array.from(String(v == null ? '' : v).replace(/[\\u0000-\\u001f\\u007f]/g, '').trim()).slice(0, 20).join('')
     }
-    function fbWhoSet(v) { // 署名落地:记在这台浏览器里,chip 跟着改
+${!AFB_PIN ? '' : `    // v0.17.6 名册:谁能在验收账上出现,该有人点头。拉得到(200)= 这块板有名册这套机制;
+    // 404 / 拉不到 / 读不懂 = 没有(宿主的 serve.py 还是老版,或这块板没配口令),照 0.17.5 走 ——
+    // 署名不问口令。放行得再宽也越不过服务端那道门:配了口令的板上,名册外的名字在 mark / shot 那儿是 403。
+    // (配了口令而名册文件还没建的那一档不在这里:v4 会代答一份空名册,页面照样问得出口令 ——
+    //  答 404 的话第一个人就永远进不了名册,而 mark 那头正卡着他。)
+    function fbRoster() {
+      if (!fbSendable()) return Promise.resolve(null) // 降级:写不进共享账,名册无意义
+      return fetch('acceptance-roster.json', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null })
+        // 名册也过一遍 fbWhoNorm:服务端比的是归一后的串,页面拿原样去比就会两头判得不一样 ——
+        // 手写进 git 的名册里多一个尾空格,人明明在册,页面还要他输口令
+        .then(function (o) { return o ? ((o.names || []).map(fbWhoNorm)) : null })
+        .catch(function () { return null })
+    }
+    function fbWhoPost(name, pin) { // 名字进名册:对了回整份名册,不对回一句(落在口令格右缘)
+      return fetch('api/acceptance/who', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, pin: pin }),
+      }).then(function (r) {
+        if (r.ok) return r.json().catch(function () { return null })
+        // 框内右缘只放得下四五个字:口令不对说原话,别的状态留个号码给人去问
+        throw new Error(r.status === 403 ? '口令不对' : '加不进名册(' + r.status + ')')
+      }, function () { throw new Error('没送出去') })
+    }
+`}    function fbWhoSet(v) { // 署名落地:记在这台浏览器里,chip 跟着改
       var was = FB_WHO
       FB_WHO = v
       try { localStorage.setItem(FB_WHO_KEY, v) } catch (e) {}
@@ -3299,6 +3365,7 @@ const ACC_FB_JS = !AFB ? '' : `
         kept = oi.value
         var orow = open.closest('.accitem')
         open.remove()
+        fbChipShow() // 框要是长在 chip 里,拆走它的同时得把让出去的那两格还回来
         if (orow) fbOpen(orow)
       }
       var host = row ? fbBox(row) : document.querySelector('[data-accme]')
@@ -3315,18 +3382,70 @@ const ACC_FB_JS = !AFB ? '' : `
       w.append(i, min)
       f.append(w, fbEl('span', 'accwhoh', '回车署名 · Esc 取消'))
       var done = false
-      var close = function () { f.remove(); if (row) fbOpen(row) }
+      var close = function () { f.remove(); fbChipShow(); if (row) fbOpen(row) }
       var cancel = function () { // Esc:什么都不记,排着的那几下一并作废(没名字就记不成)
         if (done) return
         done = true
         FB_QUEUE.length = 0
         close()
       }
-      var save = function () {
+${!AFB_PIN ? '' : `      // v0.17.6 名册这一关(只有配了口令的板才有这一段):名字不在名册里时,同一行多出一格
+      // 4 位口令(不弹框 —— 0.17.3 定的规矩)。过了关的那个名字记在 okName 里:人回头又改了名,
+      // 就得重过一次,不能拿上一个名字的口令给新名字背书。
+      var okName = null, pw = null, pi = null, pmsg = null, seen
+      var askPin = function () {
+        if (!pw) {
+          pw = fbEl('div', 'accwhow')
+          pi = document.createElement('input')
+          pi.type = 'text'; pi.className = 'accwhopi'; pi.maxLength = 4
+          pi.inputMode = 'numeric'; pi.autocomplete = 'off'
+          pi.placeholder = '新名字要口令'
+          pi.setAttribute('aria-label', '新名字进名册要 4 位口令;回车提交,Esc 取消')
+          pmsg = fbEl('i', 'accwhomin', '口令不对')
+          pmsg.hidden = true
+          pw.append(pi, pmsg)
+          f.insertBefore(pw, f.lastChild) // 名字格与那句灰字之间 —— 同一行,不换行
+          pi.addEventListener('input', function () { pw.classList.remove('bad'); pmsg.hidden = true })
+          pi.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); save(); return }
+            if (ev.key === 'Escape') { ev.preventDefault(); cancel() }
+          })
+        }
+        if (row) fbOpen(row)
+        pi.focus()
+      }
+      var gate = function (v) {
+        // 名册拉回来一次就记着(seen):口令格出来之后人又把名字改回在册的那个,这一下不该再要口令
+        // —— 那格是为上一个名字出的。「换回名册里的旧名也不问」是明写的规矩,而只看 pw 在不在的话,
+        // 他改回自己那个在册的名字,收到的是「口令不对」,除非猜中口令或整次重来
+        if (seen !== undefined && !accFbPinNeed(fbSendable(), seen !== null, seen, v)) { okName = v; save(); return }
+        if (pw) { // 口令格已经在了,而这个名字确实还没进名册:这一下是连口令一起交
+          fbWhoPost(v, pi.value).then(function (o) {
+            if (o && o.names) seen = o.names.map(fbWhoNorm) // 服务端回的是整份名册,以它为准
+            okName = v
+            save()
+          }, function (e) {
+            pw.classList.add('bad')
+            pmsg.textContent = String((e && e.message) || e)
+            pmsg.hidden = false // 不关框:人还在这儿,再打一遍就是了
+            if (row) fbOpen(row)
+            pi.focus()
+          })
+          return
+        }
+        fbRoster().then(function (names) {
+          if (done) return // 等名册回来的这几百毫秒里人按了 Esc
+          seen = names
+          if (accFbPinNeed(fbSendable(), names !== null, names, v)) askPin()
+          else { okName = v; save() }
+        })
+      }
+`}      var save = function () {
         if (done) return
         var v = fbWhoNorm(i.value)
         if (Array.from(v).length < 2) { w.classList.add('short'); min.hidden = false; i.focus(); return }
-        done = true
+${!AFB_PIN ? '' : `        if (okName !== v) { gate(v); return } // 名册那一关没过(或名字又改了):先过关再落地
+`}        done = true
         var go = FB_QUEUE.slice()
         FB_QUEUE.length = 0
         var first = !FB_WHO
@@ -3341,7 +3460,10 @@ const ACC_FB_JS = !AFB ? '' : `
         if (ev.key === 'Escape') { ev.preventDefault(); cancel() }
       })
       if (row) host.insertBefore(f, host.firstChild) // 行里:落在原来那句「先署个名」的位置
-      else host.appendChild(f) // 顶上:紧挨着那枚 chip
+      // v0.17.6 顶上那一处是**替换**不是追加:输入框顶掉「我是 X · 换人」那两格,落在同一行、
+      // 同一高度。追加会把顶栏挤到换行 —— 点一下「换人」,从这一行往下整块板集体下移一截,
+      // 换完又跳回来(病例:0.17.3 起一直如此)。chip 的两格只是 hidden,close 时原样露回来。
+      else { fbChipHide(); host.appendChild(f) }
       // 先让这一块可见再聚焦:display:none 的子树里 focus() 一律不作数(fbEdit 那处踩过同一个坑)
       if (row) fbOpen(row)
       i.focus()

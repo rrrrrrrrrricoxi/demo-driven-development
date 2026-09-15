@@ -54,6 +54,7 @@ import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
 import { pickStrings } from './strings.mjs'
 import { genAttrPaths } from './board-branch-check.mjs'
+import { accFeedback } from './accfb.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const TPL = join(HERE, '..', 'templates')
@@ -629,11 +630,14 @@ async function buildPlan(root, st, gi, opt, det) {
     plan.brand = cfg.brand
     // 验收反馈共享(v0.17.0)开着:反馈截图默认不该进 git。只说一行,不替人改 .gitignore ——
     // 那是仓库主人的文件,init 往里加行是越界(种入一份新的是另一回事)。
-    if (cfg.acceptanceFeedback === true) {
+    const afb = accFeedback(cfg) // v0.17.6:true 与 { pin } 两种写法,读法只有 accfb.mjs 一处
+    if (afb.on) {
       const ignored = [join(root, '.gitignore'), join(st.kanban, '.gitignore')].some((p) => {
         try { return readFileSync(p, 'utf8').split('\n').some((l) => l.trim().replace(/^app\/kanban\//, '').replace(/^\/+/, '') === 'shots/acc-*') } catch { return false }
       })
       plan.accFbIgnore = !ignored
+      // 开着反馈却没配口令:今天谁都能署任何名。说一行,不改写 —— config 是宿主的文件(与上面同一条理由)
+      plan.accFbPin = !afb.pin
     }
   } else if (opt.port !== null) {
     plan.port = opt.port
@@ -727,6 +731,7 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.narrativeSkip) console.log(S.init.planNarrativeSkip)
   if (plan.gitignoreAdd.length) console.log(S.init.planGitignoreMerge(plan.gitignoreAdd))
   if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore)
+  if (plan.accFbPin) console.log(S.init.planAccFbPin)
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
   console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
@@ -1055,6 +1060,7 @@ async function doApply(root, st, gi, opt, plan) {
   if (plan.mergeDeferred) console.log(S.init.applyMergeDeferred)
   if (plan.claudeStale) console.log(S.init.planClaudeStale(plan.claudeStale)) // 同上:CLAUDE.md 是人的文件
   if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore) // 提醒而非动作:host 的 .gitignore 由人改
+  if (plan.accFbPin) console.log(S.init.planAccFbPin) // 同上:config 是 host 的文件,只提醒
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
   console.log(S.init.applyDone(plan.port))
   console.log(S.init.applyServe(plan.port))

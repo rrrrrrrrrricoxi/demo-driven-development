@@ -26,7 +26,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback`, `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -57,12 +57,12 @@ On every Stop, the guard compares mtimes: if any manifest, demo, theme file, or 
 What the guard says is sorted into three levels, by what happens if you ignore it rather than by how stern it sounds. **Blocking** — an orphan demo, a freshly created card whose prose runs past 800 characters with no `detail` — prints in full and stops the session; a second Stop in the same round downgrades it to a warning so nothing can loop. **Broken** — a missing card directory, a card filename that disagrees with the id inside, a card or acceptance list that is not valid JSON, a duplicated pull request or item id, a list pointing at a card that does not exist, generated board files sitting on a branch or stuck in a conflict, a `merge=ours` attribute with no driver defined, board changes on a non-mainline branch — also prints in full, one paragraph each. That level is normally empty, so squeezing it into a number would just hide it. **Chores** — long prose on older cards, uncommitted acceptance feedback, prunable feedback screenshots, cards waiting to be settled, cards settled early, settle holds past their 14 days, prerequisites just cleared, a backlog over its WIP limit — are eight categories that are normally non-empty and mostly belong to someone else's line, so since 0.17.5 they collapse into one counted line:
 
 ```
-看板守卫:长正文 10 · 收早了 1 · 挂账到期 1 · 前置已清 3 · 未提交反馈 13(#276) · 积压 25/20 —— 详情 node <plugin>/scripts/ddd.mjs audit
+看板守卫:长正文 10 · 收早了 1 · 挂账到期 1 · 前置已清 3 · 未提交反馈 13(#276) · 积压 25/20 —— 详情 ddd audit
 ```
 
-Categories at zero do not appear, and if all eight are zero the line is gone entirely. The order and the separator are fixed, `<plugin>` is the guard's own install path filled in, and only "uncommitted feedback" carries an object — the pull request number — because that one is about someone else's data. The numbers are the index: `node <plugin>/scripts/ddd.mjs audit` prints all three levels in full, including how to deal with each, and `--session <session tag>` narrows the card-scoped ones to one line of work (`--line` is accepted too, as a synonym). Guard and `audit` share one implementation (`scripts/audits.mjs`), so the two can never disagree.
+Categories at zero do not appear, and if all eight are zero the line is gone entirely. The order and the separator are fixed, and only "uncommitted feedback" carries an object — the pull request number — because that one is about someone else's data. The line carries no path: since 0.17.6 it ends at `ddd audit` and nothing more, because it prints on every Stop and an absolute install path costs four lines on a phone. Where `ddd.mjs` actually lives is said once, below and in the board section of your `CLAUDE.md`. The numbers are the index: `node <plugin>/scripts/ddd.mjs audit` prints all three levels in full, including how to deal with each, and `--session <session tag>` narrows the card-scoped ones to one line of work (`--line` is accepted too, as a synonym). Guard and `audit` share one implementation (`scripts/audits.mjs`), so the two can never disagree.
 
-A hook process is bound to the plugin version its session started with, so upgrading the plugin mid-session used to leave that session's guard permanently old — and an old `gen` may not overwrite newer output, which froze the board until someone restarted. Since 0.16.2 the hook checks first: if the board's stamp is newer than itself, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and, when that install is at least as new as the board's output and is not itself, hands the whole hook over — same stdin, environment and working directory — returning that version's stdout and exit code unchanged, with one line in the output saying it forwarded and to which version. `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read, holds no newer install, or holds one that is still older than the board's output, the old behaviour stands: skip regeneration and say why. Running `gen.mjs` by hand from an old path is still refused — the forwarding is the guard's, not the generator's.
+A hook process is bound to the plugin version its session started with, so upgrading the plugin mid-session used to leave that session's guard permanently old — and an old `gen` may not overwrite newer output, which froze the board until someone restarted. Since 0.16.2 the hook checks first: if the board's stamp is newer than itself, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and, when that install is at least as new as the board's output and is not itself, hands the whole hook over — same stdin, environment and working directory — returning that version's stdout and exit code unchanged, with one line in the output saying it forwarded and to which version (`守卫已转发到 vX(本 session 绑 vY;不必重启)` — one line since 0.17.6; it prints on every Stop of such a session). `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read, holds no newer install, or holds one that is still older than the board's output, the old behaviour stands: skip regeneration and say why. Running `gen.mjs` by hand from an old path is still refused — the forwarding is the guard's, not the generator's.
 
 ## Upgrading
 
@@ -220,6 +220,55 @@ then the board says so where it happens, and it says which of the two it is: a
 sentence instead of the status code; a `ddd-serve v2` refuses only the retraction
 with a 400 about the `verdict` enum, and the row keeps the server's own sentence
 and appends the fix — overwrite `serve.py` from the plugin and restart.
+
+## Acceptance roster and pin (optional)
+
+With `acceptanceFeedback: true`, anyone who can open the board can sign the
+ledger under any name. On a trusted network that is not a security hole, but it
+is a discipline hole: the acceptance ledger is a record, and who gets to appear
+in it should be somebody's decision. Write the key as an object instead —
+
+```json
+"acceptanceFeedback": { "pin": "1111" }
+```
+
+— and the board grows a roster. `app/kanban/acceptance-roster.json` is a plain
+`{"names": […]}` file that lives in git; the ledger accepts only the names in
+it. Signing under a name already on the roster is unchanged — no pin, no extra
+click, and switching back to a name you used before never asks either. A name
+that is *not* on the roster gets one more box on the same line, four digits
+wide, labelled 新名字要口令: enter the pin and the name joins the roster, and
+whatever you had just clicked is recorded right after. A wrong pin leaves a grey
+口令不对 inside the right edge of that box and keeps it open; Esc cancels the
+whole signing. No dialog is ever raised.
+
+The pin is checked by the server, not the page: it is never baked into the
+generated HTML, and `POST /api/acceptance/who` (`{name, pin}`) is the only way
+into the roster. A wrong pin sleeps one second and answers 403 — no lockout, no
+counter, since the trust boundary is still the network and that second only
+blunts a slipped finger. With a pin configured, `mark` and `shot` answer 403 for
+any `who` outside the roster; with `acceptanceFeedback: true` those two behave
+exactly as they did in 0.17.0, the `who` route does not exist (501, the same
+answer 0.17.5 gave it), and the generated board carries not one byte of the
+roster code. Where a pin *is* configured, the server also answers
+`GET /acceptance-roster.json` itself, so a board whose roster file has not been
+committed yet still hands the page an empty roster and the first person can pin
+themselves in. The roster only grows: to remove somebody, edit the file and
+commit it, the same discipline as the ledger itself. Names are normalised the
+same way signatures are (control characters dropped, trimmed, cut to 20 code
+points) and every comparison runs through that normaliser on both sides, so a
+name hand-written into the roster with a stray space still matches its owner.
+The pin must be a 4-digit string; any other shape is a hard error from both
+`gen` and `serve.py` rather than a silent fallback to "no pin", which is
+precisely the case where somebody believes one is set.
+
+Both sides need the newer pieces: the endpoint ships with `serve.py` version
+`# ddd-serve v4`, and the roster flow is baked by the 0.17.6 generator. A board
+whose `serve.py` is still older keeps working — the page cannot fetch a roster,
+so it never asks for a pin, exactly as before — and `kanban-init` prints a line
+when yours is behind. The pin lives in git next to the board; it is a doorbell,
+not a secret, and anything that needs to be a real secret needs a different
+design.
 
 ## Release progress (optional)
 

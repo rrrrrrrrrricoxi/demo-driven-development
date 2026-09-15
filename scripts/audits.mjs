@@ -23,6 +23,7 @@ import { SETTLE_HOLD_DAYS, TERMINAL, settleHold, settleHoldSince, settleOf } fro
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, daysBetween, localDate, scanCardDir } from './cards.mjs'
 import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount } from './deps.mjs'
 import { GEN_RE, dirtyBoardFiles, genAttrPaths } from './board-branch-check.mjs'
+import { accFeedback } from './accfb.mjs'
 import { ACC_FB_PRUNE_DAYS, ACC_FB_PRUNE_MIN, prunable } from './acc-feedback-prune.mjs'
 
 /** 三份头文件 →(文件, 数组键, 卡目录子目录);cardsDir 开着时后两者的真源在卡目录 */
@@ -313,7 +314,7 @@ export function auditRichText(ctx, S) {
  */
 export function auditAccFeedback(ctx, S) {
   const out = []
-  if (ctx.cfg.acceptanceFeedback !== true) return out
+  if (!accFeedback(ctx.cfg).on) return out // v0.17.6:开关两种写法(true / { pin }),读法只有 accfb.mjs 一处
   const fbPath = join(ctx.dir, 'acceptance-feedback.jsonl')
   if (!existsSync(fbPath)) return out
   // (a) 未提交的新增行:git diff 认得已跟踪文件的增行;还没 add 过的整份文件全算新增
@@ -546,7 +547,7 @@ export const pickLevel = (entries, level) => entries.filter((e) => e.level === l
 /**
  * 家务八类压成的那一行(0.17.5 §1)。零的类别不出现;八类全零则返回 ''(那一行整条不出)。
  * 类别次序与分隔符都固定 —— 这一行每次收工都出,次序一变人就得重读一遍才知道哪个数是哪类。
- * @param cmd 详情那条命令,路径已填实(守卫知道自己装在哪)
+ * @param cmd 详情那条命令(v0.17.6 起不带路径)
  */
 export function choreLine(entries, S, cmd) {
   const parts = []
@@ -557,5 +558,8 @@ export function choreLine(entries, S, cmd) {
   return parts.length ? S.choreLine(parts, cmd) : ''
 }
 
-/** 详情那条命令(路径填实);scriptsDir 取不到时退回 `<plugin>` 占位,总比说一条跑不了的命令强 */
-export const auditCmd = (scriptsDir) => `node ${scriptsDir ? join(scriptsDir, 'ddd.mjs') : '<plugin>/scripts/ddd.mjs'} audit`
+/**
+ * 详情那条命令。v0.17.6 起不带路径:这一行每次收工都印一遍,插件的绝对路径在手机上要占四行,
+ * 而 ddd.mjs 装在哪由 README 与 CLAUDE.md 的看板段落说 —— 守卫不替它们重复一遍。
+ */
+export const auditCmd = () => 'ddd audit'

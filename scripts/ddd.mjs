@@ -647,7 +647,7 @@ function cmdAudit() {
   const session = String(flags.line || flags.session || '').trim()
   const ctx = makeCtx(KANBAN, { session })
   const entries = collect(ctx, TABLE, { branch: boardBranchCheck(KANBAN, TABLE), gen: join(HERE, 'gen.mjs') })
-  const cmd = auditCmd(HERE)
+  const cmd = auditCmd()
   const line = choreLine(entries, TABLE, cmd)
   const LEVELS = [['block', S.audit.sec.block], ['broken', S.audit.sec.broken], ['chore', S.audit.sec.chore]]
   if (flags.json) {

@@ -49,7 +49,7 @@
 //   转发那行说清去了哪一版 / DDD_HOOK_FORWARDED 刹得住真递归 / 装的比产物旧·version 非数字·
 //   projectPath 不是这个项目·读不到安装表 各自退回今天的拒降级 / 产物不比我新时根本不查表)、
 // 收工提醒分级压成一行(0.17.5:八类家务各自单独触发 → 那一行里只有它一格 / 八类同时 → 次序与
-//   分隔符固定、只有未提交反馈带 PR 号、<plugin> 路径填实 / audit 与守卫共读同一份结果(同一块板
+//   分隔符固定、只有未提交反馈带 PR 号、结尾不带路径 / audit 与守卫共读同一份结果(同一块板
 //   两边数字逐格相等)/ --line 按 session 过滤而依赖图不跟着缩 / --json 形状 / audit 只读 /
 //   阻断与坏了两级、家务全零时的守卫 stdout 与产物都与 0.17.4 逐字节相同)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
@@ -1381,8 +1381,8 @@ console.log('T35 richText 轻 markdown / 折叠 / detail')
     '一行到底:不报字数,也不铺逐卡清单(v0.15.7)', a1.stdout.slice(0, 260))
   ok(/⚠ 看板守卫:1 张卡的正文字段超过 800 字/.test(a1.stdout),
     '非阻断通知带 ⚠ 前缀(与其它 notice 同一形制;阻断的那几条才不带)', a1.stdout.slice(0, 260))
-  ok(/^\{"systemMessage":"看板守卫:长正文 1 —— 详情 node .*\/scripts\/ddd\.mjs audit"\}$/.test(g1.stdout.trim()),
-    'v0.17.5:守卫那头只剩一行「长正文 1」,路径填实(全文归 ddd audit)', g1.stdout.slice(0, 260))
+  ok(/^\{"systemMessage":"看板守卫:长正文 1 —— 详情 ddd audit"\}$/.test(g1.stdout.trim()),
+    'v0.17.6:守卫那头只剩一行「长正文 1」,结尾只写 ddd audit(全文归 ddd audit)', g1.stdout.slice(0, 260))
 
   // ---- 终态卡不点名(v0.15.6,TERMINAL 与 settle.mjs 同一份口径)----
   bl.items.push({ id: 'BL-9', status: 'done', priority: Object.keys(bl.priorities)[0], tier: '1', title: 'e',
@@ -5328,7 +5328,9 @@ console.log('T72 守卫转发到更新的安装')
   const m1 = (() => { try { return JSON.parse(r1.stdout || '{}').systemMessage || '' } catch { return 'NOT-JSON:' + r1.stdout } })()
   ok(r1.status === 0 && /MARKER-99/.test(m1), '产物 99.9.9 + 本机装着 99.9.9 → 整个 hook 转发过去,新版的 stdout 原样带回',
     `${r1.status} ${(r1.stdout || '').slice(0, 300)}`)
-  ok(m1.startsWith('看板守卫已转发到已安装的 v99.9.9'), '输出里说了一行「已转发到已安装的 v99.9.9」——不说,人只会以为守卫串了味', m1.slice(0, 120))
+  ok(m1.split('\n')[0] === `守卫已转发到 v99.9.9(本 session 绑 v${MY_VER};不必重启)`,
+    'v0.17.6:转发那句缩成一行「守卫已转发到 v99.9.9(本 session 绑 vX;不必重启)」——不说,人只会以为守卫串了味', m1.slice(0, 160))
+  ok(!/看板产物已是|下面这段是新版守卫的输出/.test(m1), 'v0.17.6:第三个版本号与那半句解释都去了(每次收工都印,只留有人看的两个数)', m1.slice(0, 160))
   ok(/fwd=99\.9\.9/.test(m1), '子进程拿到 DDD_HOOK_FORWARDED(它再遇到同样的局面就不会二次转发)', m1.slice(0, 200))
   ok(/stdin=\{\}/.test(m1), 'stdin 原样交过去(不重新序列化,免得丢掉本版不认识的字段)', m1.slice(0, 200))
   ok(m1.includes(`cwd=${process.cwd()}`), 'cwd 也照原样(转发的是整个 hook,不是只把 gen 换个版本跑)', m1.slice(0, 200))
@@ -6342,8 +6344,8 @@ console.log('T70 英文串表')
   const aud = runAudit(kb).stdout // v0.17.5:这几段全文归 audit,守卫那头只剩一行计数
   ok(/Kanban guard/.test(aud) && /Prerequisites cleared/.test(aud) && /On settle hold/.test(aud) && /prose field over 800/.test(aud),
     '这一批 0.15.x/0.16.x 新键真被调用了一遍(前置已清 / 挂账到期 / 长正文 / 积压)', aud.slice(0, 400))
-  ok(/^Kanban guard: long prose 1 · to settle 1 · holds due 1 · prerequisites cleared 1 · backlog \d+\/0 — details: node .*ddd\.mjs audit$/.test(msg),
-    'v0.17.5:en 板上那一行也是 en 文案,次序与 zh 同一张 CHORE_KEYS', msg.slice(0, 300))
+  ok(/^Kanban guard: long prose 1 · to settle 1 · holds due 1 · prerequisites cleared 1 · backlog \d+\/0 — details: ddd audit$/.test(msg),
+    'v0.17.6:en 板上那一行也是 en 文案,次序与 zh 同一张 CHORE_KEYS,结尾同样不带路径', msg.slice(0, 300))
   ok(!/[\u4e00-\u9fff]/.test(msg) && !/[\u4e00-\u9fff]/.test(aud),
     'en 板上的守卫通知与 audit 全文里一个中文字都不该有', ((msg + aud).match(/[\u4e00-\u9fff][^\n]{0,60}/) || [''])[0])
 }
@@ -6819,6 +6821,10 @@ console.log('T77 收工提醒分级压成一行')
   // 八个词按 CHORE_KEYS 的次序摆 —— 下面「只出现该类」与「次序固定」两组断言共读这一张表
   const WORDS = ['长正文', '未提交反馈', '可清截图', '待收账', '收早了', '挂账到期', '前置已清', '积压']
   const hit = (line) => WORDS.filter((w) => line.includes(w))
+  // 0.17.6:那一行每次收工都印,结尾只写 `ddd audit` —— 既不许出现 /scripts/ddd.mjs,
+  // 也不许出现任何以 / 打头的绝对路径(手机上一条绝对路径就占掉四行)
+  const noPath = (line) =>
+    line.endsWith(' —— 详情 ddd audit') && !line.includes('/scripts/ddd.mjs') && !/(^|\s)\//.test(line)
   const relOf = (prs) => ({ stages: REL_MANIFEST.stages, releases: [], prs, syncedAt: null })
 
   /** 一块只摆了指定家务的板;没点到的档一律不触发(零命中的类别不该出现在那一行里) */
@@ -6889,8 +6895,9 @@ console.log('T77 收工提醒分级压成一行')
     for (const [word, cell, fx] of only) {
       const g = runStop(NEW_SCRIPTS, fx.root)
       const line = lineOf(g)
-      ok(g.status === 0 && line === `看板守卫:${cell} —— 详情 node ${join(NEW_SCRIPTS, 'ddd.mjs')} audit`,
-        `只有「${word}」时,那一行只有这一格,且 <plugin> 路径填实`, JSON.stringify([line, msgOf(g).slice(0, 200)]))
+      ok(g.status === 0 && line === `看板守卫:${cell} —— 详情 ddd audit`,
+        `只有「${word}」时,那一行只有这一格,结尾就是 ddd audit`, JSON.stringify([line, msgOf(g).slice(0, 200)]))
+      ok(noPath(line), `那一行结尾是 ddd audit,不带 /scripts/ddd.mjs 也不带绝对路径(${word})`, JSON.stringify(line))
       ok(hit(line).join(',') === word, `零的七类一个字都不出(${word})`, hit(line).join(','))
       ok(runAudit(fx.kb).stdout.includes('家务(1):'), `audit 那头把它算在家务一级(${word})`)
     }
@@ -6915,8 +6922,9 @@ console.log('T77 收工提醒分级压成一行')
     })
     const g = runStop(NEW_SCRIPTS, fx.root)
     const line = lineOf(g)
-    ok(line === `看板守卫:长正文 1 · 未提交反馈 3(#277) · 可清截图 10 · 待收账 1 · 收早了 1 · 挂账到期 1 · 前置已清 1 · 积压 4/0 —— 详情 node ${join(NEW_SCRIPTS, 'ddd.mjs')} audit`,
+    ok(line === '看板守卫:长正文 1 · 未提交反馈 3(#277) · 可清截图 10 · 待收账 1 · 收早了 1 · 挂账到期 1 · 前置已清 1 · 积压 4/0 —— 详情 ddd audit',
       '八类同时命中:一行到底,次序照 CHORE_KEYS、分隔符恒是 ` · `,只有未提交反馈带 PR 号', JSON.stringify(line))
+    ok(noPath(line), '八类都在时那一行也不带路径(积压那格的 4/0 不算路径)', JSON.stringify(line))
     ok(msgOf(g).split('\n').length === 1, '家务那八段在守卫这头合计只占一行(0.17.4 是八段)', JSON.stringify(msgOf(g).slice(0, 200)))
     // 同一块板两头对账:audit --json 的每一格数字与那一行里的数逐个相等
     const j = JSON.parse(runAudit(fx.kb, ['--json']).stdout)
@@ -7076,6 +7084,462 @@ console.log('T77 收工提醒分级压成一行')
         '分支与生成物那几条「坏了」的次序与措辞也与 0.17.4 逐字节相同(只归一化两块板各自的路径)',
         JSON.stringify([bare(oe, ba.root, oldScripts).slice(0, 200), bare(of, bb.root, NEW_SCRIPTS).slice(0, 200)]))
     }
+  }
+}
+
+// ============ T78 验收名册与口令(0.17.6:acceptanceFeedback 写成 { pin })============
+// 0.17.5 之前,任何能打开看板的人都能在验收账上署任何名。Tailscale 是信任边界,这不是安全问题,
+// 是纪律问题:验收署名是账,谁能在账上出现该有人点头。做法 = 名册(进 git 的一份 JSON)+ 4 位口令,
+// 名字进名册要口令,账只认名册里的名字;acceptanceFeedback: true 的板(没配口令)一个字节都不变。
+console.log('T78 验收名册与口令')
+{
+  const fx78 = mkFixture('fx78', { 's.html': demoHtml('s') })
+  const kb = fx78.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const accP = join(kb, 'acceptance-manifest.json'), rosP = join(kb, 'acceptance-roster.json')
+  const jsonlP = join(kb, 'acceptance-feedback.jsonl')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  wr(accP, {
+    current: 277,
+    lists: [{
+      pr: 277, revision: 2, title: '通扫收口',
+      groups: [{ id: 'J', title: 'J 组', tip: '' }],
+      items: [{ id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' }],
+    }],
+  })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  cfg.acceptanceFeedback = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const noPin = readFileSync(idxP, 'utf8')
+  ok(!noPin.includes('accFbPinNeed') && !noPin.includes('fbRoster') && !noPin.includes('acceptance-roster')
+    && !noPin.includes('api/acceptance/who') && !noPin.includes('accwhopi'),
+    '冻结①:acceptanceFeedback: true(没配口令)的板 —— 名册与口令那套一个字节都不烤进去')
+
+  cfg.acceptanceFeedback = { pin: '1111' }
+  wr(cfgP, cfg)
+  const rOn = runGen(NEW_SCRIPTS, kb)
+  ok(rOn.status === 0, '{ "pin": "1111" } 写法:gen exit 0', rOn.stderr.slice(0, 200))
+  const on = readFileSync(idxP, 'utf8')
+  ok(!on.includes('1111'), '口令一个字都不烤进产物 —— 页面拿它去问服务端,不在本地比对')
+  ok(on.includes('function accFbPinNeed(sendable, hasRoster, names, name)') && on.includes('function fbRoster()')
+    && on.includes("fetch('acceptance-roster.json', { cache: 'no-store' })") && on.includes("fetch('api/acceptance/who'"),
+    '配了口令才烤:名册那一关 + 两条运行期取数(名册 no-store,与 jsonl 同一把尺)')
+  ok(on.includes("pi.placeholder = '新名字要口令'") && on.includes("pi.inputMode = 'numeric'")
+    && on.includes('pi.maxLength = 4') && on.includes("pi.autocomplete = 'off'"),
+    '口令格形制:占位「新名字要口令」/ inputmode=numeric / maxlength=4 / autocomplete=off')
+  ok(on.includes('f.insertBefore(pw, f.lastChild)') && on.includes('.accwhopi {') && on.includes('.accwhow.bad .accwhopi'),
+    '口令格落在同一行里(名字格与那句灰字之间),错了在框内右缘出灰字')
+  ok(on.includes("throw new Error(r.status === 403 ? '口令不对' : '加不进名册(' + r.status + ')')")
+    && on.includes('pmsg.hidden = false'),
+    '口令不对:框里出那句原话,框不关(人还在这儿,再打一遍就是了)')
+  ok(on.includes('if (okName !== v) { gate(v); return }'),
+    '过了关的名字记在 okName:人回头又改了名就得重过一次(不拿上一个名字的口令给新名字背书)')
+  // 病例:口令格一旦出来就只认口令。新人打了自己的名字、口令格冒出来,这时他改成名册里那个
+  // 在用的名字回车 —— 收到的是「口令不对」,除非猜中口令或整次重来。规矩写的是「换回名册里的
+  // 旧名也不问」,所以名册拉回来那一份要记着(seen),每一下都拿它重判一次
+  ok(on.includes('if (seen !== undefined && !accFbPinNeed(fbSendable(), seen !== null, seen, v)) { okName = v; save(); return }')
+    && on.includes('seen = names') && on.includes('if (o && o.names) seen = o.names.map(fbWhoNorm)'),
+    '名册拉回来就记着:名字改回在册的那个,不再问口令(who 回的整份名册也拿来刷新它)')
+  ok(on.includes("return o ? ((o.names || []).map(fbWhoNorm)) : null"),
+    '页面比名册前也过一遍 fbWhoNorm —— 服务端比的是归一后的串,两头得用同一把尺')
+  ok(on.includes('FB_QUEUE.length = 0') && on.includes('go.forEach(function (q) { q.run() })'),
+    '0.17.4 的补记队列原样还在:口令过了之后,刚才点的每一下照样按点击顺序补记')
+
+  // ---- 纯函数:在名册 / 不在 / 降级 / 没有名册机制(从产物里原样抠出来跑)----
+  {
+    const fbSrc = on.slice(on.indexOf('/* ---- 纯函数区'), on.indexOf('/* ---- 运行期 ---- */'))
+    const F = new Function(fbSrc + '\nreturn { accFbPinNeed }')()
+    ok(F.accFbPinNeed(true, true, ['甲', '乙'], '甲') === false, '名册里有这个名字:不问口令(换回旧名同理)')
+    ok(F.accFbPinNeed(true, true, ['甲'], '乙') === true, '新名字:问口令')
+    ok(F.accFbPinNeed(true, true, [], '乙') === true, '名册在、但一个名字都没有:第一个人也要口令')
+    ok(F.accFbPinNeed(false, true, ['甲'], '乙') === false, '降级(这台没有写口):不问 —— 写不进共享账,名册无从谈起')
+    ok(F.accFbPinNeed(true, false, null, '乙') === false, '拉名册 404(宿主 serve.py 还是老版):照 0.17.5 不问')
+  }
+
+  // ---- pin 形状不对:gen 硬报错并说清(悄悄当「没配口令」= 谁都能署名,而人以为配上了)----
+  for (const bad of [{ pin: '12' }, { pin: '12345' }, { pin: 'abcd' }, { pin: 1111 }, {}]) {
+    cfg.acceptanceFeedback = bad
+    wr(cfgP, cfg)
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status !== 0 && /pin/.test(r.stderr) && /4 位数字/.test(r.stderr),
+      `pin 形状不对(${JSON.stringify(bad)})→ gen 硬报错,一句说清两种写法`, `${r.status} ${r.stderr.slice(0, 160)}`)
+  }
+  {
+    const c = rd(cfgP)
+    c.acceptanceFeedback = 'yes' // true / 对象 以外的写法照 0.17.5 静默当没开(不在升级时把好板打死)
+    wr(cfgP, c)
+    const r = runGen(NEW_SCRIPTS, kb)
+    ok(r.status === 0 && !readFileSync(idxP, 'utf8').includes('data-accme'),
+      '既不是 true 也不是对象(如字符串):照 0.17.5 当没开,不报错')
+  }
+  cfg.acceptanceFeedback = { pin: '1111' }
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+
+  // ---- 读法只有一处:gen / 守卫 / init 都走 accfb.mjs,不各写一遍 ----
+  {
+    for (const f of ['gen.mjs', 'audits.mjs', 'init.mjs']) {
+      const s = readFileSync(join(NEW_SCRIPTS, f), 'utf8')
+      ok(s.includes("from './accfb.mjs'") && !/cfg\.acceptanceFeedback\s*===\s*true/.test(s),
+        `${f} 走同一只 accFeedback(),不自己判 acceptanceFeedback === true`)
+    }
+    ok(readFileSync(join(NEW_SCRIPTS, 'accfb.mjs'), 'utf8').includes('ACC_PIN_RE'), '4 位数字那把尺也只有那一处')
+  }
+
+  // ---- serve.py:第三条写口 + 名册门(随机端口,同一个测试负责收尸)----
+  if (!HAS_PY3) {
+    ok(true, '本机没有 python3,serve.py 那组跳过(CI 的 ubuntu 上有)')
+  } else {
+    cpSync(join(REPO, 'templates', 'serve.py'), join(kb, 'serve.py'))
+    const srvSrc = readFileSync(join(kb, 'serve.py'), 'utf8')
+    ok(/^# ddd-serve v4$/m.test(srvSrc),
+      'serve.py 版本戳升到 v4(写口的形状变了:多一条 who,mark/shot 多一道名册门)')
+    ok(!srvSrc.includes('ROSTER_FILE + ".tmp"') && srvSrc.includes('threading.get_ident()'),
+      '名册的临时文件名带线程号:这台服务是线程化的,写死一个 .tmp 就是两个线程对写同一个文件')
+    const srv = await startServe(kb)
+    try {
+      const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(64)])
+      const post = (route, body, extra) => req(srv.base, route,
+        { method: 'POST', headers: { 'Content-Type': 'application/json', ...extra }, body: JSON.stringify(body) })
+      const who = (body, extra) => post('/api/acceptance/who', body, extra)
+      const mark = (body) => post('/api/acceptance/mark', body)
+      const shot = (q, buf) => req(srv.base, '/api/acceptance/shot?' + q,
+        { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: buf })
+
+      // ① 没配口令(acceptanceFeedback: true):who 口不存在,mark 照旧收任何名字 —— 冻结②
+      {
+        const c = rd(cfgP); c.acceptanceFeedback = true; wr(cfgP, c)
+        // 501 不是 404:0.17.5 对这条路径答的就是这一句(它没有 who 这条路),而「true 的板逐响应
+        // 与 0.17.5 相同」是这一版的硬口径。答 404 + 一句 JSON 解释,探针矩阵上就是一处差异
+        const w = await who({ name: '路人', pin: '1111' })
+        ok(w.status === 501 && /Unsupported method/.test(w.text),
+          '冻结②:没配口令的板 —— who 这条路压根不存在(501,与 0.17.5 同一句)', `${w.status} ${w.text.slice(0, 90)}`)
+        ok((await mark({ pr: 277, item: 'JJ3', who: '路人甲', verdict: 'ok' })).status === 200,
+          '冻结②:没配口令时 mark 照旧收任何名字(0.17.0 起的行为一字不改)')
+        ok(!existsSync(rosP), '名册文件也没被创建出来 —— 没配口令的板上根本没有名册这回事')
+        ok((await req(srv.base, '/acceptance-roster.json')).status === 404,
+          '冻结②:名册那份 GET 也照旧是静态文件(文件不在就 404,服务端不代答)')
+        // 反馈整个关掉的板:同一条路径同样是 501(0.17.5 连 do_POST 的第一道门都没走到这儿)
+        const c0 = rd(cfgP); delete c0.acceptanceFeedback; wr(cfgP, c0)
+        const w0 = await who({ name: '路人', pin: '1111' })
+        ok(w0.status === 501 && /Unsupported method/.test(w0.text),
+          '冻结②:acceptanceFeedback 关着的板 —— who 同样 501,不是「未开」那句 404', `${w0.status} ${w0.text.slice(0, 90)}`)
+      }
+      const c2 = rd(cfgP); c2.acceptanceFeedback = { pin: '1111' }; wr(cfgP, c2)
+
+      // ② pin 形状不对:写口一律 500 + 一句说清(不退化成「没口令」)
+      {
+        const c = rd(cfgP); c.acceptanceFeedback = { pin: '12' }; wr(cfgP, c)
+        const w = await who({ name: '甲', pin: '12' })
+        const m = await mark({ pr: 277, item: 'JJ3', who: '甲', verdict: 'ok' })
+        ok(w.status === 500 && m.status === 500 && /4 位数字/.test(String(m.json && m.json.error)),
+          'pin 形状不对:写口一律 500 + 一句说清(悄悄当「没配」就是谁都能署名)', `${w.status}/${m.status} ${m.text.slice(0, 120)}`)
+        wr(cfgP, c2)
+      }
+
+      // ③ 名册:缺席 = 空;口令对就进;去重;归一化(与署名同一套)
+      // 配了口令时名册那份 GET 由服务端答,文件还没建也答一份空的:答 404 的话页面读成「这块板
+      // 没有名册这回事」→ 不问口令就署名 → mark 那头按名册 403,而人被告知去输的那格永远不会出现。
+      // 第一个人上板时名册文件本来就不在,这一档是常态不是边角
+      {
+        const g0 = await req(srv.base, '/acceptance-roster.json')
+        ok(g0.status === 200 && JSON.stringify(g0.json) === '{"names":[]}',
+          '名册文件还没建:GET 答 200 空名册(不是 404)—— 第一个人才进得了名册', `${g0.status} ${g0.text.slice(0, 80)}`)
+        ok(!existsSync(rosP), '而且只是答一份空的,没顺手把文件建出来(名册是人提交进 git 的东西)')
+      }
+      const w1 = await who({ name: '  tester-a  ', pin: '1111' })
+      ok(w1.status === 200 && JSON.stringify(w1.json.names) === JSON.stringify(['tester-a']),
+        '口令对:名字归一(去首尾空白)后进名册,回的是整份名册', w1.text.slice(0, 120))
+      ok(rd(rosP).names.length === 1, '名册落盘就是那一份 JSON(进 git 的东西,不是只增的 jsonl)')
+      const w2 = await who({ name: 'tester-a', pin: '1111' })
+      ok(w2.status === 200 && rd(rosP).names.length === 1, '同一个名字再输一次口令:去重,名册里不留两行')
+      const w3 = await who({ name: 'tester-b', pin: '1111' })
+      ok(w3.status === 200 && rd(rosP).names.join(',') === 'tester-a,tester-b',
+        '控制字符照署名那套清掉(名册与账上的名字必须是同一个串,否则永远对不上)', JSON.stringify(rd(rosP).names))
+      const w4 = await who({ name: '甲'.repeat(30), pin: '1111' })
+      ok(w4.status === 200 && rd(rosP).names[2] === '甲'.repeat(20), '超过 20 字按码点切到 20(与 fbWhoNorm 同一把尺)')
+      const w5 = await who({ name: '', pin: '1111' })
+      ok(w5.status === 400 && String(w5.json.error).includes('name'), '空名字:400(写法不对,不是「没这个份」)')
+
+      // ④ 口令不对:sleep 1s 再 403,名册一个字节不长
+      {
+        const before = readFileSync(rosP, 'utf8')
+        const t0 = Date.now()
+        const bad = await who({ name: '路人', pin: '9999' })
+        const dt = Date.now() - t0
+        ok(bad.status === 403 && String(bad.json.error) === '口令不对', '口令不对:403 + 一句原话', `${bad.status} ${bad.text.slice(0, 90)}`)
+        ok(dt >= 1000, '错口令服务端先 sleep 1s 再答(不锁不计数,只防手滑连点)', `${dt}ms`)
+        ok((await who({ name: '路人' })).status === 403, '压根没带 pin 字段:同样 403')
+        ok(readFileSync(rosP, 'utf8') === before, '被拒的那两笔:名册一个字节没长')
+      }
+
+      // ⑤ mark / shot 的名册门
+      {
+        const m1 = await mark({ pr: 277, item: 'JJ3', who: '路人', verdict: 'ok' })
+        ok(m1.status === 403 && String(m1.json.error).includes('未在名册'),
+          '配了口令:名册外的名字写不进账(403「未在名册」,不是 400)', `${m1.status} ${m1.text.slice(0, 120)}`)
+        const s1 = await shot('pr=277&item=JJ3&who=' + encodeURIComponent('路人'), JPG)
+        ok(s1.status === 403 && String(s1.json.error).includes('未在名册'), '图那条口同一道门')
+        ok(readdirSync(join(kb, 'shots')).every((f) => !f.startsWith('acc-277-JJ3-')), '被挡下的那张图没落盘')
+        const m2 = await mark({ pr: 277, item: 'JJ3', who: 'tester-a', verdict: 'ok' })
+        ok(m2.status === 200 && m2.json.who === 'tester-a', '名册里的名字:照旧写得进', m2.text.slice(0, 120))
+      }
+
+      // ⑥ 跨站门对 who 同样生效(别人的网页替你的浏览器往名册里加人,一个都不许)
+      {
+        const before = readFileSync(rosP, 'utf8')
+        const f1 = await who({ name: '别人加的', pin: '1111' }, { Origin: 'https://evil.example' })
+        ok(f1.status === 403 && String(f1.json.error).includes('Origin'), '跨站 Origin:403(与两条老写口同一道门)', f1.text.slice(0, 90))
+        const f2 = await who({ name: '别人加的', pin: '1111' }, { 'Sec-Fetch-Site': 'cross-site' })
+        ok(f2.status === 403 && String(f2.json.error).includes('Sec-Fetch-Site'), '浏览器盖的跨站戳:403')
+        const f3 = await req(srv.base, '/api/acceptance/who', {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: JSON.stringify({ name: '别人加的', pin: '1111' }),
+        })
+        ok(f3.status === 400 && String(f3.json.error).includes('Content-Type'),
+          'who 也认死 application/json —— text/plain 是 CORS simple type,跨站一行 fetch 就能加人', f3.text.slice(0, 90))
+        ok(readFileSync(rosP, 'utf8') === before, '被挡下的三笔:名册一个字节没长')
+      }
+
+      // ⑦ 名册的 GET 与账一样不吃缓存(页面每次署名现拉)
+      {
+        const g = await req(srv.base, '/acceptance-roster.json')
+        ok(g.status === 200 && String(g.headers.get('cache-control')).includes('no-store'),
+          '名册 GET 带 no-store(与 jsonl 同一把尺)', String(g.headers.get('cache-control')))
+      }
+
+      // ⑧ 名册是人手写进 git 的那一份:两边都过同一只归一再比,别留一道人看不见的门
+      {
+        wr(rosP, { names: ['  tester-hand  ', 'tester-a'] }) // 手敲 JSON 落下的首尾空白
+        const m = await mark({ pr: 277, item: 'JJ3', who: 'tester-hand', verdict: 'ok' })
+        ok(m.status === 200 && m.json.who === 'tester-hand',
+          '名册项带首尾空白:页面送的归一名照样认得(账上记的也是归一后的那个串)', `${m.status} ${m.text.slice(0, 120)}`)
+        ok((await mark({ pr: 277, item: 'JJ3', who: 'tester-nobody', verdict: 'ok' })).status === 403,
+          '归一只是把两边拉到同一把尺上,名册外的名字照样 403')
+        const g = await req(srv.base, '/acceptance-roster.json')
+        ok(g.status === 200 && g.json.names.length === 2, '名册读坏不了就照原样答(归一只发生在比的那一刻)')
+      }
+
+      // ⑨ 名册读坏了:答空名册,而不是把全板的人卡在 403 上没有出路
+      {
+        const keep = readFileSync(rosP, 'utf8')
+        writeFileSync(rosP, '{"names": ["tester-a"')  // 半截 JSON(手改手滑 / 上一版撕出来的)
+        const g = await req(srv.base, '/acceptance-roster.json')
+        ok(g.status === 200 && JSON.stringify(g.json) === '{"names":[]}',
+          '名册不是合法 JSON:GET 答空名册 —— 页面会问口令,输一次就把它整份重写回来', g.text.slice(0, 80))
+        ok((await who({ name: 'tester-a', pin: '1111' })).status === 200 && rd(rosP).names.join(',') === 'tester-a',
+          '输一次口令,坏名册被整份重写回来(自己能爬出来,不必有人上机修文件)')
+        writeFileSync(rosP, keep)
+      }
+
+      // ⑩ 两个人同一秒加名字:名册可以掉一个(ponytail 认的),但不许撕成读不回来的半截
+      // 病例:临时文件名是写死的一个 .tmp,两个线程一起 O_TRUNC 往同一个文件里对写,长的写在前、
+      // 短的写在后,rename 出去的是「短的 + 长的尾巴」—— 名册从此不是 JSON,全板的人一律 403
+      {
+        const keep = readFileSync(rosP, 'utf8')
+        for (let i = 0; i < 12; i++) {
+          await Promise.all([who({ name: `n${i}`, pin: '1111' }), who({ name: `longname-${i}-xxxxxxxx`, pin: '1111' })])
+          let names = null
+          try { names = rd(rosP).names } catch (e) { names = String(e) }
+          ok(Array.isArray(names) && names.every((n) => typeof n === 'string'),
+            `并发两写第 ${i + 1} 轮:名册仍是一份读得回来的 JSON`, String(names).slice(0, 160))
+        }
+        ok(readdirSync(kb).every((f) => !f.endsWith('.tmp')), '临时文件都被 rename 吃掉了,看板目录不留残渣')
+        writeFileSync(rosP, keep)
+      }
+
+      // ⑪ pin 的形状:Python 的 $ 还认「末尾那个换行」,而页面那把尺(/^[0-9]{4}$/)不认
+      {
+        const c = rd(cfgP); c.acceptanceFeedback = { pin: '1111\n' }; wr(cfgP, c)
+        const w = await who({ name: 'tester-a', pin: '1111\n' })
+        ok(w.status === 500 && /4 位数字/.test(String(w.json && w.json.error)),
+          '"1111\\n" 不是 4 位数字口令:serve 与 gen 判得一样(硬报错,不是一边收一边拒)', `${w.status} ${w.text.slice(0, 120)}`)
+        wr(cfgP, c2)
+      }
+      ok((await req(srv.base, '/api/nope', { method: 'POST', body: '{}' })).status === 501,
+        '别的 POST 路径照旧 501(多一条写口没把这句兜底改掉)')
+    } finally {
+      srv.proc.kill('SIGKILL')
+    }
+    rmSync(jsonlP, { force: true })
+  }
+
+  // ---- kanban-init:开着反馈却没配口令 → plan / apply 各一行提醒,config 一个字节不动 ----
+  {
+    const fx = mkFixture('fx78init', { 's.html': demoHtml('s') })
+    const g = (...a) => spawnSync('git', a, { cwd: fx.root, encoding: 'utf8' })
+    g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
+    g('add', '-A'); g('commit', '-q', '-m', 'init')
+    const cP = join(fx.kb, 'kanban.config.json')
+    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), ...extra, '--dir', fx.root],
+      { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS } })
+    const c = JSON.parse(readFileSync(cP, 'utf8'))
+    c.acceptanceFeedback = true // 只开这一个:init 那条提醒只看它,验收清单不必在场
+    writeFileSync(cP, JSON.stringify(c, null, 2) + '\n')
+    const before = readFileSync(cP, 'utf8')
+    const p = runInit('plan')
+    ok(/没配口令/.test(p.stdout) && /"pin": "1111"/.test(p.stdout) && count(p.stdout, '没配口令') === 1,
+      'plan:开着反馈没配口令 → 一行提醒(说清怎么写),只说一次', (p.stdout.match(/\[plan\][^\n]*口令[^\n]*/) || [''])[0].slice(0, 160))
+    const a = runInit('apply', '--yes')
+    ok(a.status === 0 && /没配口令/.test(a.stdout), 'apply:同一行也说一次(升级时人多半只跑 apply)', `${a.status} ${(a.stderr || '').slice(0, 200)}`)
+    ok(readFileSync(cP, 'utf8') === before, '两次都没改写 config —— 那是宿主的文件(与 .gitignore 同一条理由)')
+    c.acceptanceFeedback = { pin: '1111' }
+    writeFileSync(cP, JSON.stringify(c, null, 2) + '\n')
+    ok(!/没配口令/.test(runInit('plan').stdout), '配上了就不再说')
+    c.acceptanceFeedback = false
+    writeFileSync(cP, JSON.stringify(c, null, 2) + '\n')
+    ok(!/没配口令/.test(runInit('plan').stdout), '压根没开反馈:这条提醒一个字都不出')
+  }
+}
+
+// ============ T79 验收 tab 副标题说人话(0.17.6 两处小修之一)============
+// 病例:标题下那行原来是「清单源 acceptance-manifest.json · 判定存 acceptance-feedback.jsonl
+// (改 revision 即作废旧账)· 判定(✓/✕)、备注与截图经本机的 serve.py 共享给同看板的人」——
+// 三个开发词汇(文件名 / revision / serve.py)摆给用户看,而用户要知道的只有两件事。
+console.log('T79 验收副标题说人话')
+{
+  const fx79 = mkFixture('fx79', { 's.html': demoHtml('s') })
+  const kb = fx79.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  wr(join(kb, 'acceptance-manifest.json'), {
+    current: 277,
+    lists: [{
+      pr: 277, revision: 2, title: '通扫收口',
+      groups: [{ id: 'J', title: 'J 组', tip: '' }],
+      items: [{ id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' }],
+    }],
+  })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const off = readFileSync(idxP, 'utf8')
+  // 验收 pane 的标题下那一行 = 「… · 验收</h1>」之后第一只 .sess
+  const sub = (html) => {
+    const at = html.indexOf('· 验收</h1>')
+    const m = at < 0 ? null : /<span class="sess">([\s\S]*?)<\/span>/.exec(html.slice(at))
+    return m ? m[1] : ''
+  }
+  ok(sub(off).includes('清单源 <code>acceptance-manifest.json</code>') && sub(off).includes('勾选存这台浏览器'),
+    '只开验收 tab(没开反馈共享)那一档:副标题一个字都没动 —— 这一版只修反馈开着的那句', sub(off).slice(0, 120))
+
+  cfg.acceptanceFeedback = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const on = readFileSync(idxP, 'utf8')
+  const s1 = sub(on)
+  ok(s1 === '判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废',
+    '反馈开着:副标题就是这一句人话(两件事,一个开发词汇都不带)', s1)
+  for (const word of ['acceptance-manifest.json', 'acceptance-feedback.jsonl', 'revision', 'serve.py', '<code>']) {
+    ok(!s1.includes(word), `副标题里不出现「${word}」—— 出处归 README,不占用户那一行`)
+  }
+  ok(!on.includes('判定(✓/✕)、备注与截图经本机的') && !on.includes('判定存 <code>acceptance-feedback.jsonl</code>'),
+    '旧那两截(serve.py 那句 + 判定存 jsonl 那句)全页一个字都不剩')
+
+  // 配了口令的板走同一句(副标题与口令无关,两种写法一个样)
+  cfg.acceptanceFeedback = { pin: '1111' }
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  ok(sub(readFileSync(idxP, 'utf8')) === s1, '配了口令的板:同一句(副标题与口令无关)')
+
+  // 页底那行出处(<code>gen.mjs</code> 生成自 …)照旧在 —— 开发词汇没有被删掉,只是搬离了用户那一行
+  ok(readFileSync(idxP, 'utf8').includes('<p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code>'),
+    '页底那行出处照旧:文件名不是不能说,是不该摆在标题下第一行')
+}
+
+// ============ T80 换人那一行不跳 + 与 0.17.5 的冻结对照(0.17.6)============
+// 病例:点一下顶栏的「换人」,输入框追加在 chip 之后 —— 顶栏换行,从这一行往下整块板集体下移
+// 一截,换完又跳回来。修法是**替换**:chip 的两格让位给输入框,落在同一行、同一高度。
+console.log('T80 换人不跳与 0.17.5 冻结对照')
+{
+  const fx80 = mkFixture('fx80', { 's.html': demoHtml('s') })
+  const kb = fx80.kb
+  const cfgP = join(kb, 'kanban.config.json'), idxP = join(kb, 'index.html')
+  const rd = (p) => JSON.parse(readFileSync(p, 'utf8'))
+  const wr = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2) + '\n')
+  wr(join(kb, 'acceptance-manifest.json'), {
+    current: 277,
+    lists: [{
+      pr: 277, revision: 2, title: '通扫收口',
+      groups: [{ id: 'J', title: 'J 组', tip: '' }],
+      items: [{ id: 'JJ3', group: 'J', title: '条目甲', do: '点一下', exp: '有反应' }],
+    }],
+  })
+  const cfg = rd(cfgP)
+  cfg.acceptanceTab = true
+  cfg.acceptanceFeedback = true
+  wr(cfgP, cfg)
+  runGen(NEW_SCRIPTS, kb)
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- 形态:替换而不是追加 ----
+  ok(on.includes('else { fbChipHide(); host.appendChild(f) }') && !on.includes('else host.appendChild(f)'),
+    'chip 那一处是替换:先把「我是 X · 换人」两格藏起来再放输入框(不是直接追加在它们后面)')
+  ok(on.includes('function fbChipHide() { fbChipToggle(true) }') && on.includes('function fbChipShow() { fbChipToggle(false) }')
+    && on.includes('if (n) n.hidden = hide') && on.includes('if (b) b.hidden = hide'),
+    '让位是 hidden 不是 remove —— 名字还要写回那两格(fbWhoChip 照旧改它们的 textContent)')
+  ok(count(on, 'fbChipShow()') === 3 && on.includes("var close = function () { f.remove(); fbChipShow(); if (row) fbOpen(row) }"),
+    '两条退出路都还位:close(Esc / 署完)一条,框被搬去别的行那条一条(加上定义那行共 3 处)',
+    String(count(on, 'fbChipShow()')))
+  ok(on.includes('min-height: 19px; align-self: center; }') && on.includes('.accme .accwhoi { width: 150px; font-size: 11px; line-height: 15px; padding: 0 7px; }'),
+    '同一高度靠两条 CSS:chip 定高(两态一致)+ 框用矮版(17px 外高,塞得进 19px)')
+  ok(!/\.accme \{[^}]*align-items: baseline/.test(on),
+    'chip 不再按基线对齐 —— 基线随「里面装的是文字还是输入框」变,那 0.7px 就是一次微跳')
+
+  // ---- 与 0.17.5 的逐字节对照:true 档只许差那两处修错(参照树取自 tag)----
+  const TAG = 'demo-driven-development--v0.17.5'
+  const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.5 逐字节对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v0175')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v0175.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const oldScripts = join(oldRoot, 'scripts')
+    const mk = (name) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      cpSync(join(kb, 'acceptance-manifest.json'), join(fx.kb, 'acceptance-manifest.json'))
+      const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+      c.acceptanceTab = true
+      c.acceptanceFeedback = true
+      writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+      return fx
+    }
+    const a = mk('fx80-old'), b = mk('fx80-new')
+    runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
+    const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
+    const oldL = ml(join(a.kb, 'index.html')), newL = ml(join(b.kb, 'index.html'))
+    // 按行做多重集差:行号整体后移不算差异,只看「哪些行没了 / 哪些行是新的」
+    const onlyIn = (x, y) => {
+      const c = new Map()
+      y.forEach((l) => c.set(l, (c.get(l) || 0) + 1))
+      return x.filter((l) => { const n = c.get(l) || 0; if (n) { c.set(l, n - 1); return false } return true })
+    }
+    const gone = onlyIn(oldL, newL), added = onlyIn(newL, oldL)
+    ok(gone.length === 4, '0.17.5 那版里只有 4 行没了(副标题 1 行 + chip 那 3 行)', JSON.stringify(gone).slice(0, 300))
+    ok(gone.every((l) => /\.accme \{|<span class="sess">|var close = function|else host\.appendChild/.test(l)),
+      '没了的那几行全属于这两处修错(副标题 / 换人那一行),别处一行没动', JSON.stringify(gone).slice(0, 300))
+    // 两处修错各自的行 + 它们的续行(多行注释 / 多行 CSS 声明 / 那只小函数的函数体)
+    const MARK = /accme|accwho|fbChip|class="sess"|0\.17\.6|chip|顶栏|输入框|整块板|min-height: 19px|hidden = hide|if \(!c\) return|现查|收拾残局|^\s*\}$/
+    ok(added.length === 25 && added.every((l) => MARK.test(l)),
+      '新增的每一行也都属于这两处(其余一个字节不动)',
+      `${added.length} / ${JSON.stringify(added.filter((l) => !MARK.test(l))).slice(0, 300)}`)
+    ok(added.some((l) => l.includes('判定、备注与截图,同看板的人都看得见')) && added.some((l) => l.includes('fbChipHide')),
+      '两处修错确实都在这一份 diff 里(不是「什么都没改也全绿」)')
+
+    // 关档(不开 acceptanceFeedback)照旧逐字节冻结 —— 冻结③
+    const oa = mkFixture('fx80z-old', { 's.html': demoHtml('s') })
+    const ob = mkFixture('fx80z-new', { 's.html': demoHtml('s') })
+    runGen(oldScripts, oa.kb); runGen(NEW_SCRIPTS, ob.kb)
+    ok(ml(join(oa.kb, 'index.html')).join('\n') === ml(join(ob.kb, 'index.html')).join('\n'),
+      '冻结③:acceptanceFeedback 关着的板 —— 归一化版本戳后与 0.17.5 逐字节相同')
   }
 }
 
