@@ -2673,10 +2673,11 @@ const accItemHtml = (l, it) => {
   const fb = !AFB ? '' : `
               <div class="accfoot">
                 <button type="button" class="accfb" data-accfb="${esc(it.id)}" aria-expanded="false" hidden><span class="accfbt"></span></button>
-                <button type="button" class="accadd" data-accadd="${esc(it.id)}" aria-expanded="false">＋ 备注 / 图</button>
+                <button type="button" class="accadd" data-accadd="${esc(it.id)}" aria-expanded="false"><span class="accaddg">▸</span>备注 / 图</button>
               </div>`
+  // id:左栏第三级点条目跳的落点(v0.17.13)。[id] 那条全局 scroll-margin-top 顺带把它从吸顶栏底下拽出来。
   return `
-            <div class="accitem" data-accid="${esc(it.id)}" data-accpr="${it.pr}" data-accround="${esc(it.round)}"${!AFB ? '' : ` data-accrev="${l.rev}"`}>${vd}
+            <div class="accitem" id="acc-${it.pr}-${esc(it.id)}" data-accid="${esc(it.id)}" data-accpr="${it.pr}" data-accround="${esc(it.round)}"${!AFB ? '' : ` data-accrev="${l.rev}"`}>${vd}
               <span class="accno">${esc(it.id)}</span>
               <div class="accib">
                 <p class="accit">${esc(it.title)}${tags}</p>
@@ -2690,10 +2691,13 @@ const accItemHtml = (l, it) => {
 // 分组栏 = 左栏的下一级(v0.17.12)。从前它长在每份清单自己的网格左列里;两级导航之后
 // 一份清单一只、全烤进左栏,只有选中的那只不 hidden。计数与滚动高亮照旧由 syncList / spy 刷,
 // 只是它们改从 [data-accnavk] 找它 —— 它已经不在清单 section 的子树里了。
+// v0.17.13:再往下一级 —— 分组底下是条目。一条 `WW1 标题`,右端一枚我的判定标(✓/✕,由 syncList 刷)。
+// 「分组 #号」那行小标题随之退场:树上这只栏就挂在它那份清单的行下面,不必再自报家门。
 const accNavHtml = (l, sel) => {
   const gs = l.groups.filter((g) => l.items.some((it) => it.group === String(g.id)))
+  const item = (it) => `<a class="accitl" href="#acc-${it.pr}-${esc(encodeURIComponent(it.id))}" data-accitl="${esc(it.id)}" title="${esc(it.title)}"><span class="accitn">${esc(it.id)}</span><span class="accitt">${esc(it.title)}</span><span class="accvm"></span></a>`
   return `
-      <nav class="accnav" data-accnavk="${esc(l.key)}"${sel ? '' : ' hidden'}><p class="accnavh">分组 <span class="accnavp">${l.nums.map((n) => `#${n}`).join(' / ')}</span></p>${gs.map((g) => `<a href="#accg-${esc(l.key)}-${esc(String(g.id))}" data-accgl="${esc(String(g.id))}">${esc(g.title || g.id)}<span class="accgc">0/${l.items.filter((it) => it.group === String(g.id)).length}</span></a>`).join('')}</nav>`
+      <nav class="accnav" data-accnavk="${esc(l.key)}"${sel ? '' : ' hidden'}>${gs.map((g) => `<a href="#accg-${esc(l.key)}-${esc(String(g.id))}" data-accgl="${esc(String(g.id))}">${esc(g.title || g.id)}<span class="accgc">0/${l.items.filter((it) => it.group === String(g.id)).length}</span></a>${l.items.filter((it) => it.group === String(g.id)).map(item).join('')}`).join('')}</nav>`
 }
 const accListHtml = (l, sel) => {
   const gs = l.groups.filter((g) => l.items.some((it) => it.group === String(g.id)))
@@ -2772,29 +2776,33 @@ const ACC_DEG = !AFB ? '' : `
 // 左栏上一级:一份清单一条。`#号 · 标题(单行截断,title 属性给全文)· 已判 N/M`。
 // 分子走 [data-acc] 那套老钩子(syncChips 全页统一刷),gen 期一律烤 0/M。
 // 「验收中」那枚小标只给 current 那份,与卡头上那一枚同一个 .accnow。
+// v0.17.13:行首一枚 ▸/▾ —— 选中的那份是展开态,与板上各处折叠同一套字形。
 const accSideRow = (l, live) => `
-      <a class="accpr${accIsSel(l) ? ' on' : ''}" href="#acc-${l.nums[0]}" data-accsel="${esc(l.key)}"><span class="accprn">${l.nums.map((n) => `#${n}`).join('/')}</span><span class="accprt" title="${esc(l.title || l.key)}">${esc(l.title || l.key)}</span>${live ? '<span class="accnow">验收中</span>' : ''}<span class="accprc" data-acc="${l.nums[0]}">0/${l.items.length}</span></a>`
+      <a class="accpr${accIsSel(l) ? ' on' : ''}" href="#acc-${l.nums[0]}" data-accsel="${esc(l.key)}"><span class="accprg">${accIsSel(l) ? '▾' : '▸'}</span><span class="accprn">${l.nums.map((n) => `#${n}`).join('/')}</span><span class="accprt" title="${esc(l.title || l.key)}">${esc(l.title || l.key)}</span>${live ? '<span class="accnow">验收中</span>' : ''}<span class="accprc" data-acc="${l.nums[0]}">0/${l.items.length}</span></a>`
+// 手风琴的一节:那一行 + 它自己的分组/条目栏(没选中的那几节 hidden 着 = 折起来)。
+const accSideSec = (l, live) => accSideRow(l, live) + accNavHtml(l, accIsSel(l))
 // 左栏(v0.17.12,两级):上一级 PR、下一级选中那份的分组。sticky,一根柱子到底。
 // 上一级那一格只在真有行的时候才出:全收完的板(没 current、每份都有 result)从前也照出一个空 div,
 // 窄屏下那是一条 4px 高的空横滚槽 —— 空段。同理,默认选中的那份万一落在「已验收」那一折里
 // (只有这种板会),烤的时候就把折叠打开:不然首屏是主区在显示一份清单、左栏却一条都没点亮。
 const accDoneHasSel = accDoneSorted.some((l) => accIsSel(l))
+// v0.17.13:分组栏不再独占一小节,而是跟着自己那一行长在树上;.accnavs 只剩一格空位 ——
+// ≤640px 那一档两行 chip 排不成嵌套,运行期把当下那只栏搬进这格当第二行(见 accPlaceNav)。
 const accSideHtml = !ACC || !ACC_ORDER.length ? '' : `
     <nav class="accside">${ACC_CUR || accQueueLists.length ? `
-      <div class="accprs">${ACC_CUR ? accSideRow(ACC_CUR, true) : ''}${accQueueLists.map((l) => accSideRow(l, false)).join('')}
+      <div class="accprs">${ACC_CUR ? accSideSec(ACC_CUR, true) : ''}${accQueueLists.map((l) => accSideSec(l, false)).join('')}
       </div>` : ''}${accDoneSorted.length ? `
-      <details class="accdone"${accDoneHasSel ? ' open' : ''}><summary>已验收 (${accDoneSorted.length})</summary>${accDoneSorted.map((l) => accSideRow(l, false)).join('')}
+      <details class="accdone"${accDoneHasSel ? ' open' : ''}><summary>已验收 (${accDoneSorted.length})</summary>${accDoneSorted.map((l) => accSideSec(l, false)).join('')}
       </details>` : ''}
-      <div class="accnavs">${ACC_ORDER.map((l) => accNavHtml(l, accIsSel(l))).join('')}
-      </div>
+      <div class="accnavs"></div>
     </nav>`
 const acceptancePane = !ACC ? '' : `
   <div class="topbar">
     <h1>${esc(BRAND)} · 验收</h1>
     <span class="sess">${!AFB ? '清单源 <code>acceptance-manifest.json</code> · 勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废'}</span>${ACC_ME_CHIP}
-  </div>${ACC_DEG}
+  </div>${ACC_DEG}${accCurHtml}
   <div class="accpane">${accSideHtml}
-    <div class="accmain">${accCurHtml}${ACC_ORDER.map((l) => accListHtml(l, accIsSel(l))).join('')}${accNoListPrs.length ? `
+    <div class="accmain">${ACC_ORDER.map((l) => accListHtml(l, accIsSel(l))).join('')}${accNoListPrs.length ? `
   <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(safeHref(p.u))}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
   </div>` : ''}
     </div>
@@ -2860,6 +2868,8 @@ const ACC_FB_CSS = !AFB ? '' : `
   .accadd { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-size: 11px;
      color: var(--mut); cursor: pointer; white-space: nowrap; }
   .accadd:hover { color: var(--accent); }
+  /* v0.17.13:入口那枚 ▸/▾ —— 与 .accdone / .detail 的折叠三角同一档字号,颜色随钮走(原来是个不会变的 ＋) */
+  .accaddg { font-size: 10px; margin-right: 3px; }
   .accgot { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 9.5px;
      font-weight: 600; vertical-align: 1px; white-space: nowrap; background: ${tk('seg-bg')}; color: var(--faint); }
   .accdeg { margin: 0 0 14px; font-size: 11.5px; line-height: 1.7; color: var(--faint); }
@@ -2986,7 +2996,11 @@ const ACC_CSS = !ACC ? '' : `
   .accmeta { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
   /* 两级左栏(v0.17.12):上一级 PR、下一级分组,同一根 sticky 的柱子 */
   .accpane { display: grid; grid-template-columns: 210px 1fr; gap: 20px; align-items: start; margin-top: 14px; }
-  .accside { position: sticky; top: calc(var(--hubh, 41px) + 12px); font-size: 12px; min-width: 0; }
+  /* 钉住的落点(v0.17.13)= 真实页头高:--acc-top 由 docsNavSync 量 hubbar(+ 吸顶的 tab 条)一次写进根上。
+     53px 只是 JS 跑到之前的兜底(41px 那个 hubbar 默认 + 12px 气口),不是写死的版面。
+     max-height + overflow-y:左栏比视口高时它自己滚 —— 从前顶上几条被 tab 条盖住、下面几条滚不到。 */
+  .accside { position: sticky; top: var(--acc-top, 53px); max-height: calc(100vh - var(--acc-top, 53px) - 14px);
+     overflow-y: auto; font-size: 12px; min-width: 0; }
   .accmain { min-width: 0; } /* 主区自己会滚的那些块(数据表)靠它才收得住,不把左栏挤窄 */
   .accpr { display: flex; align-items: baseline; gap: 6px; padding: 5px 8px; margin-bottom: 2px;
      border-radius: 6px; line-height: 1.5; color: var(--mut); text-decoration: none; }
@@ -2995,6 +3009,9 @@ const ACC_CSS = !ACC ? '' : `
      darkMode 走 light-dark)。别改回 var(--bg):.ovrow / .pnode 那几处能用,是因为它们坐在 --card 上。 */
   .accpr:hover { background: ${tk('faint-bg')}; }
   .accpr.on { background: var(--brand-soft); color: var(--ink); }
+  /* 行首那枚 ▸/▾:与 .accdone 的折叠三角、.accadd 的入口同一档字号,颜色随行走 */
+  .accprg { flex: none; font-size: 10px; color: var(--faint); }
+  .accpr.on .accprg { color: var(--mut); }
   .accprn { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
   .accprt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .accpr .accnow { flex: none; }
@@ -3006,16 +3023,22 @@ const ACC_CSS = !ACC ? '' : `
   .accdone > summary::-webkit-details-marker { display: none; }
   .accdone > summary::before { content: "▸"; font-size: 10px; }
   .accdone[open] > summary::before { content: "▾"; }
-  .accnavs { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-  .accnav { font-size: 12px; }
-  .accnavh { margin: 0 0 6px 8px; font-size: 10.5px; letter-spacing: .08em; color: var(--faint); }
-  .accnavp { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+  /* .accnavs:宽屏下是空的(每只栏都长在自己那一行下面);窄屏那一档才有东西搬进来当第二行 */
+  .accnav { font-size: 12px; margin: 0 0 6px 12px; } /* 缩一格 = 它是那一行的子级 */
   .accnav a { display: block; padding: 5px 8px; margin-bottom: 2px; border-radius: 6px; line-height: 1.4;
      color: var(--mut); text-decoration: none; }
   .accnav a:hover { background: ${tk('faint-bg')}; } /* 与 .accpr:hover 同一档,见上 */
   .accnav a.on { background: var(--brand-soft); color: var(--ink); }
   .accnav a.done .accgc { color: ${tk('ok-ink')}; }
   .accgc { float: right; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  /* 第三级:条目(v0.17.13)。再缩一格,右端一枚我的判定标 —— 空着就是还没判 */
+  .accnav a.accitl { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px 3px 20px;
+     font-size: 11.5px; color: var(--faint); }
+  .accitn { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .accitt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .accvm { flex: none; width: 10px; text-align: right; font-size: 11px; }
+  .accvm.ok { color: ${tk('ok-ink')}; }
+  .accvm.bad { color: #d44c47; }
   .accfs { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
   .accf { display: flex; gap: 6px; flex-wrap: wrap; }
   .accf button { appearance: none; font: inherit; font-size: 11.5px; padding: 2px 11px; border-radius: 99px; cursor: pointer;
@@ -3064,14 +3087,16 @@ const ACC_CSS = !ACC ? '' : `
      已验收那一折排到两行之后,免得把两行 chip 隔开。 */
   @media (max-width: 640px) {
     .accpane { display: block; }
-    .accside { position: static; display: flex; flex-direction: column; margin-bottom: 12px; }
+    .accside { position: static; display: flex; flex-direction: column; margin-bottom: 12px;
+       max-height: none; overflow: visible; }
     /* :not([hidden]) 不是装饰:作者写的 display 压得过浏览器自带的 [hidden]{display:none},
        少这一截,没选中的那 N 只分组栏会在窄屏上全冒出来(41 份清单 = 41 行)。 */
     .accprs, .accnav:not([hidden]) { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
     .accpr, .accnav a { flex: none; margin-bottom: 0; border: 1px solid var(--line); }
     .accprt { max-width: 11em; }
-    .accnavs { order: 2; margin-top: 8px; padding-top: 0; border-top: 0; }
-    .accnavh { display: none; }
+    .accnav { margin: 0; } /* 这一档它被搬去 .accnavs 当第二行,不再是谁的子级 */
+    .accnav a.accitl { display: none; } /* 条目一级不进 chip:手机上滚主区就够 */
+    .accnavs { order: 2; margin-top: 8px; }
     .accdone { order: 3; }
   }${ACC_FB_CSS}`
 // 运行期:勾选(localStorage;开了 acceptanceFeedback 就换成判定)/ 筛选 / 进度 / 目录 /
@@ -3669,7 +3694,11 @@ ${!AFB_PIN ? '' : `        if (okName !== v) { gate(v); return } // 名册那一
       var ed = box.querySelector('.accfbed')
       ed.hidden = !open
       var add = row.querySelector('[data-accadd]')
-      if (add) add.setAttribute('aria-expanded', open ? 'true' : 'false')
+      if (add) {
+        add.setAttribute('aria-expanded', open ? 'true' : 'false')
+        var ag = add.querySelector('.accaddg') // ▸ 收着 / ▾ 开着(v0.17.13,原来那个 ＋ 点开也不变)
+        if (ag) ag.textContent = open ? '▾' : '▸'
+      }
       // 先把展开区放开再聚焦:display:none 的子树里 focus() 一律不作数 —— 原来的次序让 §2 那两条
       // 「自动展开并聚焦」在首开那一下从来没生效过,判完 ✕ 直接打字,字落在那枚刚获焦的 ✕ 钮上
       // (再敲个空格就等于又按一次它 = 把刚判的那条静默撤回)
@@ -3989,6 +4018,9 @@ const ACC_JS = !ACC ? '' : `
       // querySelector 当场抛 —— 验收与发布进度共用一个 <script>,一抛后面整块都不跑了。
       var rowsById = new Map()
       sec.querySelectorAll('[data-accid]').forEach(function (r) { rowsById.set(r.dataset.accid, r) })
+      // 左栏第三级那几行同理按 id 索引(v0.17.13):判定标与筛选显隐跟着主区同一趟算完
+      var nav = accNavOf(l.k), navById = new Map()
+      if (nav) nav.querySelectorAll('[data-accitl]').forEach(function (a) { navById.set(a.dataset.accitl, a) })
       var ${!AFB ? 'mine = ck[l.k], ' : ''}vt = 0, vd = 0, ${!AFB ? '' : 'vb = 0, '}gc = {}
       l.items.forEach(function (it) {
         var ${!AFB ? 'on = Boolean(mine[it.id])' : "v = fbVdOf(l, it.id, it.pr), on = v === 'ok', bd = v === 'bad', jd = on || bd"}, shown = visible(l, it)
@@ -3999,12 +4031,20 @@ const ACC_JS = !ACC ? '' : `
           var box = row.querySelector('input')
           if (box) box.checked = on` : 'fbPaint(row, v)'}
         }
+        var il = navById.get(it.id)
+        if (il) {
+          il.style.display = shown ? '' : 'none'
+          var mk = il.querySelector('.accvm')
+          if (mk) {
+            mk.textContent = on ? '✓' : ${!AFB ? "''" : "bd ? '✕' : ''"}
+            mk.classList.toggle('ok', on); mk.classList.toggle('bad', ${!AFB ? 'false' : 'bd'})
+          }
+        }
         if (shown) { vt++; if (${!AFB ? 'on' : 'jd'}) vd++${!AFB ? '' : '; if (bd) vb++'} }
         gc[it.g] = gc[it.g] || { t: 0, d: 0, v: 0${!AFB ? '' : ', b: 0'} }
         gc[it.g].t++; if (${!AFB ? 'on' : 'jd'}) gc[it.g].d++; if (shown) gc[it.g].v++${!AFB ? '' : '; if (bd) gc[it.g].b++'}
       })
       sec.querySelectorAll('.accgrp').forEach(function (g) { g.style.display = (gc[g.dataset.accg] || {}).v ? '' : 'none' })
-      var nav = accNavOf(l.k)
       if (nav) nav.querySelectorAll('[data-accgl]').forEach(function (a) {
         var c = gc[a.dataset.accgl] || { t: 0, d: 0, v: 0${!AFB ? '' : ', b: 0'} }
         var n = a.querySelector('.accgc'); if (n) n.textContent = c.d + '/' + c.t
@@ -4097,7 +4137,12 @@ const ACC_JS = !ACC ? '' : `
       document.querySelectorAll('#pane-acceptance [data-acck], #pane-acceptance [data-accnavk]').forEach(function (e) {
         e.hidden = (e.dataset.acck || e.dataset.accnavk) !== k
       })
-      document.querySelectorAll('[data-accsel]').forEach(function (a) { a.classList.toggle('on', a.dataset.accsel === k) })
+      document.querySelectorAll('[data-accsel]').forEach(function (a) {
+        var mine = a.dataset.accsel === k
+        a.classList.toggle('on', mine)
+        var g = a.querySelector('.accprg') // 手风琴:选中的那份展开成 ▾,别的收回 ▸(v0.17.13)
+        if (g) g.textContent = mine ? '▾' : '▸'
+      })
       // 选中的那条要是折在「已验收」里,把折叠打开 —— 不然人看不见自己刚点到哪儿
       var row = document.querySelector('[data-accsel="' + k + '"]')
       if (row) for (var rp = row.parentElement; rp; rp = rp.parentElement) if (rp.tagName === 'DETAILS') rp.open = true
@@ -4111,7 +4156,22 @@ const ACC_JS = !ACC ? '' : `
           if (rr.left < sr.left || rr.right > sr.right) sc.scrollLeft += rr.left - sr.left - (sr.width - rr.width) / 2
         }
       }
+      accPlaceNav()
+      // 宽屏这根柱子自己会滚(max-height + overflow-y):选中的那条得落在它自己的可视区里。
+      // block:'nearest' 只补最小的一段;这根柱子钉在页头底下、整根都在视口内,窗口因此不必跟着动。
+      var side = row && row.closest ? row.closest('.accside') : null
+      if (side && side.scrollHeight > side.clientHeight + 1) row.scrollIntoView({ block: 'nearest' })
       window.accSync()
+    }
+    // 第三级挂哪儿(v0.17.13):宽屏挂在自己那一行的正下方 = 手风琴;≤640px 是两行 chip
+    // (PR 一行、分组一行),嵌在横滚槽里排不成 —— 那一档把当下这只栏搬进 .accnavs 那格当第二行。
+    function accPlaceNav() {
+      var nav = accNavOf(SEL), row = document.querySelector('[data-accsel="' + SEL + '"]')
+      if (!nav || !row || !row.insertAdjacentElement) return
+      var box = document.querySelector('#pane-acceptance .accnavs')
+      var narrow = window.matchMedia && window.matchMedia('(max-width: 640px)').matches
+      if (narrow) { if (box && nav.parentElement !== box) box.appendChild(nav) }
+      else if (nav.previousElementSibling !== row) row.insertAdjacentElement('afterend', nav)
     }
     function accRoute() { // #acc-230 / #accg-… 深链:先把目标那一份选中(它多半 hidden 着),再展开、再滚
       var id = decodeURIComponent(location.hash.slice(1))
@@ -4131,6 +4191,8 @@ const ACC_JS = !ACC ? '' : `
     LISTS.forEach(function (l) { byKey[l.k] = l; ${!AFB ? 'ck[l.k] = load(l); ' : ''}view[l.k] = { round: 'all', pr: 'all' } })
     window.addEventListener('scroll', spy, { passive: true })
     window.addEventListener('hashchange', accRoute)
+    window.addEventListener('resize', accPlaceNav) // 跨过 640px 那道坎时,第三级换一格挂
+    accPlaceNav()
     window.accSync()
     accRoute()
   ${ACC_CLOSE}`
@@ -5480,7 +5542,13 @@ if (LAZY) {
   for (const it of archItems) LAZY_IDMAP[it.id] = 'archive' // 归档卡改判到第三个 part(深链跨 part 靠这张表)
 }
 const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
-const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = LAZY_PANE_OF[id]\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
+// 验收的锚不止上面烤进表的那两种:分组锚(accg-<键>-<组>)一直都有,0.17.13 起每个条目也有一个
+// (acc-<号>-<条目>)。逐条烤进 LAZY_IDMAP 等于往壳里塞几百个派生键(条目数 = 全部清单之和),
+// 而它们统统以 acc 开头 —— accRoute 自己也是按这个前缀认门的。所以表里查不着时按前缀兜一次。
+// 次序要紧:表先查,真叫 acc-x 的卡号(人写的)照旧说了算,兜底只接表里没有的那些。
+// 关着验收的板取回那个裸表达式 —— 这一句是全体懒加载板共用的,产物得逐字节回 0.17.12。
+const LAZY_PANE_EXPR = !ACC_LAZY ? 'LAZY_PANE_OF[id]' : `(LAZY_PANE_OF[id] || (id.indexOf('acc') === 0 ? 'acceptance' : ''))`
+const LAZY_ROUTE = !LAZY ? '' : `if (!el && ${LAZY_PANE_EXPR}) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = ${LAZY_PANE_EXPR}\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
 const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
 const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
 const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(线别/工具条/搜索/时间筛全幂等重跑)————
@@ -5668,6 +5736,10 @@ const STICKY_DOCSNAV = !STICKY ? 'var(--hubh, 41px)' : 'calc(var(--hubh, 41px) +
 const STICKY_SPY = !STICKY ? '' : ' + tabH'
 const STICKY_TABH_DECL = !STICKY ? '' : ', tabH = 44'
 const STICKY_TABBAR_EL = !STICKY ? '' : `\n  const tabbarEl = document.querySelector('.tabbar')`
+// 验收左栏钉住的落点(v0.17.13):hubbar 实高 +(吸顶时)tab 条实高 + 一档气口。与 --hubh 同一次实测 ——
+// 左栏顶上几条被 tab 条盖住,病根就是它只减了 hubbar。stickyTabs 关着的板 tab 条会随页面滚走,不必减。
+const ACC_SETVARS = !ACC ? '' : `
+    rs.setProperty('--acc-top', (hubH${!STICKY ? '' : ' + tabH'} + 12) + 'px')`
 const STICKY_SETVARS = !STICKY ? '' : `
     if (tabbarEl && tabbarEl.offsetHeight) tabH = tabbarEl.offsetHeight
     rs.setProperty('--ddd-hubh', hubH + 'px') // tab 条落点 = hubbar 实高(与 --hubh 同一次实测,给吸顶自己一个名字)
@@ -6513,7 +6585,7 @@ ${DLIVE_JS}    const card = e.target.closest('.doccard')
     if (docsnavEl && docsnavEl.offsetHeight) dnavH = docsnavEl.offsetHeight // pane display:none 时量得 0:保留旧值,切进 docs tab 再补量
     const rs = document.documentElement.style
     rs.setProperty('--hubh', hubH + 'px')
-    rs.setProperty('--dnavh', dnavH + 'px')${STICKY_SETVARS}
+    rs.setProperty('--dnavh', dnavH + 'px')${STICKY_SETVARS}${ACC_SETVARS}
     buildDocSpy()
   }
   docsNavSync()
