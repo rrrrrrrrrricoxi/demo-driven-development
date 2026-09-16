@@ -8325,6 +8325,13 @@ console.log('T83 验收左栏两级导航(0.17.12)')
     '窄屏那条 display 必须挂 :not([hidden]) —— 作者样式压得过 [hidden]{display:none},' +
     '少了它没选中的那几十只分组栏会在手机上全冒出来(真机上撞见过)', mq.slice(0, 300))
   ok(on.includes('.accside { position: sticky; top: calc(var(--hubh, 41px) + 12px);'), '宽屏下左栏 sticky')
+  { // 悬停反馈:这根柱子直接坐在 --bg 页底上,hover 再刷一遍 --bg 等于没刷 —— 两级统一换一档,别再改回去
+    const pr = (on.match(/\.accpr:hover \{ background: ([^;]+);/) || [])[1]
+    const nav = (on.match(/\.accnav a:hover \{ background: ([^;]+);/) || [])[1]
+    ok(pr && pr !== 'var(--bg)',
+      `.accpr:hover 的底色不再是 var(--bg) —— 与页底同色,悬停看不出反馈(实际 ${pr})`)
+    ok(nav && nav === pr, `左栏两级(PR / 分组)悬停走同一档(accpr=${pr} / accnav=${nav})`)
+  }
   { // accSelect 也原样抠出来跑:窄屏那行 chip 横滚时,选中的那枚要被推进可视区,且只准推那条槽
     const src = (on.match(/    function accSelect\(k\) \{[\s\S]*?\n    \}/) || [''])[0]
     ok(/sc\.scrollLeft \+=/.test(src) && !/window\.scroll|scrollIntoView/.test(src),

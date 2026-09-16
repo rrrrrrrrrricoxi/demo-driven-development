@@ -2990,7 +2990,10 @@ const ACC_CSS = !ACC ? '' : `
   .accmain { min-width: 0; } /* 主区自己会滚的那些块(数据表)靠它才收得住,不把左栏挤窄 */
   .accpr { display: flex; align-items: baseline; gap: 6px; padding: 5px 8px; margin-bottom: 2px;
      border-radius: 6px; line-height: 1.5; color: var(--mut); text-decoration: none; }
-  .accpr:hover { background: var(--bg); }
+  /* 这根柱子直接长在 --bg 页底上,hover 再刷一遍 --bg 等于没刷(悬停看不出反馈)。
+     两级(PR/分组)统一走 faint-bg —— 比页底亮半档;暗档由令牌覆写(换装走 theme.css,
+     darkMode 走 light-dark)。别改回 var(--bg):.ovrow / .pnode 那几处能用,是因为它们坐在 --card 上。 */
+  .accpr:hover { background: ${tk('faint-bg')}; }
   .accpr.on { background: var(--brand-soft); color: var(--ink); }
   .accprn { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
   .accprt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3009,7 +3012,7 @@ const ACC_CSS = !ACC ? '' : `
   .accnavp { font-variant-numeric: tabular-nums; letter-spacing: 0; }
   .accnav a { display: block; padding: 5px 8px; margin-bottom: 2px; border-radius: 6px; line-height: 1.4;
      color: var(--mut); text-decoration: none; }
-  .accnav a:hover { background: var(--bg); }
+  .accnav a:hover { background: ${tk('faint-bg')}; } /* 与 .accpr:hover 同一档,见上 */
   .accnav a.on { background: var(--brand-soft); color: var(--ink); }
   .accnav a.done .accgc { color: ${tk('ok-ink')}; }
   .accgc { float: right; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
