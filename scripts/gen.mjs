@@ -5542,7 +5542,13 @@ if (LAZY) {
   for (const it of archItems) LAZY_IDMAP[it.id] = 'archive' // 归档卡改判到第三个 part(深链跨 part 靠这张表)
 }
 const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
-const LAZY_ROUTE = !LAZY ? '' : `if (!el && LAZY_PANE_OF[id]) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = LAZY_PANE_OF[id]\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
+// 验收的锚不止上面烤进表的那两种:分组锚(accg-<键>-<组>)一直都有,0.17.13 起每个条目也有一个
+// (acc-<号>-<条目>)。逐条烤进 LAZY_IDMAP 等于往壳里塞几百个派生键(条目数 = 全部清单之和),
+// 而它们统统以 acc 开头 —— accRoute 自己也是按这个前缀认门的。所以表里查不着时按前缀兜一次。
+// 次序要紧:表先查,真叫 acc-x 的卡号(人写的)照旧说了算,兜底只接表里没有的那些。
+// 关着验收的板取回那个裸表达式 —— 这一句是全体懒加载板共用的,产物得逐字节回 0.17.12。
+const LAZY_PANE_EXPR = !ACC_LAZY ? 'LAZY_PANE_OF[id]' : `(LAZY_PANE_OF[id] || (id.indexOf('acc') === 0 ? 'acceptance' : ''))`
+const LAZY_ROUTE = !LAZY ? '' : `if (!el && ${LAZY_PANE_EXPR}) { // 深链目标在未取 pane:成功注入才重入一次;已注入仍无此卡=死链,与非懒的静默降级同款;失败停在错误面板走人工重试(防无限风暴/微任务死环)\n      const lzp = ${LAZY_PANE_EXPR}\n      if (!lazyDone[lzp]) ensurePane(lzp).then(() => { if (lazyDone[lzp]) routeHash() })\n      return\n    }\n    `
 const LAZY_TF = !LAZY ? '' : `curTf = days\n    `
 const LAZY_BADGE = !LAZY ? '' : `if (pane && pane.dataset.lazyPending !== undefined) return // 未取 pane 保持烤入总数,别归零\n      `
 const LAZY_JS = !LAZY ? '' : `// ———— 懒加载运行时:fetch parts/*.html → 注入 → 补课链(线别/工具条/搜索/时间筛全幂等重跑)————

@@ -8563,6 +8563,46 @@ console.log('T84 验收左栏第二轮:通栏信息卡 + 钉住自滚 + 三级�
       '⑤ 嵌套的那只栏在窄屏搬进 .accnavs 当第二行;跨过 640 那道坎时 resize 再搬回行下面')
   }
 
+  // ---- ③ 懒加载板:条目锚是这一版新长出来的 id,壳里的深链路由也得认得它 ----
+  // 病例:宿主板开着 lazyTabs,验收正文在 parts/acceptance.html 里。冷启动(把左栏条目的链接
+  // 贴给别人、或者点完条目按一下刷新)时壳里 getElementById 找不到那条,深链表里又查不着
+  // acc-<号>-<条目>,routeHash 于是静默走人 —— 人落在总览 tab 上。分组锚(accg-…)一直是同一个坑。
+  {
+    const fx84c = mkFixture('fx84c', { 's.html': demoHtml('s') })
+    const ccP = join(fx84c.kb, 'kanban.config.json'), cIdx = join(fx84c.kb, 'index.html')
+    const cc = JSON.parse(readFileSync(ccP, 'utf8'))
+    cc.lazyTabs = true
+    writeFileSync(ccP, JSON.stringify(cc, null, 2) + '\n')
+    const rOff = runGen(NEW_SCRIPTS, fx84c.kb)
+    ok(rOff.status === 0, 'gen exit 0(lazyTabs 开着、验收关着)', rOff.stderr.slice(0, 200))
+    ok(readFileSync(cIdx, 'utf8').includes('if (!el && LAZY_PANE_OF[id]) {'),
+      '③ 关着验收的懒加载板:深链那一句是 0.17.12 的原句(前缀兜底只给开着验收的板长出来)')
+
+    cc.acceptanceTab = true
+    cc.acceptanceFeedback = true
+    writeFileSync(ccP, JSON.stringify(cc, null, 2) + '\n')
+    writeFileSync(join(fx84c.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: LISTS84 }))
+    const rOn = runGen(NEW_SCRIPTS, fx84c.kb)
+    ok(rOn.status === 0, 'gen exit 0(lazyTabs + 验收同开)', rOn.stderr.slice(0, 200))
+    const shell = readFileSync(cIdx, 'utf8')
+    const part = readFileSync(join(fx84c.kb, 'parts', 'acceptance.html'), 'utf8')
+    ok(part.includes('id="acc-230-WW1"') && !shell.includes('id="acc-230-WW1"'),
+      '③ 条目那一行随 pane 进了 parts/acceptance.html —— 壳里没有它,冷启动时 getElementById 当然找不到')
+    const map = JSON.parse((shell.match(/const LAZY_PANE_OF = (\{[\s\S]*?\})\n/) || [, '{}'])[1].replace(/\\u003c/g, '<'))
+    ok(!('acc-230-WW1' in map) && !('accg-230-232-K' in map),
+      '③ 深链表不逐条烤条目/分组锚:那是几百个派生键进壳,懒加载省的正是这个', Object.keys(map).join(','))
+    const expr = "(LAZY_PANE_OF[id] || (id.indexOf('acc') === 0 ? 'acceptance' : ''))"
+    ok(shell.includes(`if (!el && ${expr}) {`) && shell.includes(`const lzp = ${expr}`),
+      '③ 壳里那句深链路由:表里查不着、id 又以 acc 开头 → 去取验收那份 part 再重入一次')
+    const paneOf = new Function('LAZY_PANE_OF', 'id', `return ${expr}`)
+    ok(paneOf(map, 'acc-230-WW1') === 'acceptance' && paneOf(map, 'accg-230-232-K') === 'acceptance',
+      '③ 条目锚与分组锚都翻得回验收那份 part(0.17.12 起分组锚也走这条路)')
+    ok(paneOf(map, 'acc-240') === 'acceptance' && paneOf({ 'acc-x': 'backlog' }, 'acc-x') === 'backlog',
+      '③ 次序:表先查 —— 真叫 acc-x 的卡号照旧各归各的 part,兜底只接表里没有的那些')
+    ok(!paneOf(map, 'BL-999') && !paneOf(map, 'zz'),
+      '③ 既不在表里、又不以 acc 开头的 id:照旧静默降级,不白取一份 part 回来')
+  }
+
   // ---- ② tab 条不吸顶的板:它随页面滚走,--acc-top 不必减它 ----
   {
     const fx84b = mkFixture('fx84b', { 's.html': demoHtml('s') })
@@ -8598,10 +8638,11 @@ console.log('T84 验收左栏第二轮:通栏信息卡 + 钉住自滚 + 三级�
     spawnSync('tar', ['-xf', tar, '-C', oldRoot])
     const oldScripts = join(oldRoot, 'scripts')
     const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
-    const mk = (name, accOn) => {
+    const mk = (name, accOn, lazy) => {
       const fx = mkFixture(name, { 's.html': demoHtml('s') })
       const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
       c.stickyTabs = true
+      if (lazy) c.lazyTabs = true
       if (accOn) {
         c.acceptanceTab = true
         c.acceptanceFeedback = true
@@ -8614,6 +8655,11 @@ console.log('T84 验收左栏第二轮:通栏信息卡 + 钉住自滚 + 三级�
     runGen(oldScripts, za.kb); runGen(NEW_SCRIPTS, zb.kb)
     ok(ml(join(za.kb, 'index.html')).join('\n') === ml(join(zb.kb, 'index.html')).join('\n'),
       '冻结:acceptanceTab 关着的板 —— 归一化版本戳后与 0.17.12 逐字节相同')
+    // 深链那一句长在全体懒加载板共用的 routeHash 里:验收关着时必须回到 0.17.12 的原句
+    const wa = mk('fx84w-old', false, true), wb = mk('fx84w-new', false, true)
+    runGen(oldScripts, wa.kb); runGen(NEW_SCRIPTS, wb.kb)
+    ok(ml(join(wa.kb, 'index.html')).join('\n') === ml(join(wb.kb, 'index.html')).join('\n'),
+      '冻结:lazyTabs 开着、acceptanceTab 关着的板 —— 深链路由那一句也一个字节没动')
     const ya = mk('fx84y-old', true), yb = mk('fx84y-new', true)
     runGen(oldScripts, ya.kb); runGen(NEW_SCRIPTS, yb.kb)
     const oldOn = ml(join(ya.kb, 'index.html')), newOn = ml(join(yb.kb, 'index.html'))

@@ -47,6 +47,14 @@ on the board turns `▸` into `▾`.
   other acceptance anchor; clicking a group still scrolls to the group heading.
   Every other checklist stays folded, and selecting one folds the last. The
   standalone `分组 #number` section is gone — it is the tree now.
+- **A deep link to an item also works on a `lazyTabs` board.** There the
+  acceptance pane is fetched on demand, so on a cold link the shell's router has
+  nothing to find, and its id map carries only whole-checklist and member pull
+  request anchors. Baking every item into that map would put hundreds of derived
+  keys back into the shell, so the router falls back to the `acc` prefix for ids
+  the map does not carry; group anchors, which had the same gap, ride the same
+  line. The map is still read first, so a card named `acc-something` keeps its
+  own pane. Boards without the acceptance tab keep the 0.17.12 line unchanged.
 - **`＋ 备注 / 图` is a fold triangle,** `▸` closed and `▾` open, at the same size
   and colour as `已验收` and the rest of the board's folds.
 - **At 640px and below the two rows of chips are unchanged** — pull requests on
