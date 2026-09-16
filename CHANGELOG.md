@@ -9,6 +9,56 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.13] - 2026-09-16
+
+### The acceptance sidebar stops being cut off, and opens down to the item
+
+First use of 0.17.12 on a real board turned up four things. The column's sticky
+offset only cleared the hub bar, so with a sticky tab bar above it the top rows
+sat underneath it; and a column taller than the window had a tail nobody could
+reach. The card holding the address, backend, branch, account and progress bar
+had been pulled into the main column, where it used to run the full width. The
+column started lower than the content it navigates. And it stopped at groups:
+picking `WW1` out of a checklist still meant scrolling the main area. Separately,
+the `＋ 备注 / 图` entry kept its plus sign when it opened, while every other fold
+on the board turns `▸` into `▾`.
+
+### Changed
+- **The current pull request's card is full width again,** above the two-column
+  grid rather than inside its right column. The sidebar and the main area now
+  start on the same grid row, so the top of the column is the top of the
+  checklist header.
+- **The sticky offset is the measured height of the page head.** `docsNavSync`
+  writes `--acc-top` from the hub bar's `offsetHeight` plus the tab bar's when
+  the tab bar is sticky, alongside `--hubh` and in the same re-measure on resize
+  and on `load`; the column uses it for both `top` and
+  `max-height: calc(100vh - var(--acc-top) - 14px)`, with `overflow-y: auto`, so
+  a column taller than the window scrolls itself. Selecting a checklist keeps its
+  row inside that box with `scrollIntoView({block:'nearest'})` — the column's own
+  two scrollers are the only ones touched; where the window goes is still
+  `accRoute`'s call alone.
+- **The column is a three-level accordion.** Each checklist is one row,
+  `▸ #number · title · 已判 N/M`; the selected one turns `▾` and expands to its
+  groups, and each group to its items — `WW1 title`, truncated, with the viewer's
+  own verdict at the right end (`✓` green, `✕` red, blank for unjudged), painted
+  by `syncList` in the same pass as the progress bar and refreshed by the
+  20-second poll. Clicking an item scrolls the main area to that row, which now
+  carries `id="acc-<number>-<item>"` and is reachable as a deep link like any
+  other acceptance anchor; clicking a group still scrolls to the group heading.
+  Every other checklist stays folded, and selecting one folds the last. The
+  standalone `分组 #number` section is gone — it is the tree now.
+- **`＋ 备注 / 图` is a fold triangle,** `▸` closed and `▾` open, at the same size
+  and colour as `已验收` and the rest of the board's folds.
+- **At 640px and below the two rows of chips are unchanged** — pull requests on
+  one, groups on the other — and the item level is not a chip: on a phone the
+  main area is the thing to scroll. The nested nav moves into that second row
+  while the viewport is narrow and back under its row when it is not.
+- **Boards without `acceptanceTab` are byte-identical to 0.17.12,** including the
+  new `--acc-top` line, which lives in the shared measuring function and is
+  therefore gated like everything else. On a board that has the tab, every
+  changed line belongs to the acceptance tab. Both are tested against the
+  `0.17.12` tag.
+
 ## [0.17.12] - 2026-09-16
 
 ### The acceptance tab gets a sidebar you can navigate pull requests with

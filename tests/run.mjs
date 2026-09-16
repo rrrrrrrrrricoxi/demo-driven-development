@@ -5525,8 +5525,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     `${count(on, 'data-accv="ok"')} / ${count(on, 'data-accv="bad"')}`)
   ok(count(on, 'aria-pressed="false"') === 4 && count(on, '<button type="button" class="accv') === 4,
     '两枚钮是真 <button>(可 Tab、Enter/Space 原生触发)且 aria-pressed 跟随', String(count(on, 'aria-pressed="false"')))
-  ok(count(on, 'data-accadd=') === 2 && on.includes('>＋ 备注 / 图</button>'),
-    '每行右下角常驻「＋ 备注 / 图」—— 不做悬停才现(桌面上藏在悬停里等于不存在)')
+  ok(count(on, 'data-accadd=') === 2 && on.includes('><span class="accaddg">▸</span>备注 / 图</button>'),
+    '每行右下角常驻「▸ 备注 / 图」—— 不做悬停才现(桌面上藏在悬停里等于不存在);0.17.13 起入口是折叠三角')
   ok(count(on, 'data-accfb=') === 2 && on.includes('<span class="accfbt"></span>') && on.includes('aria-expanded="false" hidden>'),
     '行末摘要 chip 烤成 hidden:没人说过话时那儿什么都没有(不再每行挂一枚「反馈 ▸」)')
   ok(on.includes('data-accid="A&quot;1"') && on.includes('data-accfb="A&quot;1"'),
@@ -8284,7 +8284,7 @@ console.log('T83 验收左栏两级导航(0.17.12)')
       'accRoute:锚找不到 / hash 不是 acc 开头 —— 一个字不动')
   }
   ok(on.includes("e.hidden = (e.dataset.acck || e.dataset.accnavk) !== k")
-    && on.includes("document.querySelectorAll('[data-accsel]').forEach(function (a) { a.classList.toggle('on', a.dataset.accsel === k) })"),
+    && on.includes("a.classList.toggle('on', mine)"),
     'accSelect 一把管三件事:主区只留选中那份、分组栏跟着换、左栏那一条点亮')
   { // OF_PR 是深链的真通路:每一条左栏链接的号都要翻得回它自己那份清单
     const ofpr = JSON.parse((on.match(/var OF_PR = (\{.*?\})\n/) || [])[1] || '{}')
@@ -8324,7 +8324,7 @@ console.log('T83 验收左栏两级导航(0.17.12)')
   ok(!/\.accnav \{ display: flex/.test(mq),
     '窄屏那条 display 必须挂 :not([hidden]) —— 作者样式压得过 [hidden]{display:none},' +
     '少了它没选中的那几十只分组栏会在手机上全冒出来(真机上撞见过)', mq.slice(0, 300))
-  ok(on.includes('.accside { position: sticky; top: calc(var(--hubh, 41px) + 12px);'), '宽屏下左栏 sticky')
+  ok(on.includes('.accside { position: sticky; top: var(--acc-top, 53px);'), '宽屏下左栏 sticky')
   { // 悬停反馈:这根柱子直接坐在 --bg 页底上,hover 再刷一遍 --bg 等于没刷 —— 两级统一换一档,别再改回去
     const pr = (on.match(/\.accpr:hover \{ background: ([^;]+);/) || [])[1]
     const nav = (on.match(/\.accnav a:hover \{ background: ([^;]+);/) || [])[1]
@@ -8334,19 +8334,26 @@ console.log('T83 验收左栏两级导航(0.17.12)')
   }
   { // accSelect 也原样抠出来跑:窄屏那行 chip 横滚时,选中的那枚要被推进可视区,且只准推那条槽
     const src = (on.match(/    function accSelect\(k\) \{[\s\S]*?\n    \}/) || [''])[0]
-    ok(/sc\.scrollLeft \+=/.test(src) && !/window\.scroll|scrollIntoView/.test(src),
-      'accSelect 只推横滚槽自己的 scrollLeft —— 窗口滚到哪儿由 accRoute 一处说了算', src.slice(0, 120))
+    // 0.17.13 起左栏自己也会纵向滚(max-height + overflow-y),多一条 block:'nearest' —— 但仍然
+    // 只碰左栏自己的两条槽:window.scroll 那条线照旧不许越。
+    ok(/sc\.scrollLeft \+=/.test(src) && /scrollIntoView\(\{ block: 'nearest' \}\)/.test(src) && !/window\.scroll/.test(src),
+      'accSelect 只推左栏自己的两条槽(横滚 scrollLeft、纵向 block:nearest)—— 窗口滚到哪儿由 accRoute 一处说了算', src.slice(0, 120))
     const mkRun = (geo) => {
       const sc = { scrollLeft: 0, scrollWidth: geo.sw, clientWidth: geo.cw, tagName: 'DIV', parentElement: null,
         getBoundingClientRect: () => ({ left: 0, right: geo.cw, width: geo.cw }) }
+      const side = { scrollHeight: geo.sh == null ? 400 : geo.sh, clientHeight: geo.ch == null ? 400 : geo.ch }
+      const glyph = { textContent: '▸' }
+      let nearest = 0
       const row = { parentElement: sc, dataset: { accsel: '241' }, classList: { toggle() {} },
+        querySelector: () => glyph, closest: (s) => (s === '.accside' ? side : null),
+        scrollIntoView: (o) => { if (o && o.block === 'nearest') nearest++ },
         getBoundingClientRect: () => ({ left: geo.x - sc.scrollLeft, right: geo.x + 100 - sc.scrollLeft, width: 100 }) }
       const els = [{ dataset: { acck: '240' }, hidden: false }, { dataset: { acck: '241' }, hidden: true }, { dataset: { accnavk: '241' }, hidden: true }]
-      let synced = 0
-      const sel = new Function('document', 'window', 'byKey', 'SEL', `${src}\n accSelect('241'); return SEL`)(
+      let synced = 0, placed = 0
+      const sel = new Function('document', 'window', 'byKey', 'SEL', 'accPlaceNav', `${src}\n accSelect('241'); return SEL`)(
         { querySelectorAll: (s) => (s.indexOf('data-accsel') >= 0 ? [row] : els), querySelector: () => row },
-        { accSync: () => { synced++ } }, { 240: {}, 241: {} }, '240')
-      return { sel, sc, els, synced }
+        { accSync: () => { synced++ } }, { 240: {}, 241: {} }, '240', () => { placed++ })
+      return { sel, sc, els, synced, glyph, nearest, placed }
     }
     const far = mkRun({ sw: 900, cw: 300, x: 400 }) // 300px 宽的槽,选中的那枚停在 x=400(屏外)
     ok(far.sel === '241' && far.els[0].hidden === true && far.els[1].hidden === false && far.els[2].hidden === false && far.synced === 1,
@@ -8354,6 +8361,12 @@ console.log('T83 验收左栏两级导航(0.17.12)')
     ok(far.sc.scrollLeft === 300, `选中的 chip 在屏外时,那条槽自己滚过去把它摆进可视区(实际 ${far.sc.scrollLeft})`)
     ok(mkRun({ sw: 900, cw: 300, x: 60 }).sc.scrollLeft === 0, '已经看得见的 chip 不白滚一趟')
     ok(mkRun({ sw: 300, cw: 300, x: 400 }).sc.scrollLeft === 0, '宽屏下这根柱子不横滚(scrollWidth === clientWidth)—— 这一段一动不动')
+    // ---- 0.17.13:手风琴的三件小事 ----
+    ok(far.glyph.textContent === '▾', `换选中:新选中那条的三角翻成 ▾(实际 ${far.glyph.textContent})`)
+    ok(far.placed === 1, '换选中:第三级(分组 + 条目)跟着换一格挂 —— accPlaceNav 每次选中只跑一趟')
+    ok(mkRun({ sw: 300, cw: 300, x: 0, sh: 900, ch: 400 }).nearest === 1,
+      '左栏比自己的可视区高时,选中那条被推进左栏自身的可视区(block:nearest,不是滚窗口)')
+    ok(mkRun({ sw: 300, cw: 300, x: 0, sh: 400, ch: 400 }).nearest === 0, '左栏装得下时不白推一趟')
   }
   { // ---- ⑫ 全收完的板(没 current、每份都有 result):左栏不出空段,选中的那条看得见 ----
     const fx83b = mkFixture('fx83b', { 's.html': demoHtml('s') })
@@ -8418,6 +8431,197 @@ console.log('T83 验收左栏两级导航(0.17.12)')
     ok(goneZ.length > 0 && addedZ.length > 0, '开着的板产物确实变了(这一版要改的就是它)')
     ok(onlyIn(goneZ, onlyIn(oldOn, offOld)).length === 0 && onlyIn(addedZ, onlyIn(newOn, offNew)).length === 0,
       '0.17.11 → 今天:差的每一行都是「验收开着才有」的行(别的 pane 一个字节没动)',
+      JSON.stringify([...onlyIn(goneZ, onlyIn(oldOn, offOld)), ...onlyIn(addedZ, onlyIn(newOn, offNew))]).slice(0, 400))
+  }
+}
+
+// ============ T84 验收左栏第二轮(0.17.13):通栏信息卡 + 钉住自滚 + 三级手风琴 ============
+// 0.17.12 上机试用后的四点病症:① 左栏顶上几条被吸顶的 tab 条盖住、比视口高时也不自滚;
+// ② 「＋ 备注 / 图」点开加号不变,与板上各处 ▸/▾ 不是一套;③ 当前 PR 那张信息卡被塞进主区那一列
+// (从前通栏);④ 左栏起点要对齐验收内容起点;⑤ 选中的那份要能在左栏展开到条目,一点就跳过去。
+// 版面数字(左栏顶 y = 清单头顶 y、点条目主区那条进视口)最终在真浏览器里量;
+// 这里钉的是产物结构、CSS 口径与那几处运行期机关。
+console.log('T84 验收左栏第二轮:通栏信息卡 + 钉住自滚 + 三级手风琴(0.17.13)')
+{
+  const fx84 = mkFixture('fx84', { 's.html': demoHtml('s') })
+  const cfgP = join(fx84.kb, 'kanban.config.json'), idxP = join(fx84.kb, 'index.html')
+  const accP = join(fx84.kb, 'acceptance-manifest.json')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.stickyTabs = true // 宿主板就是这个配法:页头 = hubbar + 吸顶的 tab 条,两截都得让开
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx84.kb)
+  const offSha = sha(idxP) // 吸顶开着、验收关着的基线(这一版对它必须一个字节不碰)
+  const mkL = (pr, title, n, extra = {}) => ({
+    pr, title, groups: [{ id: 'K', title: 'K 组' }, { id: 'L', title: 'L 组' }],
+    items: Array.from({ length: n }, (_, i) => ({ id: `WW${i + 1}`, group: i % 2 ? 'L' : 'K', title: `条目 ${i + 1}`, do: 'x', exp: 'y' })),
+    ...extra,
+  })
+  const LISTS84 = [
+    mkL([230, 232], '验收中这份', 4),
+    mkL(240, '排队甲', 3),
+    mkL(220, '收过的旧账', 5, { result: { checked: [], at: '2026-08-01' } }),
+  ]
+  cfg.acceptanceTab = true
+  cfg.acceptanceFeedback = true
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: LISTS84 }))
+  const r84 = runGen(NEW_SCRIPTS, fx84.kb)
+  ok(r84.status === 0, 'gen exit 0(验收 + 反馈共享 + 吸顶 tab 条都开着)', r84.stderr.slice(0, 200))
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- ① 信息卡回通栏:.acccur 在两栏网格之外 ----
+  ok(on.indexOf('<section class="acccur"') < on.indexOf('<div class="accpane">')
+    && !/<div class="accmain">\s*<section class="acccur"/.test(on),
+    '① 当前 PR 的地址/后端/分支/账号/进度条那张卡回到两栏网格之上 —— 不再塞在主区那一列里')
+  ok(/<div class="accmain">\s*<section class="acclist"/.test(on),
+    '① 主区那一列第一件东西就是清单本体(卡搬走了,没留下空壳)')
+
+  // ---- ④ 左栏起点 = 内容起点:网格两列同一行起,清单头不带上边距、它前面那几只锚零高 ----
+  ok(/\.accpane \{[^}]*align-items: start;/.test(on) && !/\.acclh \{[^}]*margin-top/.test(on)
+    && /\.accanchor \{ display: block; height: 0;/.test(on),
+    '④ 网格 align-items: start、清单头不带上边距、它前面那几只锚零高 —— 左栏顶 y = 清单头顶 y(真浏览器复量)')
+
+  // ---- ② 钉住不被裁:落点走运行期量出来的 --acc-top,长了自己滚 ----
+  ok(on.includes('.accside { position: sticky; top: var(--acc-top, 53px); max-height: calc(100vh - var(--acc-top, 53px) - 14px);')
+    && /\.accside \{[^}]*overflow-y: auto;/.test(on),
+    '② 左栏钉住的落点走 --acc-top,并带 max-height + overflow-y:auto —— 比视口高时它自己滚')
+  ok(on.includes("rs.setProperty('--acc-top', (hubH + tabH + 12) + 'px')")
+    && on.includes('if (hubbarEl && hubbarEl.offsetHeight) hubH = hubbarEl.offsetHeight')
+    && on.includes('if (tabbarEl && tabbarEl.offsetHeight) tabH = tabbarEl.offsetHeight'),
+    '② --acc-top = 运行期量出来的 hubbar 实高 + 吸顶 tab 条实高 + 一档气口(两截都是 offsetHeight,不写死像素)')
+  ok(on.indexOf("rs.setProperty('--hubh'") < on.indexOf("rs.setProperty('--acc-top'"),
+    '② 与 --hubh 同一次实测里算出来(hubbar flex-wrap 换行、切 tab 改高度,它跟着一起重量)')
+
+  // ---- ③ 三级手风琴:清单 → 分组 → 条目 ----
+  const navOf = (k) => (on.match(new RegExp(`<nav class="accnav" data-accnavk="${k}"[^>]*>[\\s\\S]*?</nav>`)) || [''])[0]
+  const selNav = navOf('230-232')
+  ok(count(selNav, 'data-accgl=') === 2 && count(selNav, 'data-accitl=') === 4,
+    `③ 选中那份展开到条目:2 个分组 + 4 条条目(实际 ${count(selNav, 'data-accgl=')} 组 / ${count(selNav, 'data-accitl=')} 条)`)
+  ok(count(navOf('240'), 'data-accitl=') === 3 && count(navOf('220'), 'data-accitl=') === 5,
+    '③ 条目数逐份等于那份清单的 items 数(排队甲 3、旧账 5)')
+  ok(/data-accsel="230-232">[\s\S]*?<\/a>\s*<nav class="accnav" data-accnavk="230-232">/.test(on)
+    && /data-accsel="240">[\s\S]*?<\/a>\s*<nav class="accnav" data-accnavk="240" hidden>/.test(on),
+    '③ 每份清单的分组/条目栏就长在它自己那一行下面 —— 手风琴,不再是页脚一个独立小节')
+  ok(count(on, '<nav class="accnav" data-accnavk=') === 3
+    && count(on, 'data-accnavk="240" hidden>') === 1 && count(on, 'data-accnavk="220" hidden>') === 1,
+    '③ 其它清单没有子级(折着):三只栏里只有选中那只不 hidden')
+  ok(on.includes('data-accsel="230-232"><span class="accprg">▾</span>')
+    && on.includes('data-accsel="240"><span class="accprg">▸</span>')
+    && on.includes("if (g) g.textContent = mine ? '▾' : '▸'"),
+    '③ 行首那枚三角:选中那份 ▾、别的 ▸;换选中时旧的跟着收回 ▸')
+  ok(!on.includes('accnavh') && !on.includes('accnavp') && on.includes('<div class="accnavs"></div>'),
+    '③ 「分组 #号」那个独立小节删除 —— .accnavs 只剩一格空位(窄屏那一档才有东西搬进来)')
+
+  // ---- ③ 点条目 = 跳主区那一条:左栏的锚与主区那一行的 id 同一个字串 ----
+  ok(on.includes('<a class="accitl" href="#acc-230-WW1" data-accitl="WW1" title="条目 1"><span class="accitn">WW1</span><span class="accitt">条目 1</span><span class="accvm"></span></a>')
+    && on.includes('<div class="accitem" id="acc-230-WW1" data-accid="WW1"'),
+    '③ 条目那一行写「WW1 标题」,链接是 #acc-<号>-<条目>,落点就是主区那一行')
+  {
+    const hrefs = [...on.matchAll(/<a class="accitl" href="#([^"]+)"/g)].map((m) => m[1])
+    ok(hrefs.length === 12 && hrefs.every((h) => on.includes(`<div class="accitem" id="${h}"`)),
+      `③ 12 条条目链接逐条落在主区一条真行上(实际 ${hrefs.length} 条)`)
+    // 深链落在哪份清单上由 accRoute 就地问目标(T83 已钉);这里只钉「条目锚也是它认得的一种」
+    ok(/\[id\] \{ scroll-margin-top:/.test(on),
+      '③ 条目锚吃全局那条 scroll-margin-top —— 跳过去不钻到吸顶栏底下')
+  }
+
+  // ---- ③ 条目右端那枚我的判定标:随 accSync 刷 ----
+  {
+    const sl = (on.match(/ {4}function syncList\(l\) \{[\s\S]*?\n {4}\}/) || [''])[0]
+    ok(sl.includes("nav.querySelectorAll('[data-accitl]')") && sl.includes("mk.textContent = on ? '✓' : bd ? '✕' : ''")
+      && sl.includes("mk.classList.toggle('ok', on); mk.classList.toggle('bad', bd)"),
+      '③ 判定标在 syncList 里刷(accSync 每轮都跑它)—— ✓ 通过 / ✕ 不对 / 空 = 还没判', sl.slice(0, 120))
+    ok(/\.accvm\.ok \{ color: /.test(on) && on.includes('.accvm.bad { color: #d44c47; }'),
+      '③ ✓ 绿 ✕ 红,与行上那两枚判定钮同一套色')
+    ok(sl.includes('navById.get(it.id)') && sl.includes("nav.querySelectorAll('[data-accitl]').forEach"),
+      '③ 条目 id 是人写的字串:只许 Map 索引,不许拼选择器(与主区那圈 rowsById 同一条纪律)')
+  }
+
+  // ---- ④ 「备注 / 图」改折叠三角 ----
+  ok(on.includes('aria-expanded="false"><span class="accaddg">▸</span>备注 / 图</button>')
+    && on.includes("if (ag) ag.textContent = open ? '▾' : '▸'"),
+    '④ 「备注 / 图」收起是 ▸、点开变 ▾(从前那个 ＋ 点开也不变)')
+  {
+    const g1 = (on.match(/\.accaddg \{ font-size: ([\d.]+)px;/) || [])[1]
+    const g2 = (on.match(/\.accdone > summary::before \{ content: "▸"; font-size: ([\d.]+)px;/) || [])[1]
+    ok(g1 && g1 === g2, `④ 与板上各处 ▸/▾ 同一档字号(accadd=${g1}px / accdone=${g2}px)`)
+    ok(!/\.accaddg \{[^}]*color:/.test(on), '④ 颜色不另开一档:随 .accadd 那枚钮走(悬停也一起变)')
+  }
+
+  // ---- ⑤ ≤640px:两行 chip 照旧,条目一级不进 chip ----
+  {
+    const mq = (on.match(/@media \(max-width: 640px\) \{\n {4}\.accpane[\s\S]*?\n {2}\}/) || [''])[0]
+    ok(mq.includes('.accprs, .accnav:not([hidden]) { display: flex; flex-wrap: nowrap; overflow-x: auto;')
+      && mq.includes('.accnav a.accitl { display: none; }'),
+      '⑤ ≤640px 两行 chip 照旧(PR 一行、分组一行),条目一级不进 chip', mq.slice(0, 300))
+    ok(mq.includes('max-height: none; overflow: visible;'),
+      '⑤ ≤640px 左栏不钉住,也就不设高、不自滚(它跟着主区一块儿滚)', mq.slice(0, 300))
+    ok(on.includes("var narrow = window.matchMedia && window.matchMedia('(max-width: 640px)').matches")
+      && on.includes('if (narrow) { if (box && nav.parentElement !== box) box.appendChild(nav) }')
+      && on.includes("else if (nav.previousElementSibling !== row) row.insertAdjacentElement('afterend', nav)")
+      && on.includes("window.addEventListener('resize', accPlaceNav)"),
+      '⑤ 嵌套的那只栏在窄屏搬进 .accnavs 当第二行;跨过 640 那道坎时 resize 再搬回行下面')
+  }
+
+  // ---- ② tab 条不吸顶的板:它随页面滚走,--acc-top 不必减它 ----
+  {
+    const fx84b = mkFixture('fx84b', { 's.html': demoHtml('s') })
+    const cb = JSON.parse(readFileSync(join(fx84b.kb, 'kanban.config.json'), 'utf8'))
+    cb.acceptanceTab = true
+    writeFileSync(join(fx84b.kb, 'kanban.config.json'), JSON.stringify(cb, null, 2) + '\n')
+    writeFileSync(join(fx84b.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: LISTS84 }))
+    const rb = runGen(NEW_SCRIPTS, fx84b.kb)
+    ok(rb.status === 0, 'gen exit 0(tab 条不吸顶的板)', rb.stderr.slice(0, 200))
+    const ob = readFileSync(join(fx84b.kb, 'index.html'), 'utf8')
+    ok(ob.includes("rs.setProperty('--acc-top', (hubH + 12) + 'px')"),
+      '② tab 条不吸顶的板:那条会随页面滚走,--acc-top 只减 hubbar 那一截')
+  }
+
+  // ---- 关档冻结:没开 acceptanceTab 的板,这一版一个字节都不碰 ----
+  delete cfg.acceptanceTab
+  delete cfg.acceptanceFeedback
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx84.kb)
+  ok(sha(idxP) === offSha, '关掉 acceptanceTab 后与本次开之前的基线逐字节相同')
+  ok(!readFileSync(idxP, 'utf8').includes('--acc-top'),
+    '关档:--acc-top 那句长在全板共用的量高函数里,门也得关严(不然关着验收的板也跟着变)')
+
+  // 与 0.17.12 的对照(参照树取自 tag;浅克隆 / 没取 tag 时如实跳过)
+  const TAG12 = 'demo-driven-development--v0.17.12'
+  const have12 = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG12}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!have12) console.log(`  · 跳过:本地没有 ${TAG12}(浅克隆 / 未取 tag),0.17.12 冻结对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v01712')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v01712.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG12], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const oldScripts = join(oldRoot, 'scripts')
+    const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
+    const mk = (name, accOn) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+      c.stickyTabs = true
+      if (accOn) {
+        c.acceptanceTab = true
+        c.acceptanceFeedback = true
+        writeFileSync(join(fx.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: LISTS84 }))
+      }
+      writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+      return fx
+    }
+    const za = mk('fx84z-old', false), zb = mk('fx84z-new', false)
+    runGen(oldScripts, za.kb); runGen(NEW_SCRIPTS, zb.kb)
+    ok(ml(join(za.kb, 'index.html')).join('\n') === ml(join(zb.kb, 'index.html')).join('\n'),
+      '冻结:acceptanceTab 关着的板 —— 归一化版本戳后与 0.17.12 逐字节相同')
+    const ya = mk('fx84y-old', true), yb = mk('fx84y-new', true)
+    runGen(oldScripts, ya.kb); runGen(NEW_SCRIPTS, yb.kb)
+    const oldOn = ml(join(ya.kb, 'index.html')), newOn = ml(join(yb.kb, 'index.html'))
+    const offOld = ml(join(za.kb, 'index.html')), offNew = ml(join(zb.kb, 'index.html'))
+    const goneZ = onlyIn(oldOn, newOn), addedZ = onlyIn(newOn, oldOn)
+    ok(goneZ.length > 0 && addedZ.length > 0, '开着的板产物确实变了(这一版要改的就是它)')
+    ok(onlyIn(goneZ, onlyIn(oldOn, offOld)).length === 0 && onlyIn(addedZ, onlyIn(newOn, offNew)).length === 0,
+      '0.17.12 → 今天:差的每一行都是「验收开着才有」的行(别的 pane 一个字节没动)',
       JSON.stringify([...onlyIn(goneZ, onlyIn(oldOn, offOld)), ...onlyIn(addedZ, onlyIn(newOn, offNew))]).slice(0, 400))
   }
 }
