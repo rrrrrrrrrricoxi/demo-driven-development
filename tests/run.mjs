@@ -8269,8 +8269,9 @@ console.log('T83 验收左栏两级导航(0.17.12)')
     const mkEl = (acck) => ({ closest: (s) => (s === '.acclist' && acck ? { dataset: { acck } } : null), parentElement: null, scrollIntoView() {} })
     const run = (hash, id2el) => {
       let picked = null, synced = 0
-      new Function('document', 'location', 'window', 'accSelect', `${src}\n accRoute()`)(
-        { getElementById: (i) => id2el[i] || null }, { hash }, { accSync: () => { synced++ } }, (k) => { picked = k })
+      new Function('document', 'location', 'window', 'accSelect', 'SEL', `${src}\n accRoute()`)(
+        { getElementById: (i) => id2el[i] || null }, { hash }, { accSync: () => { synced++ } },
+        (k) => { picked = k }, '') // 0.17.14 起 accRoute 会读 SEL(换没换清单),给它一个初值
       return { picked, synced }
     }
     ok(run('#acc-298', { 'acc-298': mkEl('298-299') }).picked === '298-299',
@@ -8669,6 +8670,124 @@ console.log('T84 验收左栏第二轮:通栏信息卡 + 钉住自滚 + 三级�
     ok(onlyIn(goneZ, onlyIn(oldOn, offOld)).length === 0 && onlyIn(addedZ, onlyIn(newOn, offNew)).length === 0,
       '0.17.12 → 今天:差的每一行都是「验收开着才有」的行(别的 pane 一个字节没动)',
       JSON.stringify([...onlyIn(goneZ, onlyIn(oldOn, offOld)), ...onlyIn(addedZ, onlyIn(newOn, offNew))]).slice(0, 400))
+  }
+}
+
+// ============ T85 验收左栏两处小病(0.17.14):换清单不闪 + 选中行可收起 ============
+// ① 左栏 PR 行是 <a href="#acc-号>,点它走 hashchange → accRoute:accSelect 先把当前 PR 那张信息卡
+//    连同清单一起显隐(布局整块位移),再从位移后的位置平滑滚 —— 人看到的是「先闪一截信息卡、
+//    再滑到清单头」。换清单这一下改成同步落位,同一份清单内(点分组、点条目)保留平滑。
+// ② 点已经选中的那一行原本是原生锚:hash 没变、不触发 hashchange,浏览器却照样跳到清单头,
+//    展开着的那一栏也没法收。改成截下来只翻自己那只栏,不改 SEL、不改 hash、不滚窗口。
+// 真正的版面数字(两次 scrollY 相等、清单头顶 y ≈ --acc-top)在真浏览器里量;这里钉运行期机关。
+console.log('T85 验收左栏换清单不闪 + 选中行可收起(0.17.14)')
+{
+  const fx85 = mkFixture('fx85', { 's.html': demoHtml('s') })
+  const cfgP = join(fx85.kb, 'kanban.config.json'), idxP = join(fx85.kb, 'index.html')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  cfg.stickyTabs = true
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx85.kb)
+  const offSha85 = sha(idxP) // 验收关着的基线(这一版对它必须一个字节不碰)
+  const mkL85 = (pr, title, n, extra = {}) => ({
+    pr, title, groups: [{ id: 'K', title: 'K 组' }, { id: 'L', title: 'L 组' }],
+    items: Array.from({ length: n }, (_, i) => ({ id: `WW${i + 1}`, group: i % 2 ? 'L' : 'K', title: `条目 ${i + 1}`, do: 'x', exp: 'y' })),
+    ...extra,
+  })
+  const LISTS85 = [mkL85([230, 232], '验收中这份', 4), mkL85(240, '排队甲', 3), mkL85(220, '收过的旧账', 5, { result: { checked: [], at: '2026-08-01' } })]
+  cfg.acceptanceTab = true
+  cfg.acceptanceFeedback = true
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  writeFileSync(join(fx85.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: LISTS85 }))
+  const r85 = runGen(NEW_SCRIPTS, fx85.kb)
+  ok(r85.status === 0, 'gen exit 0(验收 + 反馈共享 + 吸顶 tab 条都开着)', r85.stderr.slice(0, 200))
+  const on85 = readFileSync(idxP, 'utf8')
+
+  // ---- ① accRoute:换清单瞬移、同清单内平滑,两句都在它自己的函数体里 ----
+  // 抠函数体:从 `function accRoute()` 到紧随其后的 `LISTS.forEach(` —— 后者是它闭合后的第一条语句。
+  const a0 = on85.indexOf('function accRoute()'), a1 = on85.indexOf('LISTS.forEach(', a0)
+  ok(a0 > 0 && a1 > a0, '① 产物里找得到 accRoute 的函数体')
+  const route = on85.slice(a0, a1)
+  ok(route.includes("behavior: 'auto'") && route.includes("behavior: 'smooth'"),
+    "① accRoute 里两种滚法都在:换清单 behavior: 'auto'、同一份清单内 behavior: 'smooth'")
+  ok(/var was = SEL/.test(route) && /var moved = [^\n]*host\.dataset\.acck !== was/.test(route),
+    '① 「换没换清单」记的是调用 accSelect 之前的 SEL(之后 SEL 已经是新的了)')
+  ok(/moved \?\s*\{ behavior: 'auto', block: 'start' \} : \{ behavior: 'smooth', block: 'start' \}/.test(route.replace(/\s+/g, ' ')),
+    '① 两种滚法由「换了清单」那个分支挑,不是各滚各的')
+  ok(on85.indexOf("behavior: 'auto'") === on85.indexOf("behavior: 'auto'", a0),
+    "① behavior: 'auto' 只此一处,就在 accRoute 里(别处没有被顺手改掉的平滑滚)")
+  { // accRoute 从产物里原样抠出来跑(配一只最小假 DOM):换清单 auto、同一份清单内 smooth
+    const src = (on85.match(/    function accRoute\(\) \{[\s\S]*?\n    \}/) || [''])[0]
+    const run85 = (hash, acck, sel) => {
+      let beh = null
+      const el = { closest: (s) => (s === '.acclist' ? { dataset: { acck } } : null), parentElement: null, scrollIntoView(o) { beh = o && o.behavior } }
+      new Function('document', 'location', 'window', 'accSelect', 'SEL', `${src}\n accRoute()`)(
+        { getElementById: () => el }, { hash }, { accSync() {} }, () => {}, sel)
+      return beh
+    }
+    ok(run85('#acc-240', '240', '230-232') === 'auto', '① 换到别的清单:同步落位,不给中间帧')
+    ok(run85('#accg-230-232-K', '230-232', '230-232') === 'smooth', '① 同一份清单内点分组:照旧平滑')
+    ok(run85('#acc-230', '230-232', '230-232') === 'smooth', '① 点回当前这份清单自己的锚:不算换,保持平滑')
+  }
+
+  // ---- ② 点已选中的那一行:委托里先认「等于 SEL」,再 preventDefault,再翻 hidden 与三角 ----
+  const c0 = on85.indexOf("pane.addEventListener('click'")
+  const c1 = on85.indexOf(".closest('.accf button')", c0)
+  ok(c0 > 0 && c1 > c0, '② 产物里找得到验收 pane 那只 click 委托')
+  const del = on85.slice(c0, c1)
+  ok(del.includes("closest('a.accpr')"), '② 委托命中的是左栏 PR 行 a.accpr')
+  const iSel = del.indexOf("dataset.accsel === SEL"), iPd = del.indexOf('preventDefault')
+  ok(iSel > 0 && iPd > iSel, '② preventDefault 在「这一行就是选中那份」的判断之后 —— 别的行照旧走锚')
+  const iHid = del.indexOf('nv.hidden = !nv.hidden'), iG = del.indexOf(".querySelector('.accprg')")
+  ok(iHid > iPd && iG > iPd, '② 截下来之后翻的是这份自己的 nav hidden,三角随之改')
+  ok(/textContent = nv\.hidden \? '▸' : '▾'/.test(del), '② 收起是 ▸、展开是 ▾,与板上各处折叠同一套字形')
+  ok(!/accSelect\(|location\.hash|scrollIntoView/.test(del.slice(iSel)),
+    '② 这一支不改 SEL、不改 hash、不滚窗口', del.slice(iSel, iSel + 400))
+
+  // ---- ③ 关档冻结:没开 acceptanceTab 的板,这一版一个字节都不碰 ----
+  delete cfg.acceptanceTab
+  delete cfg.acceptanceFeedback
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx85.kb)
+  ok(sha(idxP) === offSha85, '③ 关掉 acceptanceTab 后与本次开之前的基线逐字节相同')
+
+  // 与 0.17.13 的对照(参照树取自 tag;浅克隆 / 没取 tag 时如实跳过)
+  const TAG13 = 'demo-driven-development--v0.17.13'
+  const have13 = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG13}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!have13) console.log(`  · 跳过:本地没有 ${TAG13}(浅克隆 / 未取 tag),0.17.13 冻结对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v01713')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v01713.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG13], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const oldScripts = join(oldRoot, 'scripts')
+    const ml85 = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+    const mk85 = (name, accOn, lazy) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+      c.stickyTabs = true
+      if (lazy) c.lazyTabs = true
+      if (accOn) {
+        c.acceptanceTab = true
+        c.acceptanceFeedback = true
+        writeFileSync(join(fx.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: LISTS85 }))
+      }
+      writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+      return fx
+    }
+    const za = mk85('fx85z-old', false), zb = mk85('fx85z-new', false)
+    runGen(oldScripts, za.kb); runGen(NEW_SCRIPTS, zb.kb)
+    ok(ml85(join(za.kb, 'index.html')) === ml85(join(zb.kb, 'index.html')),
+      '③ 冻结:acceptanceTab 关着的板 —— 归一化版本戳后与 0.17.13 逐字节相同')
+    const wa = mk85('fx85w-old', false, true), wb = mk85('fx85w-new', false, true)
+    runGen(oldScripts, wa.kb); runGen(NEW_SCRIPTS, wb.kb)
+    ok(ml85(join(wa.kb, 'index.html')) === ml85(join(wb.kb, 'index.html')),
+      '③ 冻结:lazyTabs 开着、acceptanceTab 关着的板 —— 也一个字节没动')
+    const ya = mk85('fx85y-old', true), yb = mk85('fx85y-new', true)
+    runGen(oldScripts, ya.kb); runGen(NEW_SCRIPTS, yb.kb)
+    ok(ml85(join(ya.kb, 'index.html')) !== ml85(join(yb.kb, 'index.html')),
+      '③ 开着的板产物确实变了(这一版要改的就是它)')
   }
 }
 

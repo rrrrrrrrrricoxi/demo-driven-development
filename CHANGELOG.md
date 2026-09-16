@@ -9,6 +9,23 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.14] - 2026-09-17
+
+### Fixed
+
+- Acceptance sidebar: switching to another checklist no longer flashes. The row
+  is an anchor, so the jump ran through `accRoute`, which reveals or hides the
+  current-PR card before scrolling — the page had already shifted by a whole
+  card when the smooth scroll started, so a slice of that card showed up before
+  the list head landed. Changing the selection now scrolls instantly; moving
+  inside one checklist (a group, an item) stays smooth.
+- Acceptance sidebar: clicking the already selected PR row now collapses and
+  re-expands its group/item outline. It used to be a plain anchor to a hash that
+  was already current, so nothing but the browser's own jump to the list head
+  happened and an open outline could not be folded away. The click is
+  intercepted instead and only flips that row's outline and its `▸`/`▾` — the
+  hash and the window scroll are left alone.
+
 ## [0.17.13] - 2026-09-16
 
 ### The acceptance sidebar stops being cut off, and opens down to the item
