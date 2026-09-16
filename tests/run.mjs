@@ -7954,25 +7954,29 @@ console.log('T80 换人不跳与 0.17.5 冻结对照')
     runGen(oldScripts, a.kb); runGen(NEW_SCRIPTS, b.kb)
     const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
     const oldL = ml(join(a.kb, 'index.html')), newL = ml(join(b.kb, 'index.html'))
-    // 按行做多重集差(onlyIn 在文件头,serve.py 那组冻结与这里共读同一份)
-    const gone = onlyIn(oldL, newL), added = onlyIn(newL, oldL)
-    ok(gone.length === 4, '0.17.5 那版里只有 4 行没了(副标题 1 行 + chip 那 3 行)', JSON.stringify(gone).slice(0, 300))
-    ok(gone.every((l) => /\.accme \{|<span class="sess">|var close = function|else host\.appendChild/.test(l)),
-      '没了的那几行全属于这两处修错(副标题 / 换人那一行),别处一行没动', JSON.stringify(gone).slice(0, 300))
-    // 两处修错各自的行 + 它们的续行(多行注释 / 多行 CSS 声明 / 那只小函数的函数体)
-    const MARK = /accme|accwho|fbChip|class="sess"|0\.17\.6|chip|顶栏|输入框|整块板|min-height: 19px|hidden = hide|if \(!c\) return|现查|收拾残局|^\s*\}$/
-    ok(added.length === 25 && added.every((l) => MARK.test(l)),
-      '新增的每一行也都属于这两处(其余一个字节不动)',
-      `${added.length} / ${JSON.stringify(added.filter((l) => !MARK.test(l))).slice(0, 300)}`)
-    ok(added.some((l) => l.includes('判定、备注与截图,同看板的人都看得见')) && added.some((l) => l.includes('fbChipHide')),
-      '两处修错确实都在这一份 diff 里(不是「什么都没改也全绿」)')
 
-    // 关档(不开 acceptanceFeedback)照旧逐字节冻结 —— 冻结③
+    // 关档(两个开关都不开)照旧逐字节冻结 —— 冻结③;顺带当下面那把尺的底片
     const oa = mkFixture('fx80z-old', { 's.html': demoHtml('s') })
     const ob = mkFixture('fx80z-new', { 's.html': demoHtml('s') })
     runGen(oldScripts, oa.kb); runGen(NEW_SCRIPTS, ob.kb)
-    ok(ml(join(oa.kb, 'index.html')).join('\n') === ml(join(ob.kb, 'index.html')).join('\n'),
+    const oldOff = ml(join(oa.kb, 'index.html')), newOff = ml(join(ob.kb, 'index.html'))
+    ok(oldOff.join('\n') === newOff.join('\n'),
       '冻结③:acceptanceFeedback 关着的板 —— 归一化版本戳后与 0.17.5 逐字节相同')
+
+    // 按行做多重集差(onlyIn 在文件头,serve.py 那组冻结与这里共读同一份)
+    const gone = onlyIn(oldL, newL), added = onlyIn(newL, oldL)
+    // 0.17.12 把验收左栏整片重做(两级导航),这条对照原来钉的是「只许差 4 行 / 25 行」——
+    // 一个 pane 重做一次就得来改一次数字,钉的其实不是不变量。尺子换成同一把板自己量出来的:
+    // 「开了验收之后才多出来的那些行」= 同一版 gen 的 ON 减 OFF(验收整片是门控的,关了即空串),
+    // 差的每一行都必须落在那一堆里 —— 别的 pane 动一个字节照样红,而 acc* 允许随本版重做。
+    const owned = (on, off) => onlyIn(on, off)
+    ok(onlyIn(gone, owned(oldL, oldOff)).length === 0 && onlyIn(added, owned(newL, newOff)).length === 0,
+      '0.17.5 → 今天:差的每一行都是「验收开着才有」的行(别的 pane 一个字节没动)',
+      JSON.stringify([...onlyIn(gone, owned(oldL, oldOff)), ...onlyIn(added, owned(newL, newOff))]).slice(0, 400))
+    ok(added.some((l) => l.includes('判定、备注与截图,同看板的人都看得见')) && added.some((l) => l.includes('fbChipHide')),
+      '0.17.6 那两处修错仍在这一份 diff 里(不是「什么都没改也全绿」)')
+    ok(gone.some((l) => l.includes('.accwrap {')) && added.some((l) => l.includes('.accpane {')) && added.some((l) => l.includes('data-accnavk')),
+      '0.17.12 的左栏两级导航也在这一份 diff 里:清单里那张两列网格退场,换成 .accpane + [data-accnavk]')
   }
 }
 
@@ -8189,6 +8193,163 @@ console.log('T82 与 0.17.9 的冻结对照')
       ok(sameH, '带高:0…6 道的每一格都与 0.17.9 相同(高度随用到的道数走,这一条本来就是老口径)')
       ok(sameC, 'relCaps:一个数都没动(开着的右端不画帽是 tlCap 的事,几何不为此分叉)')
     }
+  }
+}
+
+// ============ T83 验收左栏两级导航(0.17.12)============
+// 左栏上一级列 PR(验收中那份置顶)、下一级列选中那份的分组;主区同一时刻只显示一份清单。
+// 行为层(点、深链、640px)最终由真浏览器验;这里钉的是产物结构、数据通路与那几处运行期机关。
+console.log('T83 验收左栏两级导航(0.17.12)')
+{
+  const fx83 = mkFixture('fx83', { 's.html': demoHtml('s') })
+  const cfgP = join(fx83.kb, 'kanban.config.json'), idxP = join(fx83.kb, 'index.html')
+  const accP = join(fx83.kb, 'acceptance-manifest.json')
+  const cfg = JSON.parse(readFileSync(cfgP, 'utf8'))
+  runGen(NEW_SCRIPTS, fx83.kb)
+  const offSha = sha(idxP) // 未配 acceptanceTab 的基线(这一版对它必须一个字节不碰)
+  const mkList = (pr, title, n, extra = {}) => ({
+    pr, title, groups: [{ id: 'K', title: 'K 组' }, { id: 'L', title: 'L 组' }],
+    items: Array.from({ length: n }, (_, i) => ({ id: `${Array.isArray(pr) ? pr[0] : pr}-${i + 1}`, group: i % 2 ? 'L' : 'K', title: `条目 ${i + 1}`, do: 'x', exp: 'y' })),
+    ...extra,
+  })
+  const LISTS83 = [
+    mkList([230, 232], '验收中这份', 4),
+    mkList(240, '排队甲', 3),
+    mkList(241, '排队乙', 2),
+    mkList(220, '收过的旧账甲', 5, { result: { checked: [], at: '2026-08-01' } }),
+    mkList(221, '收过的旧账乙', 6, { result: { checked: [], at: '2026-08-05' } }),
+  ]
+  cfg.acceptanceTab = true
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: LISTS83 }))
+  const r83 = runGen(NEW_SCRIPTS, fx83.kb)
+  ok(r83.status === 0, 'gen exit 0', r83.stderr.slice(0, 200))
+  const on = readFileSync(idxP, 'utf8')
+
+  // ---- ① 上一级:条目数 = 当前 + 排队 + 已验收 ----
+  ok(count(on, '<a class="accpr') === 5,
+    `左栏 PR 条目 5 条 = 当前 1 + 排队 2 + 已验收 2(实际 ${count(on, '<a class="accpr')})`)
+  ok(count(on, 'data-accsel="230-232"') === 1 && count(on, 'data-accsel="240"') === 1 && count(on, 'data-accsel="221"') === 1,
+    '每份清单在左栏只占一条(多 PR 的那份也只一条,不逐号各画一份)')
+
+  // ---- ② 顺序:当前 → 排队(沿用清单顺序)→ 已验收(折叠,最近合并/收账在前)----
+  const at = (s) => on.indexOf(s)
+  ok(at('data-accsel="230-232"') < at('data-accsel="240"') && at('data-accsel="240"') < at('data-accsel="241"')
+    && at('data-accsel="241"') < at('<details class="accdone">'),
+    '顺序:验收中那份置顶,排队的沿用清单顺序,已验收整档在它们之后')
+  ok(at('<details class="accdone">') < at('data-accsel="221"') && at('data-accsel="221"') < at('data-accsel="220"'),
+    '已验收折在 <details> 里,且最近那份(2026-08-05)排在更早那份(2026-08-01)前面')
+  ok(on.includes('<summary>已验收 (2)</summary>'), '折叠头写清有几份:「已验收 (2)」')
+
+  // ---- ③ 当前那份标「验收中」,与卡头那一枚同一个 .accnow ----
+  ok(count(on, '<span class="accnow">验收中</span>') === 1
+    && /data-accsel="230-232">.*?<span class="accnow">验收中<\/span>/.test(on),
+    '「验收中」小标只给 current 那一条,且用的是全板同一枚 .accnow')
+
+  // ---- ④ 主区同一时刻只显示一份:烤出来就只有 current 那份不 hidden ----
+  ok(on.includes('<section class="acclist" id="acc-230-232" data-acck="230-232">')
+    && count(on, ' data-acck="240" hidden>') === 1 && count(on, ' data-acck="241" hidden>') === 1
+    && count(on, ' data-acck="220" hidden>') === 1 && count(on, ' data-acck="221" hidden>') === 1,
+    '五份清单全烤进主区,只有当前那份不带 hidden(其余四份 hidden)')
+  ok(on.includes('<section class="acccur" data-acck="230-232">'),
+    '环境/进度那张卡也挂 data-acck —— 人点去别的清单时它跟着收起来,不会拿 current 的地址配别人的清单')
+  ok(count(on, 'data-accnavk="230-232"') === 1 && count(on, 'data-accnavk="240" hidden>') === 1
+    && count(on, 'class="accnav"') === 5,
+    '分组栏一份清单一只、全烤进左栏,同样只有当前那只不 hidden')
+
+  // ---- ⑤ 没有 hash 时的默认 = 当前那份:烤进产物的 SEL 与那份可见清单同一个键 ----
+  ok(on.includes('var SEL = "230-232"'), '运行期初值 SEL 就是 current 那份(无 hash 即默认它,首屏不闪)')
+
+  // ---- ⑥ 点一条 / 深链:href 是 #acc-<号>,运行期按号找清单再切显示 ----
+  ok(on.includes('<a class="accpr on" href="#acc-230" data-accsel="230-232">')
+    && on.includes('href="#acc-240" data-accsel="240"'),
+    '左栏每条就是一条 #acc-<号> 链接 —— 点它走的是 hash,前进/后退天然跟着走')
+  ok(on.includes("if (id.indexOf('acc-') === 0) { var k = id.slice(4); accSelect(byKey[k] ? k : OF_PR[k]) }"),
+    'accRoute:#acc-<号> 先按清单键认,认不出再走 OF_PR 把成员号翻成清单键')
+  ok(on.includes("e.hidden = (e.dataset.acck || e.dataset.accnavk) !== k")
+    && on.includes("document.querySelectorAll('[data-accsel]').forEach(function (a) { a.classList.toggle('on', a.dataset.accsel === k) })"),
+    'accSelect 一把管三件事:主区只留选中那份、分组栏跟着换、左栏那一条点亮')
+  { // OF_PR 是深链的真通路:每一条左栏链接的号都要翻得回它自己那份清单
+    const ofpr = JSON.parse((on.match(/var OF_PR = (\{.*?\})\n/) || [])[1] || '{}')
+    const pairs = [['230', '230-232'], ['232', '230-232'], ['240', '240'], ['241', '241'], ['220', '220'], ['221', '221']]
+    ok(pairs.every(([n, k]) => ofpr[n] === k), '深链的号→清单映射逐条对得上(含多 PR 那份的两个号)', JSON.stringify(ofpr))
+  }
+
+  // ---- ⑦ 分组栏跟随选中的那份:它已经不在清单 section 里,计数与滚动高亮都改从左栏找 ----
+  ok(on.indexOf('<div class="accnavs">') < on.indexOf('<section class="acclist"'),
+    '分组栏烤在左栏(accnavs)里,排在主区第一份清单之前 —— 不再长在清单自己的两列网格里')
+  ok(!on.includes('class="accwrap"') && !on.includes('class="accbody"'),
+    '清单里那张 168px + 1fr 的两列网格退场(左栏统一成一根柱子)')
+  ok(on.includes('function accNavOf(k) { return document.querySelector(\'[data-accnavk="\' + k + \'"]\') }')
+    && on.includes('var nav = accNavOf(l.k)') && on.includes("if (nav) nav.querySelectorAll('[data-accgl]')"),
+    'syncList 的分组计数改从 [data-accnavk] 找那只栏(它已不在清单 section 的子树里)')
+  ok(on.includes("nav.querySelectorAll('[data-accgl]').forEach(function (a) { a.classList.toggle('on', a.dataset.accgl === cur.dataset.accg) })"),
+    'spy 的滚动高亮同样改从左栏找;没选中的那几份 hidden 着,offsetParent 为 null 自然跳过')
+
+  // ---- ⑧ 「已判 N/M」与进度条同一个数 ----
+  ok(on.includes('<span class="accprc" data-acc="230">0/4</span>') && on.includes('<span class="acctot">4</span>'),
+    '同一份清单:左栏的「已判 N/M」与进度条分母都是 4,且左栏用的就是全板那套 [data-acc] 钩子')
+  ok(on.includes('<span class="accprc" data-acc="241">0/2</span>') && on.includes('<span class="accprc" data-acc="221">0/6</span>'),
+    '排队与已验收那几条同样烤 0/M(分子由 syncChips 在浏览器里按我的判定算)')
+
+  // ---- ⑨ 页顶那段「排队中」链接没了 ----
+  ok(!on.includes('accqueue') && !on.includes('排队中:') && !on.includes('>排队中 '),
+    '页顶「排队中:#240 / #241…」那一段不再渲染(信息进了左栏;泳道图例那个「排队中」不相干,还在)')
+  ok(!on.includes('class="accfold"'), '「排队中 / 已验收」两块折叠清单也退场(主区不再一次摊开好几份)')
+
+  // ---- ⑩ ≤640px:左栏不占列,收成两行可横滚 chip ----
+  // 板上不止一处 @media (max-width: 640px)(行卡标题那一处早就在),认验收这一块要按它自己的头一条规则找
+  const mq = (on.match(/@media \(max-width: 640px\) \{\n    \.accpane[\s\S]*?\n  \}/) || [''])[0]
+  ok(mq.includes('.accpane { display: block; }') && mq.includes('.accside { position: static;'),
+    '≤640px:左栏不占一列(网格化块),sticky 也撤掉', mq.slice(0, 200))
+  ok(mq.includes('.accprs, .accnav:not([hidden]) { display: flex; flex-wrap: nowrap; overflow-x: auto;'),
+    '≤640px:PR 一行、分组一行,各自横向滚动(不折行、不做抽屉)', mq.slice(0, 300))
+  ok(!/\.accnav \{ display: flex/.test(mq),
+    '窄屏那条 display 必须挂 :not([hidden]) —— 作者样式压得过 [hidden]{display:none},' +
+    '少了它没选中的那几十只分组栏会在手机上全冒出来(真机上撞见过)', mq.slice(0, 300))
+  ok(on.includes('.accside { position: sticky; top: calc(var(--hubh, 41px) + 12px);'), '宽屏下左栏 sticky')
+
+  // ---- ⑪ 关档冻结:没开 acceptanceTab 的板,这一版一个字节都不碰 ----
+  delete cfg.acceptanceTab
+  writeFileSync(cfgP, JSON.stringify(cfg, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx83.kb)
+  ok(sha(idxP) === offSha, '关掉 acceptanceTab 后与本次开之前的基线逐字节相同')
+
+  // 与 0.17.11 的对照(参照树取自 tag;浅克隆 / 没取 tag 时如实跳过)
+  const TAG = 'demo-driven-development--v0.17.11'
+  const haveTag = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!haveTag) console.log(`  · 跳过:本地没有 ${TAG}(浅克隆 / 未取 tag),0.17.11 冻结对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v01711')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v01711.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const oldScripts = join(oldRoot, 'scripts')
+    const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v'))
+    const mk = (name, accOn) => {
+      const fx = mkFixture(name, { 's.html': demoHtml('s') })
+      const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+      if (accOn) {
+        c.acceptanceTab = true
+        writeFileSync(join(fx.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: LISTS83 }))
+      }
+      writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+      return fx
+    }
+    const za = mk('fx83z-old', false), zb = mk('fx83z-new', false)
+    runGen(oldScripts, za.kb); runGen(NEW_SCRIPTS, zb.kb)
+    ok(ml(join(za.kb, 'index.html')).join('\n') === ml(join(zb.kb, 'index.html')).join('\n'),
+      '冻结:acceptanceTab 关着的板 —— 归一化版本戳后与 0.17.11 逐字节相同')
+    const ya = mk('fx83y-old', true), yb = mk('fx83y-new', true)
+    runGen(oldScripts, ya.kb); runGen(NEW_SCRIPTS, yb.kb)
+    const oldOn = ml(join(ya.kb, 'index.html')), newOn = ml(join(yb.kb, 'index.html'))
+    const offOld = ml(join(za.kb, 'index.html')), offNew = ml(join(zb.kb, 'index.html'))
+    const goneZ = onlyIn(oldOn, newOn), addedZ = onlyIn(newOn, oldOn)
+    ok(goneZ.length > 0 && addedZ.length > 0, '开着的板产物确实变了(这一版要改的就是它)')
+    ok(onlyIn(goneZ, onlyIn(oldOn, offOld)).length === 0 && onlyIn(addedZ, onlyIn(newOn, offNew)).length === 0,
+      '0.17.11 → 今天:差的每一行都是「验收开着才有」的行(别的 pane 一个字节没动)',
+      JSON.stringify([...onlyIn(goneZ, onlyIn(oldOn, offOld)), ...onlyIn(addedZ, onlyIn(newOn, offNew))]).slice(0, 400))
   }
 }
 

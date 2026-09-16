@@ -2687,29 +2687,46 @@ const accItemHtml = (l, it) => {
               </div>${fb}
             </div>`
 }
-const accListHtml = (l) => {
+// 分组栏 = 左栏的下一级(v0.17.12)。从前它长在每份清单自己的网格左列里;两级导航之后
+// 一份清单一只、全烤进左栏,只有选中的那只不 hidden。计数与滚动高亮照旧由 syncList / spy 刷,
+// 只是它们改从 [data-accnavk] 找它 —— 它已经不在清单 section 的子树里了。
+const accNavHtml = (l, sel) => {
+  const gs = l.groups.filter((g) => l.items.some((it) => it.group === String(g.id)))
+  return `
+      <nav class="accnav" data-accnavk="${esc(l.key)}"${sel ? '' : ' hidden'}><p class="accnavh">分组 <span class="accnavp">${l.nums.map((n) => `#${n}`).join(' / ')}</span></p>${gs.map((g) => `<a href="#accg-${esc(l.key)}-${esc(String(g.id))}" data-accgl="${esc(String(g.id))}">${esc(g.title || g.id)}<span class="accgc">0/${l.items.filter((it) => it.group === String(g.id)).length}</span></a>`).join('')}</nav>`
+}
+const accListHtml = (l, sel) => {
   const gs = l.groups.filter((g) => l.items.some((it) => it.group === String(g.id)))
   const chips = [
     l.rounds.length ? `<div class="accf" data-accf="round"><button type="button" class="on" data-v="all">全部轮次</button>${l.rounds.map((r) => `<button type="button" data-v="${esc(String(r.id))}">${esc(r.label || r.id)}${r.date ? ` · ${esc(String(r.date).slice(5))}` : ''}</button>`).join('')}</div>` : '',
     l.nums.length > 1 ? `<div class="accf" data-accf="pr"><button type="button" class="on" data-v="all">全部 PR</button>${l.nums.map((n) => `<button type="button" data-v="${n}">#${n}</button>`).join('')}</div>` : '',
   ].filter(Boolean).join('')
   return `
-    <section class="acclist" id="acc-${esc(l.key)}" data-acck="${esc(l.key)}">${l.nums.filter((n) => String(n) !== l.key).map((n) => `<a class="accanchor" id="acc-${n}"></a>`).join('')}
-      <header class="acclh"><b>${esc(l.title || l.key)}</b>${l.nums.map(accPrChip).join('')}<span class="accmeta">${l.items.length} 条${l.rev > 1 ? ` · 第 ${l.rev} 版清单` : ''}</span></header>
-      <div class="accwrap">
-        <nav class="accnav"><p class="accnavh">分组</p>${gs.map((g) => `<a href="#accg-${esc(l.key)}-${esc(String(g.id))}" data-accgl="${esc(String(g.id))}">${esc(g.title || g.id)}<span class="accgc">0/${l.items.filter((it) => it.group === String(g.id)).length}</span></a>`).join('')}</nav>
-        <div class="accbody">${chips ? `\n          <div class="accfs">${chips}</div>` : ''}${gs.map((g) => `
+    <section class="acclist" id="acc-${esc(l.key)}" data-acck="${esc(l.key)}"${sel ? '' : ' hidden'}>${l.nums.filter((n) => String(n) !== l.key).map((n) => `<a class="accanchor" id="acc-${n}"></a>`).join('')}
+      <header class="acclh"><b>${esc(l.title || l.key)}</b>${l.nums.map(accPrChip).join('')}<span class="accmeta">${l.items.length} 条${l.rev > 1 ? ` · 第 ${l.rev} 版清单` : ''}</span></header>${chips ? `\n          <div class="accfs">${chips}</div>` : ''}${gs.map((g) => `
           <section class="accgrp" id="accg-${esc(l.key)}-${esc(String(g.id))}" data-accg="${esc(String(g.id))}">
             <h3 class="accgh">${esc(g.title || g.id)}</h3>${g.tip ? `
             <p class="accgt">${bold(g.tip)}</p>` : ''}${l.items.filter((it) => it.group === String(g.id)).map((it) => accItemHtml(l, it)).join('')}
           </section>`).join('')}
-        </div>
-      </div>
     </section>`
 }
 // 已验收 / 排队中的分档:有 release-manifest 时按 PR 真状态,没有时退回「清单有没有 result」
 const accDoneLists = !ACC ? [] : ACC_LISTS.filter((l) => l !== ACC_CUR && (rlm ? l.nums.some((n) => (relPr.get(n) || {}).state === 'merged') : Boolean(l.result)))
 const accQueueLists = !ACC ? [] : ACC_LISTS.filter((l) => l !== ACC_CUR && !accDoneLists.includes(l))
+// 已验收那一档折叠着,展开后最近合并的在前:有 mergedAt 就按它,没有(不看 release-manifest 的板)
+// 退到清单自己记的 result.at,再退到 PR 号 —— 三档都取清单覆盖的那几个号里最大的那一个。
+const accMergedKey = (l) => l.nums.map((n) => String((relPr.get(n) || {}).mergedAt || '')).sort().pop() ||
+  String((l.result || {}).at || '')
+const accDoneSorted = !ACC ? [] : accDoneLists.slice().sort((a, b) => {
+  const ka = accMergedKey(a), kb = accMergedKey(b)
+  if (ka !== kb) return ka < kb ? 1 : -1
+  return Math.max(...b.nums) - Math.max(...a.nums)
+})
+// 左栏选中的那一份:没有 hash 时的默认(= 验收中那份;没有 current 的板退到第一份清单)。
+// gen 期就把它烤成「可见」,运行期只在人点别的 / 深链指别处时才改 —— 免得首屏先闪一下全展开。
+const ACC_ORDER = !ACC ? [] : [...(ACC_CUR ? [ACC_CUR] : []), ...accQueueLists, ...accDoneSorted]
+const ACC_SEL = ACC_ORDER[0] || null
+const accIsSel = (l) => Boolean(ACC_SEL) && l.key === ACC_SEL.key
 const accNoListPrs = !ACC ? [] : (rlm
   ? [...relPr.values()].filter((p) => p.state === 'open' && !ACC_BY_PR.has(Number(p.number))).map((p) => ({ n: Number(p.number), t: p.title || '', u: p.url || prUrl({ repo: PR_REPO, num: Number(p.number) }) }))
   : [...new Set(ALL_CARDS.flatMap((c) => prsOfCard(c, PR_REPO).filter((p) => p.repo === PR_REPO && !ACC_BY_PR.has(p.num)).map((p) => p.num)))]
@@ -2724,8 +2741,10 @@ const accCurHtml = (() => {
   const cards = accCardsOf(l)
   const docs = accDocsOf(cards)
   const row = (lbl, html) => (html ? `\n      <div class="accer"><span class="acclbl">${esc(lbl)}</span>${html}</div>` : '')
+  // data-acck:这张环境/进度卡说的是 current 那一份 —— 人在左栏点去别的清单时它跟着收起来
+  // (选中的那份显示什么,由同一个 data-acck 一把管,不另开一套开关)。
   return `
-  <section class="acccur">
+  <section class="acccur" data-acck="${esc(l.key)}"${accIsSel(l) ? '' : ' hidden'}>
     <header class="acchd">${l.nums.map(accPrChip).join('')}<b>${esc(l.title || l.key)}</b></header>
     <div class="accenv">${row('地址', env.url ? `<a href="${esc(safeHref(env.url))}" target="_blank" rel="noopener">${esc(env.url)}</a>` : '')}${row('后端', env.backend ? esc(env.backend) : '')}${row('分支', env.branch ? `<code>${esc(env.branch)}</code>${env.commit ? ` · <code>${esc(String(env.commit).slice(0, 7))}</code>` : ''}` : '')}${row('账号', env.accounts ? bold(env.accounts) : '')}${(env.notes || []).map((n) => row('注意', bold(n))).join('')}
     </div>
@@ -2735,8 +2754,7 @@ const accCurHtml = (() => {
       <button type="button" class="accbtn" data-acccopy="${esc(l.key)}">${!AFB ? '复制勾选结果' : '复制结果'}</button>
     </div>${cards.length ? `
     <div class="accrel"><span class="acclbl">关联卡</span>${cards.map((c) => `<a class="acccard" href="#${esc(c.id)}" title="${esc(c.title)}">${esc(c.id)}${c.st ? ` · ${esc(c.st)}` : ''}</a>`).join('')}</div>` : ''}${docs.length ? `
-    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(safeHref(d.href))}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}${accQueueLists.length ? `
-    <p class="accqueue">排队中:${accQueueLists.map((q) => `<a href="#acc-${esc(q.key)}">${q.nums.map((n) => `#${n}`).join(' / ')} · ${esc(q.title || q.key)}(${q.items.length} 条)</a>`).join('')}</p>` : ''}
+    <div class="accrel"><span class="acclbl">demo / 文档</span>${docs.map((d) => `<a class="acccard doc" href="${esc(safeHref(d.href))}"${d.ext ? ' target="_blank" rel="noopener"' : ''}>${esc(d.title)}</a>`).join('')}</div>` : ''}
   </section>`
 })()
 
@@ -2751,17 +2769,32 @@ const ACC_ME_CHIP = !AFB ? '' : `
 // 无写口时那一行灰字(运行期才知道有没有写口,所以烤成 hidden,降级时才亮)
 const ACC_DEG = !AFB ? '' : `
   <p class="accdeg" data-accdeg hidden>这台看板没有写口,判定只存在这台浏览器里 —— 要两人互见,请经 <code>serve.py</code>(0.17.0 起)打开。</p>`
+// 左栏上一级:一份清单一条。`#号 · 标题(单行截断,title 属性给全文)· 已判 N/M`。
+// 分子走 [data-acc] 那套老钩子(syncChips 全页统一刷),gen 期一律烤 0/M。
+// 「验收中」那枚小标只给 current 那份,与卡头上那一枚同一个 .accnow。
+const accSideRow = (l, live) => `
+      <a class="accpr${accIsSel(l) ? ' on' : ''}" href="#acc-${l.nums[0]}" data-accsel="${esc(l.key)}"><span class="accprn">${l.nums.map((n) => `#${n}`).join('/')}</span><span class="accprt" title="${esc(l.title || l.key)}">${esc(l.title || l.key)}</span>${live ? '<span class="accnow">验收中</span>' : ''}<span class="accprc" data-acc="${l.nums[0]}">0/${l.items.length}</span></a>`
+// 左栏(v0.17.12,两级):上一级 PR、下一级选中那份的分组。sticky,一根柱子到底。
+const accSideHtml = !ACC || !ACC_ORDER.length ? '' : `
+    <nav class="accside">
+      <div class="accprs">${ACC_CUR ? accSideRow(ACC_CUR, true) : ''}${accQueueLists.map((l) => accSideRow(l, false)).join('')}
+      </div>${accDoneSorted.length ? `
+      <details class="accdone"><summary>已验收 (${accDoneSorted.length})</summary>${accDoneSorted.map((l) => accSideRow(l, false)).join('')}
+      </details>` : ''}
+      <div class="accnavs">${ACC_ORDER.map((l) => accNavHtml(l, accIsSel(l))).join('')}
+      </div>
+    </nav>`
 const acceptancePane = !ACC ? '' : `
   <div class="topbar">
     <h1>${esc(BRAND)} · 验收</h1>
     <span class="sess">${!AFB ? '清单源 <code>acceptance-manifest.json</code> · 勾选存这台浏览器(改 <code>revision</code> 即作废旧勾选)' : '判定、备注与截图,同看板的人都看得见 · 清单改版后旧判定作废'}</span>${ACC_ME_CHIP}
-  </div>${ACC_DEG}${accCurHtml}${ACC_CUR ? accListHtml(ACC_CUR) : ''}${accQueueLists.length ? `
-  <details class="accfold"><summary>排队中 <span class="mut">${accQueueLists.length} 份清单</span></summary>${accQueueLists.map(accListHtml).join('')}
-  </details>` : ''}${accDoneLists.length ? `
-  <details class="accfold"><summary>已验收 <span class="mut">${accDoneLists.length} 份清单${accDoneLists.some((l) => l.result && l.result.at) ? ` · 最近 ${esc(accDoneLists.map((l) => (l.result || {}).at || '').sort().pop())}` : ''}</span></summary>${accDoneLists.map(accListHtml).join('')}
-  </details>` : ''}${accNoListPrs.length ? `
+  </div>${ACC_DEG}
+  <div class="accpane">${accSideHtml}
+    <div class="accmain">${accCurHtml}${ACC_ORDER.map((l) => accListHtml(l, accIsSel(l))).join('')}${accNoListPrs.length ? `
   <div class="accnolist"><p class="accnt">没有验收清单的 PR · ${accNoListPrs.length}</p>${accNoListPrs.map((p) => `<p class="accnr"><a href="${esc(safeHref(p.u))}" target="_blank" rel="noopener">#${p.n}</a>${p.t ? ` ${esc(p.t)}` : ''}</p>`).join('')}
   </div>` : ''}
+    </div>
+  </div>
   <p class="stamp">由 <code>gen.mjs</code> 生成自 <code>acceptance-manifest.json</code> — 条目正文改完重跑生成;${!AFB ? '勾选进度只在这台浏览器,「复制勾选结果」产出的 JSON 贴回清单的 <code>result</code> 才进 git' : '判定与备注只增不删地记在 <code>acceptance-feedback.jsonl</code>(随 git 走),「复制结果」产出的 JSON 贴回清单的 <code>result</code> 才是收账'}。</p>`
 
 // ———— 验收:门控注入片(ACC 关时全为空串)————
@@ -2938,18 +2971,35 @@ const ACC_CSS = !ACC ? '' : `
   .acccard { font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 8px; border-radius: 99px; text-decoration: none;
      color: var(--brand); background: var(--brand-soft); white-space: nowrap; }
   .acccard.doc { color: var(--accent); background: var(--accent-soft); font-weight: 400; }
-  .accqueue { margin: 10px 0 0; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 11.5px; color: var(--faint);
-     display: flex; gap: 10px; flex-wrap: wrap; }
-  .accqueue a { color: var(--accent); text-decoration: none; }
   .acclist { margin-bottom: 22px; scroll-margin-top: 58px; }
   .accanchor { display: block; height: 0; scroll-margin-top: 58px; }
   .acclh { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 7px;
      border-bottom: 1px solid var(--line-strong); }
   .acclh b { font-size: 14px; }
   .accmeta { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .accwrap { display: grid; grid-template-columns: 168px 1fr; gap: 18px; margin-top: 14px; align-items: start; }
-  .accnav { position: sticky; top: calc(var(--hubh, 41px) + 12px); font-size: 12px; }
+  /* 两级左栏(v0.17.12):上一级 PR、下一级分组,同一根 sticky 的柱子 */
+  .accpane { display: grid; grid-template-columns: 210px 1fr; gap: 20px; align-items: start; margin-top: 14px; }
+  .accside { position: sticky; top: calc(var(--hubh, 41px) + 12px); font-size: 12px; min-width: 0; }
+  .accmain { min-width: 0; } /* 主区自己会滚的那些块(数据表)靠它才收得住,不把左栏挤窄 */
+  .accpr { display: flex; align-items: baseline; gap: 6px; padding: 5px 8px; margin-bottom: 2px;
+     border-radius: 6px; line-height: 1.5; color: var(--mut); text-decoration: none; }
+  .accpr:hover { background: var(--bg); }
+  .accpr.on { background: var(--brand-soft); color: var(--ink); }
+  .accprn { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .accprt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .accpr .accnow { flex: none; }
+  .accprc { flex: none; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .accpr.on .accprc { color: var(--mut); }
+  .accdone { margin-top: 4px; }
+  .accdone > summary { padding: 5px 8px; font-size: 11.5px; color: var(--faint); cursor: pointer; list-style: none;
+     display: flex; align-items: baseline; gap: 6px; }
+  .accdone > summary::-webkit-details-marker { display: none; }
+  .accdone > summary::before { content: "▸"; font-size: 10px; }
+  .accdone[open] > summary::before { content: "▾"; }
+  .accnavs { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .accnav { font-size: 12px; }
   .accnavh { margin: 0 0 6px 8px; font-size: 10.5px; letter-spacing: .08em; color: var(--faint); }
+  .accnavp { font-variant-numeric: tabular-nums; letter-spacing: 0; }
   .accnav a { display: block; padding: 5px 8px; margin-bottom: 2px; border-radius: 6px; line-height: 1.4;
      color: var(--mut); text-decoration: none; }
   .accnav a:hover { background: var(--bg); }
@@ -2996,19 +3046,24 @@ const ACC_CSS = !ACC ? '' : `
   .accsc td { padding: 5px 9px; white-space: nowrap; border-bottom: 1px solid var(--line);
      font-variant-numeric: tabular-nums; }
   .accsc tr:last-child td { border-bottom: 0; }
-  .accfold { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
-  .accfold > summary { padding: 10px 14px; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
-     display: flex; align-items: center; gap: 8px; }
-  .accfold > summary::-webkit-details-marker { display: none; }
-  .accfold > summary::before { content: "▸"; font-size: 10px; color: var(--faint); }
-  .accfold[open] > summary::before { content: "▾"; }
-  .accfold > summary .mut { font-weight: 400; font-size: 11.5px; color: var(--faint); }
-  .accfold .acclist { padding: 0 14px; }
   .accnolist { border: 1px solid var(--line-strong); border-radius: 10px; background: ${tk('warn-bg')}; padding: 11px 14px; }
   .accnt { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: ${tk('warn-ink')}; }
   .accnr { margin: 2px 0; font-size: 12px; color: var(--mut); }
   .accnr a { font-weight: 600; color: var(--accent); text-decoration: none; font-variant-numeric: tabular-nums; }
-  @media (max-width: 820px) { .accwrap { grid-template-columns: 1fr; } .accnav { position: static; } }${ACC_FB_CSS}`
+  /* ≤ 640px:左栏不占一列,收成主区上方两行可横滚的 chip —— PR 一行、分组一行(不做抽屉)。
+     已验收那一折排到两行之后,免得把两行 chip 隔开。 */
+  @media (max-width: 640px) {
+    .accpane { display: block; }
+    .accside { position: static; display: flex; flex-direction: column; margin-bottom: 12px; }
+    /* :not([hidden]) 不是装饰:作者写的 display 压得过浏览器自带的 [hidden]{display:none},
+       少这一截,没选中的那 N 只分组栏会在窄屏上全冒出来(41 份清单 = 41 行)。 */
+    .accprs, .accnav:not([hidden]) { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+    .accpr, .accnav a { flex: none; margin-bottom: 0; border: 1px solid var(--line); }
+    .accprt { max-width: 11em; }
+    .accnavs { order: 2; margin-top: 8px; padding-top: 0; border-top: 0; }
+    .accnavh { display: none; }
+    .accdone { order: 3; }
+  }${ACC_FB_CSS}`
 // 运行期:勾选(localStorage;开了 acceptanceFeedback 就换成判定)/ 筛选 / 进度 / 目录 /
 // 复制 TSV / 复制结果 / 卡头分子。
 // 数据烤入,分子全在浏览器算(gen 零时间);<  逃逸照 LAZY_PANE_OF 做法。
@@ -3358,9 +3413,9 @@ ${!AFB_PIN ? '' : `    // v0.17.6 名册:谁能在验收账上出现,该有人�
       var kept = null
       if (open) {
         var oi = open.querySelector('.accwhoi')
-        // 交焦点之前先问一句「那只框还看得见吗」:它可能长在一个已经收起来的 <details>(排队中 /
-        // 已验收)里 —— 隐藏子树里的 focus() 一声不响地不作数,于是人点什么都没反应,队列越排越
-        // 长,整页再也署不了名,只能刷新。看不见就把它连同人打了一半的字一起搬到这一处来。
+        // 交焦点之前先问一句「那只框还看得见吗」:它可能长在一份此刻没选中的清单里(0.17.12 之前
+        // 是收起来的 <details>)—— 隐藏子树里的 focus() 一声不响地不作数,于是人点什么都没反应,
+        // 队列越排越长,整页再也署不了名,只能刷新。看不见就把它连同人打了一半的字一起搬到这一处来。
         if (oi.getClientRects().length) { oi.focus(); return }
         kept = oi.value
         var orow = open.closest('.accitem')
@@ -3939,7 +3994,8 @@ const ACC_JS = !ACC ? '' : `
         gc[it.g].t++; if (${!AFB ? 'on' : 'jd'}) gc[it.g].d++; if (shown) gc[it.g].v++${!AFB ? '' : '; if (bd) gc[it.g].b++'}
       })
       sec.querySelectorAll('.accgrp').forEach(function (g) { g.style.display = (gc[g.dataset.accg] || {}).v ? '' : 'none' })
-      sec.querySelectorAll('[data-accgl]').forEach(function (a) {
+      var nav = accNavOf(l.k)
+      if (nav) nav.querySelectorAll('[data-accgl]').forEach(function (a) {
         var c = gc[a.dataset.accgl] || { t: 0, d: 0, v: 0${!AFB ? '' : ', b: 0'} }
         var n = a.querySelector('.accgc'); if (n) n.textContent = c.d + '/' + c.t
         a.classList.toggle('done', c.t > 0 && c.d === c.t${!AFB ? '' : ' && !c.b'})${!AFB ? '' : `
@@ -3969,13 +4025,15 @@ const ACC_JS = !ACC ? '' : `
     function spy() { // 分组目录跟随滚动;滚到底点亮末项(末组太短时永远轮不到它)
       LISTS.forEach(function (l) {
         var sec = document.getElementById('acc-' + l.k)
-        if (!sec || !sec.offsetParent) return
+        if (!sec || !sec.offsetParent) return // 没选中的那几份 hidden 着,offsetParent 就是 null
+        var nav = accNavOf(l.k)
+        if (!nav) return
         var gs = [].slice.call(sec.querySelectorAll('.accgrp')).filter(function (g) { return g.style.display !== 'none' })
         if (!gs.length) return
         var y = window.scrollY + 96, cur = gs[0]
         for (var i = 0; i < gs.length; i++) { if (gs[i].getBoundingClientRect().top + window.scrollY <= y) cur = gs[i]; else break }
         if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = gs[gs.length - 1]
-        sec.querySelectorAll('[data-accgl]').forEach(function (a) { a.classList.toggle('on', a.dataset.accgl === cur.dataset.accg) })
+        nav.querySelectorAll('[data-accgl]').forEach(function (a) { a.classList.toggle('on', a.dataset.accgl === cur.dataset.accg) })
       })
     }
     window.accSync = function () { LISTS.forEach(syncList); syncChips(); spy()${ACC_FB_SYNC} }
@@ -4016,9 +4074,29 @@ const ACC_JS = !ACC ? '' : `
         save(l, ck[l.k]); syncList(l); syncChips()
       })` : ''}
     }${ACC_FB_JS}
-    function accRoute() { // #acc-230 深链:目标可能折在 <details> 里,先展开再滚
+    // ---- 左栏两级导航(v0.17.12)----
+    // SEL = 此刻选中的那份清单。烤进来的初值 = 左栏第一条(验收中那份;没有 current 的板是第一份),
+    // 与 gen 烤进 HTML 的那份可见清单同一个 —— 首屏因此不闪。
+    var SEL = ${accJson(ACC_SEL ? ACC_SEL.key : '')}
+    function accNavOf(k) { return document.querySelector('[data-accnavk="' + k + '"]') }
+    // 清单键是 PR 号拼出来的(只有数字与短横),拿去拼属性选择器安全 —— 与 [data-accprog] 同一条路;
+    // 条目 id 那种人写的字串才不许拼(见 syncList)。
+    function accSelect(k) {
+      if (!k || !byKey[k] || k === SEL) return
+      SEL = k
+      document.querySelectorAll('#pane-acceptance [data-acck], #pane-acceptance [data-accnavk]').forEach(function (e) {
+        e.hidden = (e.dataset.acck || e.dataset.accnavk) !== k
+      })
+      document.querySelectorAll('[data-accsel]').forEach(function (a) { a.classList.toggle('on', a.dataset.accsel === k) })
+      // 选中的那条要是折在「已验收」里,把折叠打开 —— 不然人看不见自己刚点到哪儿
+      var row = document.querySelector('[data-accsel="' + k + '"]')
+      if (row) for (var rp = row.parentElement; rp; rp = rp.parentElement) if (rp.tagName === 'DETAILS') rp.open = true
+      window.accSync()
+    }
+    function accRoute() { // #acc-230 深链:先把那一份选中(它多半 hidden 着),再展开、再滚
       var id = decodeURIComponent(location.hash.slice(1))
       if (id.indexOf('acc') !== 0) return
+      if (id.indexOf('acc-') === 0) { var k = id.slice(4); accSelect(byKey[k] ? k : OF_PR[k]) }
       var el = document.getElementById(id)
       if (!el) return
       for (var p = el.parentElement; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true
