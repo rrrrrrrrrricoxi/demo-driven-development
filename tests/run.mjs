@@ -8264,8 +8264,25 @@ console.log('T83 验收左栏两级导航(0.17.12)')
   ok(on.includes('<a class="accpr on" href="#acc-230" data-accsel="230-232">')
     && on.includes('href="#acc-240" data-accsel="240"'),
     '左栏每条就是一条 #acc-<号> 链接 —— 点它走的是 hash,前进/后退天然跟着走')
-  ok(on.includes("if (id.indexOf('acc-') === 0) { var k = id.slice(4); accSelect(byKey[k] ? k : OF_PR[k]) }"),
-    'accRoute:#acc-<号> 先按清单键认,认不出再走 OF_PR 把成员号翻成清单键')
+  { // accRoute 从产物里原样抠出来跑(配一只最小假 DOM):深链落在哪份清单上,由目标自己说了算
+    const src = (on.match(/    function accRoute\(\) \{[\s\S]*?\n    \}/) || [''])[0]
+    const mkEl = (acck) => ({ closest: (s) => (s === '.acclist' && acck ? { dataset: { acck } } : null), parentElement: null, scrollIntoView() {} })
+    const run = (hash, id2el) => {
+      let picked = null, synced = 0
+      new Function('document', 'location', 'window', 'accSelect', `${src}\n accRoute()`)(
+        { getElementById: (i) => id2el[i] || null }, { hash }, { accSync: () => { synced++ } }, (k) => { picked = k })
+      return { picked, synced }
+    }
+    ok(run('#acc-298', { 'acc-298': mkEl('298-299') }).picked === '298-299',
+      'accRoute:#acc-<号> 的锚长在哪份清单里,选中的就是哪份(多 PR 那份从成员号也认得出)')
+    // 组锚是「清单键 + - + 组 id」拼的,而键本身带短横 —— 拆字串拆不准,只能就地问 .acclist。
+    // 少了这一问,点完分组再刷新页面就是死链:主区还停在默认那份,hash 指着一个 hidden 的组。
+    ok(run('#accg-298-299-K', { 'accg-298-299-K': mkEl('298-299') }).picked === '298-299',
+      'accRoute:#accg-<键>-<组> 深链同样先把它所在的那份清单选中(不是死链)')
+    const miss = run('#acc-999', {})
+    ok(miss.picked === null && miss.synced === 0 && run('#BL-C73', {}).picked === null,
+      'accRoute:锚找不到 / hash 不是 acc 开头 —— 一个字不动')
+  }
   ok(on.includes("e.hidden = (e.dataset.acck || e.dataset.accnavk) !== k")
     && on.includes("document.querySelectorAll('[data-accsel]').forEach(function (a) { a.classList.toggle('on', a.dataset.accsel === k) })"),
     'accSelect 一把管三件事:主区只留选中那份、分组栏跟着换、左栏那一条点亮')
@@ -8308,6 +8325,51 @@ console.log('T83 验收左栏两级导航(0.17.12)')
     '窄屏那条 display 必须挂 :not([hidden]) —— 作者样式压得过 [hidden]{display:none},' +
     '少了它没选中的那几十只分组栏会在手机上全冒出来(真机上撞见过)', mq.slice(0, 300))
   ok(on.includes('.accside { position: sticky; top: calc(var(--hubh, 41px) + 12px);'), '宽屏下左栏 sticky')
+  { // accSelect 也原样抠出来跑:窄屏那行 chip 横滚时,选中的那枚要被推进可视区,且只准推那条槽
+    const src = (on.match(/    function accSelect\(k\) \{[\s\S]*?\n    \}/) || [''])[0]
+    ok(/sc\.scrollLeft \+=/.test(src) && !/window\.scroll|scrollIntoView/.test(src),
+      'accSelect 只推横滚槽自己的 scrollLeft —— 窗口滚到哪儿由 accRoute 一处说了算', src.slice(0, 120))
+    const mkRun = (geo) => {
+      const sc = { scrollLeft: 0, scrollWidth: geo.sw, clientWidth: geo.cw, tagName: 'DIV', parentElement: null,
+        getBoundingClientRect: () => ({ left: 0, right: geo.cw, width: geo.cw }) }
+      const row = { parentElement: sc, dataset: { accsel: '241' }, classList: { toggle() {} },
+        getBoundingClientRect: () => ({ left: geo.x - sc.scrollLeft, right: geo.x + 100 - sc.scrollLeft, width: 100 }) }
+      const els = [{ dataset: { acck: '240' }, hidden: false }, { dataset: { acck: '241' }, hidden: true }, { dataset: { accnavk: '241' }, hidden: true }]
+      let synced = 0
+      const sel = new Function('document', 'window', 'byKey', 'SEL', `${src}\n accSelect('241'); return SEL`)(
+        { querySelectorAll: (s) => (s.indexOf('data-accsel') >= 0 ? [row] : els), querySelector: () => row },
+        { accSync: () => { synced++ } }, { 240: {}, 241: {} }, '240')
+      return { sel, sc, els, synced }
+    }
+    const far = mkRun({ sw: 900, cw: 300, x: 400 }) // 300px 宽的槽,选中的那枚停在 x=400(屏外)
+    ok(far.sel === '241' && far.els[0].hidden === true && far.els[1].hidden === false && far.els[2].hidden === false && far.synced === 1,
+      'accSelect:主区与分组栏按新键改显隐,并只刷一次 accSync')
+    ok(far.sc.scrollLeft === 300, `选中的 chip 在屏外时,那条槽自己滚过去把它摆进可视区(实际 ${far.sc.scrollLeft})`)
+    ok(mkRun({ sw: 900, cw: 300, x: 60 }).sc.scrollLeft === 0, '已经看得见的 chip 不白滚一趟')
+    ok(mkRun({ sw: 300, cw: 300, x: 400 }).sc.scrollLeft === 0, '宽屏下这根柱子不横滚(scrollWidth === clientWidth)—— 这一段一动不动')
+  }
+  { // ---- ⑫ 全收完的板(没 current、每份都有 result):左栏不出空段,选中的那条看得见 ----
+    const fx83b = mkFixture('fx83b', { 's.html': demoHtml('s') })
+    const cfgB = JSON.parse(readFileSync(join(fx83b.kb, 'kanban.config.json'), 'utf8'))
+    cfgB.acceptanceTab = true
+    writeFileSync(join(fx83b.kb, 'kanban.config.json'), JSON.stringify(cfgB, null, 2) + '\n')
+    writeFileSync(join(fx83b.kb, 'acceptance-manifest.json'),
+      JSON.stringify({ lists: LISTS83.map((l, i) => ({ ...l, result: { checked: [], at: `2026-08-0${i + 1}` } })) }))
+    const rb = runGen(NEW_SCRIPTS, fx83b.kb)
+    ok(rb.status === 0, 'gen exit 0(没有 current、每份都收过账的板)', rb.stderr.slice(0, 200))
+    const ob = readFileSync(join(fx83b.kb, 'index.html'), 'utf8')
+    ok(!ob.includes('class="accprs"'),
+      '一条排队都没有时,上一级那一格根本不出 —— 从前照出一个空 div(窄屏下就是一条 4px 高的空横滚槽)')
+    ok(ob.includes('<details class="accdone" open>') && ob.indexOf('<details class="accdone" open>') < ob.indexOf('class="accpr on"'),
+      '默认选中的那份落在「已验收」里时,折叠烤成开着 —— 不然首屏主区显示着一份清单、左栏却一条都没点亮')
+    ok(on.includes('<div class="accprs">') && on.includes('<details class="accdone"><summary>'),
+      '有 current / 有排队的板照旧:accprs 那一格在,已验收那一折照旧收着(上面这两条只对全收完的板生效)')
+  }
+  // ---- ⑬ 清单头与正文之间那道气口 ----
+  // 0.17.11 里它是 .accwrap 的 margin-top:14px,两列网格退场后没人接 —— 首组标题的 margin-top 被
+  // .accgrp:first-of-type 清成 0、筛选 chip 也不带上边距,正文会直接贴上清单头那条下边框。
+  ok(/\.acclh \{[^}]*margin-bottom: 14px/.test(on),
+    '清单头带 14px 下边距 —— .accwrap 退场带走的那道气口有人接上了')
 
   // ---- ⑪ 关档冻结:没开 acceptanceTab 的板,这一版一个字节都不碰 ----
   delete cfg.acceptanceTab

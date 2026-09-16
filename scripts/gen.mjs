@@ -2775,11 +2775,15 @@ const ACC_DEG = !AFB ? '' : `
 const accSideRow = (l, live) => `
       <a class="accpr${accIsSel(l) ? ' on' : ''}" href="#acc-${l.nums[0]}" data-accsel="${esc(l.key)}"><span class="accprn">${l.nums.map((n) => `#${n}`).join('/')}</span><span class="accprt" title="${esc(l.title || l.key)}">${esc(l.title || l.key)}</span>${live ? '<span class="accnow">验收中</span>' : ''}<span class="accprc" data-acc="${l.nums[0]}">0/${l.items.length}</span></a>`
 // 左栏(v0.17.12,两级):上一级 PR、下一级选中那份的分组。sticky,一根柱子到底。
+// 上一级那一格只在真有行的时候才出:全收完的板(没 current、每份都有 result)从前也照出一个空 div,
+// 窄屏下那是一条 4px 高的空横滚槽 —— 空段。同理,默认选中的那份万一落在「已验收」那一折里
+// (只有这种板会),烤的时候就把折叠打开:不然首屏是主区在显示一份清单、左栏却一条都没点亮。
+const accDoneHasSel = accDoneSorted.some((l) => accIsSel(l))
 const accSideHtml = !ACC || !ACC_ORDER.length ? '' : `
-    <nav class="accside">
+    <nav class="accside">${ACC_CUR || accQueueLists.length ? `
       <div class="accprs">${ACC_CUR ? accSideRow(ACC_CUR, true) : ''}${accQueueLists.map((l) => accSideRow(l, false)).join('')}
-      </div>${accDoneSorted.length ? `
-      <details class="accdone"><summary>已验收 (${accDoneSorted.length})</summary>${accDoneSorted.map((l) => accSideRow(l, false)).join('')}
+      </div>` : ''}${accDoneSorted.length ? `
+      <details class="accdone"${accDoneHasSel ? ' open' : ''}><summary>已验收 (${accDoneSorted.length})</summary>${accDoneSorted.map((l) => accSideRow(l, false)).join('')}
       </details>` : ''}
       <div class="accnavs">${ACC_ORDER.map((l) => accNavHtml(l, accIsSel(l))).join('')}
       </div>
@@ -2973,8 +2977,11 @@ const ACC_CSS = !ACC ? '' : `
   .acccard.doc { color: var(--accent); background: var(--accent-soft); font-weight: 400; }
   .acclist { margin-bottom: 22px; scroll-margin-top: 58px; }
   .accanchor { display: block; height: 0; scroll-margin-top: 58px; }
+  /* margin-bottom 接的是 0.17.11 里 .accwrap 那 14px:清单正文从前长在它里面,两列网格退场后
+     这道气口没人管了 —— 首组标题的 margin-top 被 .accgrp:first-of-type 清成 0,筛选 chip 也不带
+     上边距,于是正文直接贴着这条下边框。 */
   .acclh { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 7px;
-     border-bottom: 1px solid var(--line-strong); }
+     margin-bottom: 14px; border-bottom: 1px solid var(--line-strong); }
   .acclh b { font-size: 14px; }
   .accmeta { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
   /* 两级左栏(v0.17.12):上一级 PR、下一级分组,同一根 sticky 的柱子 */
@@ -4091,14 +4098,29 @@ const ACC_JS = !ACC ? '' : `
       // 选中的那条要是折在「已验收」里,把折叠打开 —— 不然人看不见自己刚点到哪儿
       var row = document.querySelector('[data-accsel="' + k + '"]')
       if (row) for (var rp = row.parentElement; rp; rp = rp.parentElement) if (rp.tagName === 'DETAILS') rp.open = true
+      // 窄屏上这一级是一行横滚的 chip:选中的那枚可能停在屏外,左栏于是看着一个都没选中。
+      // 只推那条横滚槽自己的 scrollLeft,不碰窗口滚动(要跳到哪儿由 accRoute 一处说了算);
+      // 宽屏下这根柱子不横滚,scrollWidth === clientWidth,这一段自然不动。
+      if (row) {
+        var sc = row.parentElement
+        if (sc && sc.scrollWidth > sc.clientWidth + 1) {
+          var rr = row.getBoundingClientRect(), sr = sc.getBoundingClientRect()
+          if (rr.left < sr.left || rr.right > sr.right) sc.scrollLeft += rr.left - sr.left - (sr.width - rr.width) / 2
+        }
+      }
       window.accSync()
     }
-    function accRoute() { // #acc-230 深链:先把那一份选中(它多半 hidden 着),再展开、再滚
+    function accRoute() { // #acc-230 / #accg-… 深链:先把目标那一份选中(它多半 hidden 着),再展开、再滚
       var id = decodeURIComponent(location.hash.slice(1))
       if (id.indexOf('acc') !== 0) return
-      if (id.indexOf('acc-') === 0) { var k = id.slice(4); accSelect(byKey[k] ? k : OF_PR[k]) }
       var el = document.getElementById(id)
       if (!el) return
+      // 认哪一份不靠拆 hash 那串字 —— 就地问目标自己长在哪份清单里:#acc-<号> 落在清单本体或它的锚上,
+      // #accg-<键>-<组> 落在组上,两种都问得出同一个 data-acck。拆字串只认得出前一种:组锚是
+      // 「键 + - + 组 id」拼的,而键本身就带短横(多 PR 那份是 298-299),从哪儿切都是猜。
+      // 少这一步,分组链接一旦落在没选中的那份上就是死链 —— 点了组再刷新页面正是这一下(0.17.12 的病例)。
+      var host = el.closest('.acclist')
+      if (host) accSelect(host.dataset.acck)
       for (var p = el.parentElement; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true
       window.accSync()
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })

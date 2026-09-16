@@ -33,9 +33,11 @@ is now two levels: pull requests above, the selected one's groups below.
 - **The main area shows one checklist at a time.** Every checklist is still
   baked into the page; the ones that are not selected are `hidden`. Clicking a
   row sets the hash to `#acc-<number>`, so back and forward work and a link to a
-  checklist can be pasted anywhere. Opening `#acc-<number>` selects that
-  checklist (a member number of a multi-pull-request checklist resolves through
-  `OF_PR`, and a checklist inside the `已验收` fold opens it); with no hash the
+  checklist can be pasted anywhere. Any acceptance anchor selects the checklist
+  it lives in — `#acc-<number>`, including a member number of a
+  multi-pull-request checklist, and `#accg-<key>-<group>`, the link the group nav
+  itself puts in the address bar — and a checklist inside the `已验收` fold opens
+  that fold; with no hash the
   current one is selected, which is also what `gen` bakes as visible, so the
   first paint does not flash. The environment-and-progress card follows the
   current checklist and is hidden along with it.
@@ -49,7 +51,13 @@ is now two levels: pull requests above, the selected one's groups below.
   polling are untouched; the DOM of a hidden checklist is still there.
 - **At 640px and below the column becomes two rows of chips** above the main
   area — pull requests on one, groups on the other, each scrolling sideways; no
-  drawer. `已验收` follows them.
+  drawer. `已验收` follows them. Selecting a checklist nudges that row sideways
+  until its chip is in view, touching only the row's own `scrollLeft`, so a deep
+  link never lands on a bar where nothing looks selected.
+- **A board with no `current` still has a sidebar that reads.** When every
+  checklist has been settled, the pull-request row is omitted rather than
+  rendered empty, and the `已验收` fold is baked open so the checklist the main
+  area is showing is the one highlighted in the column.
 - **Boards without `acceptanceTab` are byte-identical to 0.17.11,** and on a
   board that has it every changed line belongs to the acceptance tab. Both are
   tested against the `0.17.11` tag.
