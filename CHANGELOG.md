@@ -9,6 +9,59 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.12] - 2026-09-16
+
+### The acceptance tab gets a sidebar you can navigate pull requests with
+
+The left column listed the groups of one checklist — the current one. Every
+other checklist being accepted sat in a paragraph of links at the top of the
+page and then inside two collapsed folds, so moving between pull requests meant
+scrolling back up, finding a link in a run-on sentence, and opening a fold. With
+nine queued at once, that paragraph was prose, not navigation. The left column
+is now two levels: pull requests above, the selected one's groups below.
+
+### Changed
+- **The left column lists checklists first, groups second.** Level one is one
+  row per checklist — `#298 · title · 已判 N/M` — with the current one pinned to
+  the top and carrying the board's usual `验收中` badge, the queued ones after it
+  in manifest order, and the rest folded into `已验收 (N)`, most recently merged
+  first (`mergedAt`, falling back to `result.at` and then to the pull request
+  number). The title is one line with an ellipsis and the full text in `title`.
+  Level two is the group nav as it was, moved out of the checklist and into the
+  same column, one per checklist with only the selected one shown. The whole
+  column is sticky.
+- **The main area shows one checklist at a time.** Every checklist is still
+  baked into the page; the ones that are not selected are `hidden`. Clicking a
+  row sets the hash to `#acc-<number>`, so back and forward work and a link to a
+  checklist can be pasted anywhere. Any acceptance anchor selects the checklist
+  it lives in — `#acc-<number>`, including a member number of a
+  multi-pull-request checklist, and `#accg-<key>-<group>`, the link the group nav
+  itself puts in the address bar — and a checklist inside the `已验收` fold opens
+  that fold; with no hash the
+  current one is selected, which is also what `gen` bakes as visible, so the
+  first paint does not flash. The environment-and-progress card follows the
+  current checklist and is hidden along with it.
+- **`已判 N/M` reuses the `data-acc` hook.** `gen` bakes `0/M` and `accSync`
+  fills the numerator from the viewer's own verdicts in the same pass that feeds
+  the progress bar and the card-header chips, so the sidebar and the bar are one
+  number, and the 20-second poll refreshes both.
+- **The `排队中` paragraph at the top of the page is gone,** and so are the two
+  `排队中` / `已验收` folds of full checklists that used to sit under it — the
+  same information is the sidebar now. Copying results, feedback, signing and
+  polling are untouched; the DOM of a hidden checklist is still there.
+- **At 640px and below the column becomes two rows of chips** above the main
+  area — pull requests on one, groups on the other, each scrolling sideways; no
+  drawer. `已验收` follows them. Selecting a checklist nudges that row sideways
+  until its chip is in view, touching only the row's own `scrollLeft`, so a deep
+  link never lands on a bar where nothing looks selected.
+- **A board with no `current` still has a sidebar that reads.** When every
+  checklist has been settled, the pull-request row is omitted rather than
+  rendered empty, and the `已验收` fold is baked open so the checklist the main
+  area is showing is the one highlighted in the column.
+- **Boards without `acceptanceTab` are byte-identical to 0.17.11,** and on a
+  board that has it every changed line belongs to the acceptance tab. Both are
+  tested against the `0.17.11` tag.
+
 ## [0.17.11] - 2026-09-16
 
 ### The count of what can be started is always reported
