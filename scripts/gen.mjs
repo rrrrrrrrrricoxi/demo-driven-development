@@ -4090,6 +4090,21 @@ const ACC_JS = !ACC ? '' : `
     var pane = document.getElementById('pane-acceptance')
     if (pane) {
       pane.addEventListener('click', function (ev) {
+        // 点已经选中的那一行 = 收起/展开它自己的分组与条目(v0.17.14)。原来这是条原生锚:hash 没变
+        // → 不触发 hashchange → 不走 accRoute,浏览器却照样把页面拽到清单头,而展开着的那一栏
+        // 没有任何收起的法子。这里截下来,只翻自己那只栏 —— 不改 SEL、不改 hash、不滚窗口。
+        // 选了别的再点回来时 accSelect 本来就会重新展开(hidden = accnavk !== k),不必另记状态。
+        var pr = ev.target.closest('a.accpr')
+        if (pr && pr.dataset.accsel === SEL) {
+          ev.preventDefault()
+          var nv = accNavOf(SEL)
+          if (nv) {
+            nv.hidden = !nv.hidden
+            var prg = pr.querySelector('.accprg')
+            if (prg) prg.textContent = nv.hidden ? '▸' : '▾'
+          }
+          return
+        }
         var f = ev.target.closest('.accf button')
         if (f) {
           var l = byKey[f.closest('.acclist').dataset.acck]
@@ -4183,10 +4198,15 @@ const ACC_JS = !ACC ? '' : `
       // 「键 + - + 组 id」拼的,而键本身就带短横(多 PR 那份是 298-299),从哪儿切都是猜。
       // 少这一步,分组链接一旦落在没选中的那份上就是死链 —— 点了组再刷新页面正是这一下(0.17.12 的病例)。
       var host = el.closest('.acclist')
+      var was = SEL // 换清单要先知道换没换 —— accSelect 之后 SEL 已经是新的了
       if (host) accSelect(host.dataset.acck)
       for (var p = el.parentElement; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true
       window.accSync()
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // 换清单时 accSelect 把当前 PR 那张信息卡连同清单一起显隐 —— 布局整块上下位移;从位移后的位置
+      // 再平滑滚过去,人看到的就是「先闪一截信息卡、再滑到清单头」。换清单这一下于是同步落位,
+      // 不给中间帧;同一份清单里(点分组、点条目)不位移,照旧平滑。
+      var moved = !!host && host.dataset.acck !== was
+      el.scrollIntoView(moved ? { behavior: 'auto', block: 'start' } : { behavior: 'smooth', block: 'start' })
     }
     LISTS.forEach(function (l) { byKey[l.k] = l; ${!AFB ? 'ck[l.k] = load(l); ' : ''}view[l.k] = { round: 'all', pr: 'all' } })
     window.addEventListener('scroll', spy, { passive: true })
