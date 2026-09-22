@@ -641,7 +641,8 @@ function safeHref(href) {
 }
 
 // shots 的一条 → 相对看板根的 href:纯文件名默认落在 shots/ 下,带 / 的按相对看板根原样用。
-// 卡片的 shots、走查留痕、验收条目的证据图共用这一把尺(校验存不存在时也照它拼路径)。
+// 卡片的 shots 与验收条目的证据图共用这一把尺(校验存不存在时也照它拼路径);
+// 走查留痕的 shots 是另一回事 —— 它的 file 一律当相对看板根,不补 shots/,见 wtBlock。
 const shotHref = (s) => {
   const file = typeof s === 'string' ? s : (s && s.file) || ''
   return !file ? '' : file.includes('/') ? file : 'shots/' + file
@@ -879,12 +880,18 @@ const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
     if (!gids.has(g)) accWarn(`清单 ${nums.join('/')} 条目 ${id} 的 group「${g}」不在 groups`)
     if (it.round && !rids.has(String(it.round))) accWarn(`清单 ${nums.join('/')} 条目 ${id} 的 round「${it.round}」不在 rounds`)
     for (const k of it.data || []) if (!data[k]) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的数据块「${k}」`)
-    // 证据图(v0.17.15):图缺了只是那一格空着,不该把整块板打死 —— 与数据块同一档软校验
-    if (Array.isArray(it.shots)) for (const s of it.shots) {
+    // 证据图(v0.17.15):图缺了只是那一格不出,不该把整块板打死 —— 与数据块同一档软校验。
+    // 缺的那一格直接不渲:warn 已经点名了是哪条哪张,页面上再顶一个浏览器原生碎图标,
+    // 是把同一句话难看地说第二遍(各家浏览器长相还不一样,也不跟着明暗主题走)。
+    // 整条 shots 都缺就连「证据」标签一起不出,不留一条空带。
+    const shots = !Array.isArray(it.shots) ? null : it.shots.filter((s) => {
       const href = shotHref(s)
-      if (href && !existsSync(join(HERE, href))) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的截图「${href}」`)
-    }
-    return { ...it, id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
+      if (!href) return false
+      if (/^https?:/i.test(href) || existsSync(join(HERE, href))) return true // 远程图存不存在只有浏览器知道,放行
+      accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的截图「${href}」,这一格不渲`)
+      return false
+    })
+    return { ...it, ...(shots && { shots }), id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
   })
   // pre:清单 result.checked 里的条目 —— 烤进数据块给旧勾选作初值,v0.17.1 起还在行上渲成只读的「已收」灰标
   return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [], pre: ((l.result || {}).checked || []).map(String) }
