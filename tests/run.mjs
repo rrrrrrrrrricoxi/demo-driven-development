@@ -8791,6 +8791,90 @@ console.log('T85 验收左栏换清单不闪 + 选中行可收起(0.17.14)')
   }
 }
 
+// ============ T86 验收条目挂证据截图(0.17.15:item.shots)============
+console.log('T86 验收条目的证据截图(item.shots)')
+{
+  const fx86 = mkFixture('fx86', { 's.html': demoHtml('s') })
+  const cfgP = join(fx86.kb, 'kanban.config.json'), idxP = join(fx86.kb, 'index.html')
+  const accP = join(fx86.kb, 'acceptance-manifest.json')
+  const cfg86 = JSON.parse(readFileSync(cfgP, 'utf8'))
+  const PNG = Buffer.from('89504e470d0a1a0a', 'hex') // 只要文件在,gen 不读像素
+  writeFileSync(join(fx86.kb, 'shots', 's1.png'), PNG)
+  mkdirSync(join(fx86.kb, 'evidence'), { recursive: true })
+  writeFileSync(join(fx86.kb, 'evidence', 's2.png'), PNG)
+  const LIST86 = (items) => ({ pr: 230, title: '清单甲', groups: [{ id: 'K', title: 'K 组', tip: '' }], items })
+  const ITEMS86 = [
+    { id: 'S1', group: 'K', title: '纯文件名', do: 'x', exp: 'y', shots: ['s1.png'] },
+    { id: 'S2', group: 'K', title: '带路径带说明', do: 'x', exp: 'y', why: '因为', shots: [{ file: 'evidence/s2.png', caption: '粘贴预览' }] },
+    { id: 'S3', group: 'K', title: '不挂图', do: 'x', exp: 'y' },
+  ]
+  cfg86.acceptanceTab = false
+  writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx86.kb)
+  const offSha86 = sha(idxP)
+
+  cfg86.acceptanceTab = true
+  writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86(ITEMS86)] }))
+  const r86 = runGen(NEW_SCRIPTS, fx86.kb)
+  ok(r86.status === 0, '挂了 shots 的清单:gen exit 0', r86.stderr.slice(0, 200))
+  const on86 = readFileSync(idxP, 'utf8')
+  const item86 = (id) => {
+    const i = on86.indexOf(`id="acc-230-${id}"`)
+    if (i < 0) return ''
+    const j = on86.indexOf('class="accitem"', i + 1)
+    return on86.slice(i, j < 0 ? on86.indexOf('</section>', i) : j)
+  }
+  ok(count(on86, '<div class="accshots">') === 2, `挂了图的两条各出一带、没挂的不出(实际 ${count(on86, '<div class="accshots">')})`)
+  ok(item86('S1').includes('<div class="accshots"><div class="wtshots">')
+    && item86('S1').includes('<a href="shots/s1.png" target="_blank" rel="noopener" title=""><img src="shots/s1.png" loading="lazy" alt=""><span></span></a>'),
+    '纯文件名 → shots/ 下,缩略图点开原图(新窗口),复用 .wtshots', item86('S1').slice(-260))
+  ok(item86('S2').includes('<a href="evidence/s2.png" target="_blank" rel="noopener" title="粘贴预览"><img src="evidence/s2.png"')
+    && item86('S2').includes('<span>粘贴预览</span>'),
+    '带 / 的按相对看板根用;caption 进 title / alt / 说明行')
+  const s2 = item86('S2')
+  ok(s2.indexOf('class="accwhy"') > 0 && s2.indexOf('class="accshots"') > s2.indexOf('class="accwhy"')
+    && /<div class="accshots"><div class="wtshots">[\s\S]*?<\/div><\/div>\n {14}<\/div>/.test(s2),
+    '带子在 accwhy 之后,且是 .accib 的最后一件(缩进对得上那一层)', s2.slice(-200))
+  ok(!item86('S3').includes('accshots'), '不挂 shots 的条目一个字节都不多')
+  ok(on86.includes('.accshots::before { content: "证据 ";') && on86.includes('.accwhy, .accshots { margin: 4px 0 0;'),
+    '标签「证据」+ 几何并进 accdo/accexp/accbad/accwhy 那条(零新增几何)')
+  ok(on86.includes('.wtshots { display: flex;'), '.wtshots 在壳的全局样式里 —— 验收 pane 懒注入进同一个文档,样式照样管得着')
+
+  { // 引用不存在的图:一句 warn,不阻断,那一格照旧渲(人一看空图就知道少了什么)
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86([...ITEMS86, { id: 'S4', group: 'K', title: '图没了', do: 'x', exp: 'y', shots: ['nope.png', { file: 'evidence/gone.png' }] }])] }))
+    const rw = runGen(NEW_SCRIPTS, fx86.kb)
+    ok(rw.status === 0, '图缺了不阻断:gen 仍 exit 0', rw.stderr.slice(0, 200))
+    ok(rw.stderr.includes('acceptance-manifest:清单 230 条目 S4 引用了不存在的截图「shots/nope.png」')
+      && rw.stderr.includes('引用了不存在的截图「evidence/gone.png」'),
+      '两条都 warn,路径按拼好的那份报', rw.stderr.slice(0, 300))
+    const w = readFileSync(idxP, 'utf8')
+    ok(w.includes('id="acc-230-S4"') && w.includes('<a href="shots/nope.png"'), 'S4 与那两格照旧渲出来(warn 不吃条目)')
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86(ITEMS86)] }))
+    runGen(NEW_SCRIPTS, fx86.kb)
+  }
+
+  { // 懒加载:验收 pane 是 parts/acceptance.html,证据带随它走,样式留在壳里
+    cfg86.lazyTabs = true
+    writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+    runGen(NEW_SCRIPTS, fx86.kb)
+    const part = readFileSync(join(fx86.kb, 'parts', 'acceptance.html'), 'utf8')
+    const shell = readFileSync(idxP, 'utf8')
+    ok(part.includes('<div class="accshots"><div class="wtshots">') && !shell.includes('<div class="accshots">'),
+      'lazyTabs:证据带在 parts/acceptance.html 里,壳里没有')
+    ok(shell.includes('.wtshots { display: flex;') && shell.includes('.accshots::before'),
+      'lazyTabs:两段样式都在壳的 <style> 里,注入后就生效')
+    delete cfg86.lazyTabs
+    writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+    runGen(NEW_SCRIPTS, fx86.kb)
+  }
+
+  cfg86.acceptanceTab = false
+  writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx86.kb)
+  ok(sha(idxP) === offSha86, '关掉 acceptanceTab 后与本节开始前的基线逐字节相同')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

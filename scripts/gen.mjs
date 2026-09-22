@@ -640,6 +640,13 @@ function safeHref(href) {
   return '#'
 }
 
+// shots 的一条 → 相对看板根的 href:纯文件名默认落在 shots/ 下,带 / 的按相对看板根原样用。
+// 卡片的 shots、走查留痕、验收条目的证据图共用这一把尺(校验存不存在时也照它拼路径)。
+const shotHref = (s) => {
+  const file = typeof s === 'string' ? s : (s && s.file) || ''
+  return !file ? '' : file.includes('/') ? file : 'shots/' + file
+}
+
 // 卡片 link(相对 kanban/)→ 渲染页 / GitHub blob / 原样。
 function cardLink(href) {
   const raw = String(href || '')
@@ -872,6 +879,11 @@ const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
     if (!gids.has(g)) accWarn(`清单 ${nums.join('/')} 条目 ${id} 的 group「${g}」不在 groups`)
     if (it.round && !rids.has(String(it.round))) accWarn(`清单 ${nums.join('/')} 条目 ${id} 的 round「${it.round}」不在 rounds`)
     for (const k of it.data || []) if (!data[k]) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的数据块「${k}」`)
+    // 证据图(v0.17.15):图缺了只是那一格空着,不该把整块板打死 —— 与数据块同一档软校验
+    if (Array.isArray(it.shots)) for (const s of it.shots) {
+      const href = shotHref(s)
+      if (href && !existsSync(join(HERE, href))) accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的截图「${href}」`)
+    }
     return { ...it, id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
   })
   // pre:清单 result.checked 里的条目 —— 烤进数据块给旧勾选作初值,v0.17.1 起还在行上渲成只读的「已收」灰标
@@ -1811,15 +1823,16 @@ const blDimOpts = [`<option value="all">全部优先级 (${blCount})</option>`]
 // manifest 里挂 walkthroughs:[{date,title,note?,shots:[{file,caption}]}],缩略图点开原图
 // 卡片现场截图(v0.11.4):shots: ["x.png"] 或 [{file, caption}];纯文件名默认落在 shots/ 下
 // (与截图廊同源——文件名以卡号打头即可在廊里自动归组并跳回本卡)。复用 .wtshots 样式,零新增 CSS。
+// 缩略图带本体单独一只(v0.17.15):卡片的 <dt>/<dd> 与验收条目的 div 各自包一层,
+// 这一段「一条 shots 怎么变成一格缩略图」只写一遍(href 规矩见 shotHref)。
+const shotCells = (list) => !Array.isArray(list) || !list.length ? '' : list.map((s) => {
+  const href = shotHref(s)
+  if (!href) return ''
+  const cap = typeof s === 'string' ? '' : (s && s.caption) || ''
+  return `<a href="${esc(safeHref(href))}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(safeHref(href))}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
+}).join('')
 const shotsBlock = (list, label) => {
-  if (!Array.isArray(list) || !list.length) return ''
-  const cells = list.map((s) => {
-    const file = typeof s === 'string' ? s : (s && s.file) || ''
-    if (!file) return ''
-    const href = file.includes('/') ? file : 'shots/' + file
-    const cap = typeof s === 'string' ? '' : (s && s.caption) || ''
-    return `<a href="${esc(safeHref(href))}" target="_blank" rel="noopener" title="${esc(cap)}"><img src="${esc(safeHref(href))}" loading="lazy" alt="${esc(cap)}"><span>${esc(cap)}</span></a>`
-  }).join('')
+  const cells = shotCells(list)
   return cells ? `\n        <dt>${esc(label)}</dt><dd><div class="wtshots">${cells}</div></dd>` : ''
 }
 // bug 卡的复现流程(v0.11.4):repro: "一句话" 或 ["步骤一","步骤二"];数组渲编号行,复用 dd.x 样式
@@ -2653,6 +2666,13 @@ const accDataBlock = (l, k) => {
   return `
               <div class="accdt"><div class="accdh"><b>${esc(d.title || k)}</b><span>表头 + ${rows.length - 1} 行 · 含制表符</span><button type="button" class="accbtn" data-acctsv="${esc(k)}">复制</button></div><div class="accsc"><table><thead><tr>${rows[0].map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`
 }
+// 条目证据图(v0.17.15):形状与卡片的 shots 一模一样 —— ["x.png"] 或 [{file, caption}]。
+// 条目里不是 <dl>,所以包成一只 div(shotsBlock 那份出的是 <dt>/<dd>);缩略图本身复用 .wtshots。
+const accShotsBlock = (list) => {
+  const cells = shotCells(list)
+  return cells ? `
+                <div class="accshots"><div class="wtshots">${cells}</div></div>` : ''
+}
 const accItemHtml = (l, it) => {
   const rd = l.rounds.find((r) => String(r.id) === it.round)
   const tags = (it.key ? '<span class="acckey">核心</span>' : '') +
@@ -2684,7 +2704,7 @@ const accItemHtml = (l, it) => {
                 ${it.do ? `<div class="accdo">${bold(it.do)}</div>` : ''}${(it.data || []).map((k) => accDataBlock(l, k)).join('')}
                 ${it.exp ? `<div class="accexp">${bold(it.exp)}</div>` : ''}
                 ${it.bad ? `<div class="accbad">${bold(it.bad)}</div>` : ''}
-                ${it.why ? `<div class="accwhy">${bold(it.why)}</div>` : ''}
+                ${it.why ? `<div class="accwhy">${bold(it.why)}</div>` : ''}${accShotsBlock(it.shots)}
               </div>${fb}
             </div>`
 }
@@ -3060,13 +3080,17 @@ const ACC_CSS = !ACC ? '' : `
      font-weight: 600; vertical-align: 1px; white-space: nowrap; }
   .acckey { background: ${tk('gold-bg')}; color: ${tk('gold-ink')}; }
   .acctag { background: ${tk('seg-bg')}; color: var(--mut); }
-  .accdo, .accexp, .accbad, .accwhy { margin: 4px 0 0; padding-left: 9px; font-size: 12.5px; line-height: 1.72;
+  .accdo, .accexp, .accbad, .accwhy, .accshots { margin: 4px 0 0; padding-left: 9px; font-size: 12.5px; line-height: 1.72;
      color: var(--mut); border-left: 2px solid var(--line-strong); }
   .accexp { border-left-color: ${tk('ok-ink')}; }
   .accexp::before { content: "预期 "; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: ${tk('ok-ink')}; }
   .accbad { border-left-color: #d44c47; }
   .accbad::before { content: "不对 "; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #d44c47; }
   .accwhy { border-left-color: var(--line); color: var(--faint); }
+  /* 条目证据图(v0.17.15):标签一行 + .wtshots 缩略图带(几何全是卡片那套,这里零新增) */
+  .accshots { border-left-color: var(--line); }
+  .accshots::before { content: "证据 "; display: block; font-size: 10px; font-weight: 700;
+     letter-spacing: .04em; line-height: 1.5; color: var(--faint); }
   .accib b { color: var(--ink); }
   .accdt { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: ${tk('faint-bg')}; }
   .accdh { display: flex; align-items: center; gap: 8px; padding: 5px 9px; font-size: 11px; border-bottom: 1px solid var(--line); }

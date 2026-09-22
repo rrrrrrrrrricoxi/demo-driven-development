@@ -9,6 +9,18 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.15] - 2026-09-23
+
+### Added
+
+- Acceptance checklist items take a `shots` field, the same shape cards already
+  use (`["x.png"]` or `[{file, caption}]`; a bare filename resolves under
+  `kanban/shots/`, anything with a `/` is read relative to the board root). The
+  thumbnails render as an 证据 strip at the end of the item, below `why`, and
+  open the full image in a new tab. A file that is not there gets one warning
+  line from `gen` and an empty cell — it never stops the build. Items without
+  `shots` render exactly as before.
+
 ## [0.17.14] - 2026-09-17
 
 ### Fixed
