@@ -9,6 +9,23 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.15] - 2026-09-23
+
+### Added
+
+- Acceptance checklist items take a `shots` field, the same shape cards already
+  use (`["x.png"]` or `[{file, caption}]`; a bare filename resolves under
+  `kanban/shots/`, anything with a `/` is read relative to the board root, and
+  an `http(s)` address is left to the browser). The thumbnails render as a
+  `证据` strip at the end of the item, below `why`, and open the full image in a
+  new tab. A local file that is not there is left out of the strip and gets one
+  warning line from `gen` — the board never shows a broken-image icon, and the
+  build never stops. If every shot on an item is missing, the strip and its
+  label go with them, so `gen`'s warning stays the only signal. Items without
+  `shots` render exactly as before: with the acceptance tab on and no `shots`
+  anywhere, the HTML is byte for byte what 0.17.14 produced and only the
+  stylesheet grows.
+
 ## [0.17.14] - 2026-09-17
 
 ### Fixed

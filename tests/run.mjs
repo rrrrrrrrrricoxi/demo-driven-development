@@ -8791,6 +8791,140 @@ console.log('T85 验收左栏换清单不闪 + 选中行可收起(0.17.14)')
   }
 }
 
+// ============ T86 验收条目挂证据截图(0.17.15:item.shots)============
+console.log('T86 验收条目的证据截图(item.shots)')
+{
+  const fx86 = mkFixture('fx86', { 's.html': demoHtml('s') })
+  const cfgP = join(fx86.kb, 'kanban.config.json'), idxP = join(fx86.kb, 'index.html')
+  const accP = join(fx86.kb, 'acceptance-manifest.json')
+  const cfg86 = JSON.parse(readFileSync(cfgP, 'utf8'))
+  const PNG = Buffer.from('89504e470d0a1a0a', 'hex') // 只要文件在,gen 不读像素
+  writeFileSync(join(fx86.kb, 'shots', 's1.png'), PNG)
+  mkdirSync(join(fx86.kb, 'evidence'), { recursive: true })
+  writeFileSync(join(fx86.kb, 'evidence', 's2.png'), PNG)
+  const LIST86 = (items) => ({ pr: 230, title: '清单甲', groups: [{ id: 'K', title: 'K 组', tip: '' }], items })
+  const ITEMS86 = [
+    { id: 'S1', group: 'K', title: '纯文件名', do: 'x', exp: 'y', shots: ['s1.png'] },
+    { id: 'S2', group: 'K', title: '带路径带说明', do: 'x', exp: 'y', why: '因为', shots: [{ file: 'evidence/s2.png', caption: '粘贴预览' }] },
+    { id: 'S3', group: 'K', title: '不挂图', do: 'x', exp: 'y' },
+  ]
+  cfg86.acceptanceTab = false
+  writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx86.kb)
+  const offSha86 = sha(idxP)
+
+  cfg86.acceptanceTab = true
+  writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+  writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86(ITEMS86)] }))
+  const r86 = runGen(NEW_SCRIPTS, fx86.kb)
+  ok(r86.status === 0, '挂了 shots 的清单:gen exit 0', r86.stderr.slice(0, 200))
+  const on86 = readFileSync(idxP, 'utf8')
+  const item86 = (id, html = on86) => {
+    const i = html.indexOf(`id="acc-230-${id}"`)
+    if (i < 0) return ''
+    const j = html.indexOf('class="accitem"', i + 1)
+    return html.slice(i, j < 0 ? html.indexOf('</section>', i) : j)
+  }
+  ok(count(on86, '<div class="accshots">') === 2, `挂了图的两条各出一带、没挂的不出(实际 ${count(on86, '<div class="accshots">')})`)
+  ok(item86('S1').includes('<div class="accshots"><div class="wtshots">')
+    && item86('S1').includes('<a href="shots/s1.png" target="_blank" rel="noopener" title=""><img src="shots/s1.png" loading="lazy" alt=""><span></span></a>'),
+    '纯文件名 → shots/ 下,缩略图点开原图(新窗口),复用 .wtshots', item86('S1').slice(-260))
+  ok(item86('S2').includes('<a href="evidence/s2.png" target="_blank" rel="noopener" title="粘贴预览"><img src="evidence/s2.png"')
+    && item86('S2').includes('<span>粘贴预览</span>'),
+    '带 / 的按相对看板根用;caption 进 title / alt / 说明行')
+  const s2 = item86('S2')
+  ok(s2.indexOf('class="accwhy"') > 0 && s2.indexOf('class="accshots"') > s2.indexOf('class="accwhy"')
+    && /<div class="accshots"><div class="wtshots">[\s\S]*?<\/div><\/div>\n {14}<\/div>/.test(s2),
+    '带子在 accwhy 之后,且是 .accib 的最后一件(缩进对得上那一层)', s2.slice(-200))
+  ok(!item86('S3').includes('accshots'), '不挂 shots 的条目一个字节都不多')
+  ok(on86.includes('.accshots::before { content: "证据 ";') && on86.includes('.accwhy, .accshots { margin: 4px 0 0;'),
+    '标签「证据」+ 几何并进 accdo/accexp/accbad/accwhy 那条(零新增几何)')
+  ok(on86.includes('.wtshots { display: flex;'), '.wtshots 在壳的全局样式里 —— 验收 pane 懒注入进同一个文档,样式照样管得着')
+
+  { // 引用不存在的图:一句 warn,不阻断,缺的那一格不渲 —— 板上只留 warn 这一个信号,不露浏览器碎图标
+    const S4 = { id: 'S4', group: 'K', title: '两张都没了', do: 'x', exp: 'y', shots: ['nope.png', { file: 'evidence/gone.png' }] }
+    const S5 = { id: 'S5', group: 'K', title: '一张在一张没', do: 'x', exp: 'y', shots: ['s1.png', 'gone.png'] }
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86([...ITEMS86, S4, S5])] }))
+    const rw = runGen(NEW_SCRIPTS, fx86.kb)
+    ok(rw.status === 0, '图缺了不阻断:gen 仍 exit 0', rw.stderr.slice(0, 200))
+    ok(rw.stderr.includes('acceptance-manifest:清单 230 条目 S4 引用了不存在的截图「shots/nope.png」,这一格不渲')
+      && rw.stderr.includes('引用了不存在的截图「evidence/gone.png」,这一格不渲'),
+      '两条都 warn,路径按拼好的那份报', rw.stderr.slice(0, 300))
+    const w = readFileSync(idxP, 'utf8')
+    ok(w.includes('id="acc-230-S4"') && !w.includes('nope.png') && !w.includes('gone.png'),
+      'S4 条目照旧渲(warn 不吃条目),缺的那两格一个字节都没进板')
+    ok(!item86('S4', w).includes('accshots'),
+      '两张全缺 → 连「证据」标签带一起不出,不留一条空带', item86('S4', w).slice(-200))
+    ok(item86('S5', w).includes('<div class="accshots"><div class="wtshots">')
+      && item86('S5', w).includes('<img src="shots/s1.png"') && count(item86('S5', w), '<img ') === 1,
+      '一张在一张没 → 带还在,只渲在的那一格', item86('S5', w).slice(-240))
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86(ITEMS86)] }))
+    runGen(NEW_SCRIPTS, fx86.kb)
+  }
+
+  { // 远程图存不存在只有浏览器知道:gen 不拿 existsSync 去量它,既不误报也不误删
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86([{ id: 'S6', group: 'K', title: '远程图', do: 'x', exp: 'y', shots: [{ file: 'https://example.invalid/e.png', caption: '远处' }] }])] }))
+    const rr = runGen(NEW_SCRIPTS, fx86.kb)
+    ok(rr.status === 0 && !rr.stderr.includes('不存在的截图'), '带 scheme 的 http(s) 图不报「不存在」', rr.stderr.slice(0, 200))
+    ok(readFileSync(idxP, 'utf8').includes('<img src="https://example.invalid/e.png"'), '远程图照旧渲出来')
+    writeFileSync(accP, JSON.stringify({ current: 230, lists: [LIST86(ITEMS86)] }))
+    runGen(NEW_SCRIPTS, fx86.kb)
+  }
+
+  { // 懒加载:验收 pane 是 parts/acceptance.html,证据带随它走,样式留在壳里
+    cfg86.lazyTabs = true
+    writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+    runGen(NEW_SCRIPTS, fx86.kb)
+    const part = readFileSync(join(fx86.kb, 'parts', 'acceptance.html'), 'utf8')
+    const shell = readFileSync(idxP, 'utf8')
+    ok(part.includes('<div class="accshots"><div class="wtshots">') && !shell.includes('<div class="accshots">'),
+      'lazyTabs:证据带在 parts/acceptance.html 里,壳里没有')
+    ok(shell.includes('.wtshots { display: flex;') && shell.includes('.accshots::before'),
+      'lazyTabs:两段样式都在壳的 <style> 里,注入后就生效')
+    delete cfg86.lazyTabs
+    writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+    runGen(NEW_SCRIPTS, fx86.kb)
+  }
+
+  { // shots 是可选字段:验收 tab 开着、但清单里一条 shots 都没有的老板子,HTML 该与 0.17.14 一模一样
+    const TAG14 = 'demo-driven-development--v0.17.14'
+    const have14 = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG14}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+    if (!have14) console.log(`  · 跳过:本地没有 ${TAG14}(浅克隆 / 未取 tag),0.17.14 冻结对照本次不比`)
+    else {
+      const oldRoot = join(WORK, 'v01714b')
+      mkdirSync(oldRoot, { recursive: true })
+      const tar = join(WORK, 'v01714b.tar')
+      spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG14], { cwd: REPO })
+      spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+      const noShots = ITEMS86.map(({ shots, ...rest }) => rest)
+      const mk86f = (name) => {
+        const fx = mkFixture(name, { 's.html': demoHtml('s') })
+        const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+        c.acceptanceTab = true
+        writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+        writeFileSync(join(fx.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 230, lists: [LIST86(noShots)] }))
+        return fx
+      }
+      // 版本戳那一行 + <style> 整块(.accshots 那几行只落在里面)之外,两边必须逐字节相同
+      const bare86 = (p) => readFileSync(p, 'utf8')
+        .split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/g, '<style/>')
+      const fa = mk86f('fx86f-old'), fb2 = mk86f('fx86f-new')
+      runGen(join(oldRoot, 'scripts'), fa.kb); runGen(NEW_SCRIPTS, fb2.kb)
+      ok(bare86(join(fa.kb, 'index.html')) === bare86(join(fb2.kb, 'index.html')),
+        '冻结:清单里一条 shots 都没有 → 除样式表外,HTML 与 0.17.14 逐字节相同')
+      ok(!readFileSync(join(fa.kb, 'index.html'), 'utf8').includes('.accshots')
+        && readFileSync(join(fb2.kb, 'index.html'), 'utf8').includes('.accshots'),
+        '差的只是样式表里 .accshots 那几行(旧版没有、新版有)')
+    }
+  }
+
+  cfg86.acceptanceTab = false
+  writeFileSync(cfgP, JSON.stringify(cfg86, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx86.kb)
+  ok(sha(idxP) === offSha86, '关掉 acceptanceTab 后与本节开始前的基线逐字节相同')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

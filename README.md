@@ -117,6 +117,13 @@ Set `config.acceptanceTab` to `true` and the board grows a tab fed by a new
 per pull request (or per group of them), with the environment under test, items
 built from *what to do / what to expect / what is wrong / why*, data blocks
 rendered as tables and copyable as TSV, and round and pull-request filters.
+An item can also carry `shots` — the same field cards use, `["x.png"]` or
+`[{file, caption}]`, a bare filename resolving under `kanban/shots/` and
+anything with a `/` read relative to the board root — which renders as a strip
+of evidence thumbnails at the end of the item, each opening the full image in a
+new tab. A screenshot that is not there is left out of the strip and warns once,
+so a missing file costs a line in `gen`'s output rather than a broken-image icon
+on the board.
 Ticks live in `localStorage`, keyed by the checklist's `revision` — bump it and
 the previous round's ticks retire (switch on `acceptanceFeedback`, below, and
 the tick becomes a shared ✓ / ✕ verdict instead). A "copy result" button produces
