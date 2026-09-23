@@ -28,6 +28,7 @@ import { lite, litePreview } from './lite.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { accFeedback } from './accfb.mjs'
+import { isIso, isRemoteShot, readPrecheck, shotHref } from './accpre.mjs'
 import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFrom, depItemText, openCount, reverseAfter } from './deps.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
@@ -640,13 +641,8 @@ function safeHref(href) {
   return '#'
 }
 
-// shots 的一条 → 相对看板根的 href:纯文件名默认落在 shots/ 下,带 / 的按相对看板根原样用。
-// 卡片的 shots 与验收条目的证据图共用这一把尺(校验存不存在时也照它拼路径);
-// 走查留痕的 shots 是另一回事 —— 它的 file 一律当相对看板根,不补 shots/,见 wtBlock。
-const shotHref = (s) => {
-  const file = typeof s === 'string' ? s : (s && s.file) || ''
-  return !file ? '' : file.includes('/') ? file : 'shots/' + file
-}
+// shots 的一条 → 相对看板根的 href:规矩在 accpre.mjs 的 shotHref(v0.17.16 抽出 ——
+// 卡片的 shots、验收条目的证据图、`ddd acc precheck --shot` 的写回校验共用这一把尺)。
 
 // 卡片 link(相对 kanban/)→ 渲染页 / GitHub blob / 原样。
 function cardLink(href) {
@@ -884,14 +880,35 @@ const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
     // 缺的那一格直接不渲:warn 已经点名了是哪条哪张,页面上再顶一个浏览器原生碎图标,
     // 是把同一句话难看地说第二遍(各家浏览器长相还不一样,也不跟着明暗主题走)。
     // 整条 shots 都缺就连「证据」标签一起不出,不留一条空带。
-    const shots = !Array.isArray(it.shots) ? null : it.shots.filter((s) => {
+    // v0.17.16:旧轮(shotsHistory)里的图同一把尺 —— 缺图滤掉那一格、warn 点名是哪一轮。
+    const keepShots = (list, where) => list.filter((s) => {
       const href = shotHref(s)
       if (!href) return false
-      if (/^https?:/i.test(href) || existsSync(join(HERE, href))) return true // 远程图存不存在只有浏览器知道,放行
-      accWarn(`清单 ${nums.join('/')} 条目 ${id} 引用了不存在的截图「${href}」,这一格不渲`)
+      if (isRemoteShot(href) || existsSync(join(HERE, href))) return true // 远程图存不存在只有浏览器知道,放行
+      accWarn(`清单 ${nums.join('/')} 条目 ${id} ${where}引用了不存在的截图「${href}」,这一格不渲`)
       return false
     })
-    return { ...it, ...(shots && { shots }), id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
+    const shots = !Array.isArray(it.shots) ? null : keepShots(it.shots, '')
+    // 代验(v0.17.16):形制不对的 precheck 与数据块同一档软校验 —— warn 点名,那一行不渲,不阻断。
+    // 时间写坏了只丢时间那一格(结论本身还是对的)。
+    const prOf = (p, where) => {
+      const why = []
+      const pc = readPrecheck(p, why)
+      if (p != null && !pc) accWarn(`清单 ${nums.join('/')} 条目 ${id} ${where}的 precheck ${why.join('')},这一行不渲`)
+      if (pc && pc.at != null && !isIso(pc.at)) accWarn(`清单 ${nums.join('/')} 条目 ${id} ${where}的 precheck.at「${pc.at}」不是带时区的 ISO 时刻,时间那一格不渲`)
+      return pc
+    }
+    const precheck = it.precheck == null ? null : prOf(it.precheck, '')
+    // 一轮在板上还剩得下东西(图或代验)才算一轮;整轮都缺了就连那一段一起不出,与「整条 shots 都缺」同理。
+    const hist = !Array.isArray(it.shotsHistory) ? null : it.shotsHistory.map((r, i) => {
+      const round = String((r && r.round) || `r${i + 1}`)
+      return {
+        round, at: r && r.at,
+        precheck: r && r.precheck != null ? prOf(r.precheck, `旧轮 ${round} `) : null,
+        shots: Array.isArray(r && r.shots) ? keepShots(r.shots, `旧轮 ${round} `) : [],
+      }
+    }).filter((r) => r.shots.length || r.precheck)
+    return { ...it, ...(shots && { shots }), ...(it.precheck != null && { precheck }), ...(hist && { shotsHistory: hist }), id, group: gids.has(g) ? g : String(groups[0].id), pr: it.pr != null ? Number(it.pr) : nums[0], round: it.round ? String(it.round) : '' }
   })
   // pre:清单 result.checked 里的条目 —— 烤进数据块给旧勾选作初值,v0.17.1 起还在行上渲成只读的「已收」灰标
   return { ...l, nums, key: nums.join('-'), rev: Number.isFinite(l.revision) ? l.revision : 1, env: l.env || {}, rounds, groups, items, data, cards: l.cards || [], pre: ((l.result || {}).checked || []).map(String) }
@@ -903,6 +920,8 @@ const ACC_LISTS = !ACC ? [] : (acm.lists || []).map((l) => {
     else owner.set(n, l.key)
   }
 }
+// 代验 / 旧轮(v0.17.16)只在真有的板上才烤样式与运行时:一条都没有的板,产物与 0.17.15 逐字节相同。
+const ACC_PRE = ACC_LISTS.some((l) => l.items.some((it) => it.precheck || (it.shotsHistory && it.shotsHistory.length)))
 const ACC_BY_PR = new Map()
 for (const l of ACC_LISTS) for (const n of l.nums) if (!ACC_BY_PR.has(n)) ACC_BY_PR.set(n, l)
 const ACC_CUR = ACC ? ACC_BY_PR.get(Number(acm.current)) || null : null
@@ -2680,6 +2699,46 @@ const accShotsBlock = (list) => {
   return cells ? `
                 <div class="accshots"><div class="wtshots">${cells}</div></div>` : ''
 }
+// 代验一行(v0.17.16):`🤖 代验 ok · 09-24 01:12 · 看到:…`。by 不是 agent 时 🤖 换成 by 原文。
+// 时间:gen 零时间 —— 只把 ISO 原文烤进 data-accat,MM-DD HH:mm 由浏览器按本地时区换算(accTimes);
+// 烤进去的那几个字是 UTC 的同一格式,只在脚本没跑的时候看得见。
+const PRE_WORD = { ok: 'ok', bad: '不对', blocked: '没跑成' }
+const accTime = (iso, day) => {
+  const u = new Date(iso).toISOString()
+  return `<time data-accat="${esc(iso)}"${day ? ' data-accfmt="d"' : ''}>${esc(day ? u.slice(5, 10) : u.slice(5, 16).replace('T', ' '))}</time>`
+}
+const accPreLine = (pc) => {
+  const by = String(pc.by || 'agent')
+  return `<div class="accpre ${pc.result}"${pc.env ? ` title="${esc(`跑在 ${pc.env}`)}"` : ''}><span class="accpreb">${by === 'agent' ? '🤖' : esc(by)} 代验 ${PRE_WORD[pc.result]}</span>${isIso(pc.at) ? ` · ${accTime(pc.at)}` : ''}${pc.note ? ` · 看到:${esc(pc.note)}` : ''}</div>`
+}
+const accPreBlock = (pc) => (!pc ? '' : `
+                ${accPreLine(pc)}`)
+// 旧轮(v0.17.16):证据带下面一枚默认收起的折叠。summary「旧轮 N · 最近 r1 09-23」;展开后每轮一段,
+// 最近的在上 —— 最外层是最新一轮,往下读就是往回翻。缩略图复用 .wtshots(与证据带同一只 shotCells)。
+const accHistBlock = (hist) => {
+  if (!hist || !hist.length) return ''
+  const last = hist[hist.length - 1]
+  const rounds = hist.slice().reverse().map((r) => {
+    const cells = shotCells(r.shots)
+    return `
+                  <div class="accshr"><div class="accshh">${esc(r.round)}${isIso(r.at) ? ` · ${accTime(r.at)}` : ''}</div>${r.precheck ? accPreLine(r.precheck) : ''}${cells ? `<div class="wtshots">${cells}</div>` : ''}</div>`
+  }).join('')
+  return `
+                <details class="accsh"><summary>旧轮 ${hist.length} · 最近 ${esc(last.round)}${isIso(last.at) ? ` ${accTime(last.at, true)}` : ''}</summary>${rounds}
+                </details>`
+}
+// 清单头的代验计数(v0.17.16):「代验 3 通过 · 1 不对 · 1 没跑成」,零的那档不出;一条代验都没有的清单整段不出。
+// 有「不对」时它是一枚钮:点一下只看不对的那几条,再点回全部(同轮次 / PR 筛选芯片那套 view + syncList)。
+const accPreCount = (l) => {
+  const c = { ok: 0, bad: 0, blocked: 0 }
+  for (const it of l.items) if (it.precheck) c[it.precheck.result]++
+  const parts = [c.ok && `${c.ok} 通过`, c.bad && `<span class="accpcb">${c.bad} 不对</span>`, c.blocked && `${c.blocked} 没跑成`].filter(Boolean)
+  if (!parts.length) return ''
+  const txt = `代验 ${parts.join(' · ')}`
+  return c.bad
+    ? `<button type="button" class="accprec" data-accprec aria-pressed="false" title="只看代验不对的那几条(再点一下看全部)">${txt}</button>`
+    : `<span class="accprec">${txt}</span>`
+}
 const accItemHtml = (l, it) => {
   const rd = l.rounds.find((r) => String(r.id) === it.round)
   const tags = (it.key ? '<span class="acckey">核心</span>' : '') +
@@ -2711,7 +2770,7 @@ const accItemHtml = (l, it) => {
                 ${it.do ? `<div class="accdo">${bold(it.do)}</div>` : ''}${(it.data || []).map((k) => accDataBlock(l, k)).join('')}
                 ${it.exp ? `<div class="accexp">${bold(it.exp)}</div>` : ''}
                 ${it.bad ? `<div class="accbad">${bold(it.bad)}</div>` : ''}
-                ${it.why ? `<div class="accwhy">${bold(it.why)}</div>` : ''}${accShotsBlock(it.shots)}
+                ${it.why ? `<div class="accwhy">${bold(it.why)}</div>` : ''}${accPreBlock(it.precheck)}${accShotsBlock(it.shots)}${accHistBlock(it.shotsHistory)}
               </div>${fb}
             </div>`
 }
@@ -2734,7 +2793,7 @@ const accListHtml = (l, sel) => {
   ].filter(Boolean).join('')
   return `
     <section class="acclist" id="acc-${esc(l.key)}" data-acck="${esc(l.key)}"${sel ? '' : ' hidden'}>${l.nums.filter((n) => String(n) !== l.key).map((n) => `<a class="accanchor" id="acc-${n}"></a>`).join('')}
-      <header class="acclh"><b>${esc(l.title || l.key)}</b>${l.nums.map(accPrChip).join('')}<span class="accmeta">${l.items.length} 条${l.rev > 1 ? ` · 第 ${l.rev} 版清单` : ''}</span></header>${chips ? `\n          <div class="accfs">${chips}</div>` : ''}${gs.map((g) => `
+      <header class="acclh"><b>${esc(l.title || l.key)}</b>${l.nums.map(accPrChip).join('')}<span class="accmeta">${l.items.length} 条${l.rev > 1 ? ` · 第 ${l.rev} 版清单` : ''}</span>${accPreCount(l)}</header>${chips ? `\n          <div class="accfs">${chips}</div>` : ''}${gs.map((g) => `
           <section class="accgrp" id="accg-${esc(l.key)}-${esc(String(g.id))}" data-accg="${esc(String(g.id))}">
             <h3 class="accgh">${esc(g.title || g.id)}</h3>${g.tip ? `
             <p class="accgt">${bold(g.tip)}</p>` : ''}${l.items.filter((it) => it.group === String(g.id)).map((it) => accItemHtml(l, it)).join('')}
@@ -2987,6 +3046,33 @@ const ACC_FB_CSS = !AFB ? '' : `
   /* 时间线里自己的姓名圆点是一枚真 <button>(可 Tab、Enter/Space 原生触发);样式与 span 那枚同源 */
   button.accfbav { appearance: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; }
   button.accfbav:hover { color: var(--accent); }`
+// 代验一行 / 清单头计数 / 旧轮折叠(v0.17.16)。三档色取现成令牌:ok 与「预期」同一支绿,bad 与「不对」
+// 同一支红(也是 .accvm 判定标那两支),blocked 退成 --mut 灰 —— 没跑成不是结论,不该抢眼。
+// 几何照抄 .accdo 那一族(左竖线 + 9px),只是另起一条:并进那条共享选择器会让没有代验的板样式表也变。
+const ACC_PRE_CSS = !ACC_PRE ? '' : `
+  .accpre { margin: 4px 0 0; padding-left: 9px; font-size: 12.5px; line-height: 1.72; color: var(--mut);
+     border-left: 2px solid var(--line-strong); }
+  .accpreb { font-size: 11px; font-weight: 700; }
+  .accpre.ok { border-left-color: ${tk('ok-ink')}; }
+  .accpre.ok .accpreb { color: ${tk('ok-ink')}; }
+  .accpre.bad { border-left-color: #d44c47; }
+  .accpre.bad .accpreb { color: #d44c47; }
+  .accpre.blocked .accpreb { color: var(--mut); }
+  .accprec { appearance: none; font: inherit; font-size: 11.5px; color: var(--faint); background: none; border: 0; padding: 0;
+     font-variant-numeric: tabular-nums; white-space: nowrap; }
+  button.accprec { cursor: pointer; border-bottom: 1px dashed var(--line-strong); }
+  button.accprec:hover, button.accprec.on { color: var(--ink); border-bottom-color: #d44c47; }
+  .accpcb { color: #d44c47; }
+  .accsh { margin: 4px 0 0; padding-left: 9px; border-left: 2px solid var(--line); }
+  .accsh > summary { font-size: 11px; line-height: 1.72; color: var(--faint); cursor: pointer; list-style: none;
+     font-variant-numeric: tabular-nums; }
+  .accsh > summary::-webkit-details-marker { display: none; }
+  .accsh > summary::before { content: "▸ "; font-size: 10px; }
+  .accsh[open] > summary::before { content: "▾ "; }
+  .accshr { margin-top: 6px; }
+  .accshh { font-size: 11px; font-weight: 600; color: var(--mut); font-variant-numeric: tabular-nums; }
+  .accshr .accpre { margin: 2px 0 4px; }
+  .accshr .wtshots { margin-top: 4px; }`
 const ACC_CSS = !ACC ? '' : `
   /* ============ 验收 tab(v0.12.0,config.acceptanceTab)============ */
   .acclink { font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px;
@@ -3129,7 +3215,7 @@ const ACC_CSS = !ACC ? '' : `
     .accnav a.accitl { display: none; } /* 条目一级不进 chip:手机上滚主区就够 */
     .accnavs { order: 2; margin-top: 8px; }
     .accdone { order: 3; }
-  }${ACC_FB_CSS}`
+  }${ACC_PRE_CSS}${ACC_FB_CSS}`
 // 运行期:勾选(localStorage;开了 acceptanceFeedback 就换成判定)/ 筛选 / 进度 / 目录 /
 // 复制 TSV / 复制结果 / 卡头分子。
 // 数据烤入,分子全在浏览器算(gen 零时间);<  逃逸照 LAZY_PANE_OF 做法。
@@ -3145,7 +3231,7 @@ const OV_ACC_BAR = !OVERVIEW ? '' : `
       }`
 const ACC_D_LISTS = !ACC ? [] : ACC_LISTS.map((l) => ({
   k: l.key, rev: l.rev, nums: l.nums,
-  items: l.items.map((it) => ({ id: it.id, g: it.group, pr: it.pr, rd: it.round })),
+  items: l.items.map((it) => ({ id: it.id, g: it.group, pr: it.pr, rd: it.round, ...(it.precheck && { pc: it.precheck.result }) })),
   pre: l.pre,
 }))
 const ACC_D_TSV = !ACC ? {} : Object.fromEntries(ACC_LISTS.map((l) => [l.key, Object.fromEntries(Object.keys(l.data).map((k) => [k, accTsv(l, k)]))]))
@@ -4004,6 +4090,28 @@ ${!AFB_PIN ? '' : `        if (okName !== v) { gate(v); return } // 名册那一
       setInterval(fbTick, 20000) // 可见期间 20s 一轮;不可见时 fbTick 自己判掉,不发请求
       fbTick()
     }`
+// 代验的运行时(v0.17.16;没有代验的板全为空串,ACC_JS 逐字节回 0.17.15):
+// 清单头那枚「代验 … 不对」钮 = 第三个筛选维度(与轮次 / PR 芯片同一份 view,syncList 一处算显隐与进度);
+// 时间一律浏览器按本地时区换算(gen 零时间)。
+const ACC_PRE_VIS = !ACC_PRE ? '' : ` && (w.pre !== 'bad' || it.pc === 'bad')`
+const ACC_PRE_CLICK = !ACC_PRE ? '' : `        var pq = ev.target.closest('[data-accprec]')
+        if (pq) {
+          var pl = byKey[pq.closest('.acclist').dataset.acck]
+          view[pl.k].pre = view[pl.k].pre === 'bad' ? 'all' : 'bad'
+          pq.classList.toggle('on', view[pl.k].pre === 'bad')
+          pq.setAttribute('aria-pressed', String(view[pl.k].pre === 'bad'))
+          syncList(pl); spy()
+          return
+        }
+`
+const ACC_PRE_TIMES = !ACC_PRE ? '' : `
+    document.querySelectorAll('#pane-acceptance time[data-accat]').forEach(function (t) {
+      var d = new Date(t.dataset.accat)
+      if (isNaN(d.getTime())) return
+      var p2 = function (n) { return (n < 10 ? '0' : '') + n }
+      var md = p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+      t.textContent = t.dataset.accfmt === 'd' ? md : md + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+    })`
 const ACC_JS = !ACC ? '' : `
   ${ACC_OPEN}
     var byKey = {}, ${!AFB ? 'ck = {}, ' : ''}view = {}${!AFB ? `
@@ -4023,7 +4131,7 @@ const ACC_JS = !ACC ? '' : `
     // (转过去等于替人署名发布);既往 result.checked 在行上渲成只读的「已收」灰标,不计入判定。`}
     function visible(l, it) {
       var w = view[l.k]
-      return (w.round === 'all' || it.rd === w.round) && (w.pr === 'all' || String(it.pr) === w.pr)
+      return (w.round === 'all' || it.rd === w.round) && (w.pr === 'all' || String(it.pr) === w.pr)${ACC_PRE_VIS}
     }
     // http 内网页面多半不是安全上下文,navigator.clipboard 不存在 —— 退回 execCommand 老路
     function copyText(t, btn, okmsg) {
@@ -4136,7 +4244,7 @@ const ACC_JS = !ACC ? '' : `
           }
           return
         }
-        var f = ev.target.closest('.accf button')
+${ACC_PRE_CLICK}        var f = ev.target.closest('.accf button')
         if (f) {
           var l = byKey[f.closest('.acclist').dataset.acck]
           view[l.k][f.closest('.accf').dataset.accf] = f.dataset.v
@@ -4243,7 +4351,7 @@ const ACC_JS = !ACC ? '' : `
     window.addEventListener('scroll', spy, { passive: true })
     window.addEventListener('hashchange', accRoute)
     window.addEventListener('resize', accPlaceNav) // 跨过 640px 那道坎时,第三级换一格挂
-    accPlaceNav()
+    accPlaceNav()${ACC_PRE_TIMES}
     window.accSync()
     accRoute()
   ${ACC_CLOSE}`

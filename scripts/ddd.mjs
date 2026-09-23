@@ -11,6 +11,8 @@
 //   node scripts/ddd.mjs card show <id> [--json]
 //   node scripts/ddd.mjs card list [--status s --line X --session Y --since YYYY-MM-DD] [--json]
 //   node scripts/ddd.mjs card history <id>
+//   node scripts/ddd.mjs acc precheck <pr> <item> --result ok|bad|blocked --note "…" [--shot p [--caption c]]… | --clear | <pr> --list
+//   node scripts/ddd.mjs acc shots rotate <pr> <item> [--round r2] [--at ISO]   (验收代验与证据分轮,v0.17.16)
 //   node scripts/ddd.mjs export [--out f.json]
 //   node scripts/ddd.mjs audit [--json] [--session <session 标签>]  (只读:守卫那一行背后的正文;--line 同义,仍接受)
 //   node scripts/ddd.mjs pr-sync […]
@@ -23,9 +25,9 @@
 // 不碰别人的卡);没配 = 从头文件的数组读、整文件重写(竞态照旧,这是未拆板的既有代价)。
 //
 // 不做:交互式 TUI、批量编辑、自动 commit —— commit 仍由会话按纪律做。
-import { closeSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
@@ -35,6 +37,7 @@ import { parsePr } from './prlink.mjs'
 import { afterKey, afterOf, afterStates, auditAfter, depCtxFrom, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 import { auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
+import { PRE_RESULTS, isIso, isRemoteShot, rotateItem, shotHref, shotKey, spliceItem } from './accpre.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ARGV = process.argv.slice(2)
@@ -46,8 +49,11 @@ if (ARGV[0] === 'pr-sync') {
 }
 
 // ---- 旗子 ----------------------------------------------------------------
-const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since', 'tier', 'rm'])
-const BOOL_FLAGS = new Set(['json', 'help', 'no-note'])
+const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since', 'tier', 'rm',
+  'result', 'note', 'env', 'by', 'round', 'at'])
+const BOOL_FLAGS = new Set(['json', 'help', 'no-note', 'clear', 'list', 'new-round'])
+// 成组可重复的旗子(v0.17.16,acc precheck):--shot 一张图,紧跟的 --caption 给它配说明。收成 flags.shots 有序数组。
+const SHOT_FLAGS = new Set(['shot', 'caption'])
 const die = (msg) => { console.error(msg); process.exit(1) }
 
 function parseArgv(argv) {
@@ -60,9 +66,16 @@ function parseArgv(argv) {
     const eq = a.indexOf('=')
     const name = eq < 0 ? a.slice(2) : a.slice(2, eq)
     if (BOOL_FLAGS.has(name)) { flags[name] = true; continue }
-    if (!VALUE_FLAGS.has(name)) return { bad: a }
+    if (!VALUE_FLAGS.has(name) && !SHOT_FLAGS.has(name)) return { bad: a }
     const v = eq < 0 ? argv[++i] : a.slice(eq + 1)
     if (v === undefined) return { needsValue: name }
+    if (name === 'shot') { (flags.shots = flags.shots || []).push({ file: v }); continue }
+    if (name === 'caption') {
+      const last = (flags.shots || [])[(flags.shots || []).length - 1]
+      if (!last || last.caption !== undefined) return { captionAlone: true, flags, pos }
+      last.caption = v
+      continue
+    }
     flags[name] = v
   }
   return { flags, pos }
@@ -82,6 +95,7 @@ const S = TABLE.cli
 if (parsed.flags && parsed.flags.help) { console.log(S.usage()); process.exit(0) }
 if (parsed.bad) die(S.unknownFlag(parsed.bad))
 if (parsed.needsValue) die(S.flagNeedsValue(parsed.needsValue))
+if (parsed.captionAlone) die(S.acc.captionAlone())
 if (dirErr) die(dirErr.message)
 const { flags, pos } = parsed
 if (!pos.length) die(S.usage())
@@ -670,11 +684,149 @@ function cmdAudit() {
   console.log(parts.join('\n\n'))
 }
 
+// ---- 验收代验与证据分轮(v0.17.16)------------------------------------------
+// 写的是 acceptance-manifest.json 里的某一条:整份原文只换掉那一条的字节区间(accpre.mjs 的 spliceItem),
+// 别的条目、别的清单、文件头一个字节不动 —— 那份清单是几条会话一起写的大文件,整份重排没人敢看 diff。
+// 一切校验(清单 / 条目 / result / 图在不在)都在写之前做完;拒了就是一个字节都没写、退出码非 0。
+const nowIso = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+
+function accLoad() {
+  const p = join(KANBAN, 'acceptance-manifest.json')
+  let text, doc
+  try { text = readFileSync(p, 'utf8'); doc = JSON.parse(text) } catch (e) { return die(S.acc.noManifest(e.message)) }
+  return { p, text, doc }
+}
+
+function accFind(doc, prArg, itemId) {
+  const n = Number(String(prArg ?? '').replace(/^#/, ''))
+  if (!Number.isInteger(n) || n <= 0) die(S.acc.prBad(String(prArg ?? '')))
+  const lists = Array.isArray(doc.lists) ? doc.lists : []
+  const li = lists.findIndex((l) => l && (Array.isArray(l.pr) ? l.pr : [l.pr]).map(Number).includes(n))
+  if (li < 0) die(S.acc.noList(n))
+  const list = lists[li]
+  const items = Array.isArray(list.items) ? list.items : []
+  if (itemId === undefined) return { n, li, list, items }
+  const ii = items.findIndex((it) => it && String(it.id) === String(itemId))
+  if (ii < 0) die(S.acc.noItem(n, itemId, items.map((it) => String(it && it.id))))
+  return { n, li, ii, list, items, item: items[ii] }
+}
+
+function accWrite(ctx, li, ii, item) {
+  try { atomicWrite(ctx.p, spliceItem(ctx.text, li, ii, item)) } catch (e) { die(S.writeFailed('acceptance-manifest.json', e.message)) }
+}
+
+/**
+ * --shot 的一张:路径规矩与板上渲染同一把尺(shotHref:纯文件名落 shots/,带 / 的按相对看板根)。
+ * 绝对路径只要落在看板目录里就换成相对看板根的写法;落在外面、远程地址、文件不在,一律拒。
+ */
+function accShot(raw, caption) {
+  let file = String(raw)
+  if (isRemoteShot(file)) die(S.acc.shotRemote(raw))
+  if (isAbsolute(file)) {
+    const rel = relative(KANBAN, file)
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) die(S.acc.shotOutside(raw))
+    file = rel.split(sep).join('/')
+  }
+  const href = shotHref(file)
+  const abs = resolve(KANBAN, href)
+  const rel = relative(KANBAN, abs)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) die(S.acc.shotOutside(raw))
+  let isFile = false
+  try { isFile = existsSync(abs) && statSync(abs).isFile() } catch {}
+  if (!isFile) die(S.acc.shotMissing(raw, href))
+  if (basename(file).startsWith('acc-')) console.error(S.acc.shotAccPrefix(file))
+  return caption !== undefined && caption !== '' ? { file, caption } : file
+}
+
+/** 被搬走那一轮的时刻:显式 --at > 那一轮代验自己的时间 > 现在 */
+const roundAtOf = (item, explicit) => explicit ?? (item.precheck && isIso(item.precheck.at) ? item.precheck.at : nowIso())
+const roundTaken = (item, r) => r && Array.isArray(item.shotsHistory) && item.shotsHistory.some((h) => h && String(h.round) === r)
+
+function cmdAccPrecheck() {
+  const [prArg, itemId] = pos.slice(2)
+  const ctx = accLoad()
+  if (flags.list) {
+    const { n, list, items } = accFind(ctx.doc, prArg)
+    const c = { ok: 0, bad: 0, blocked: 0, none: 0 }
+    const rows = items.map((it) => {
+      const p = it && it.precheck
+      if (p && PRE_RESULTS.includes(p.result)) c[p.result]++
+      else c.none++
+      const k = Array.isArray(it.shots) ? it.shots.length : 0
+      const h = Array.isArray(it.shotsHistory) ? it.shotsHistory.length : 0
+      return { id: String(it.id), precheck: p || null, shots: k, rounds: h }
+    })
+    if (flags.json) { console.log(JSON.stringify({ pr: n, items: rows, count: c }, null, 2)); return }
+    console.log(S.acc.listHead(n, String(list.title || '')))
+    for (const r of rows) {
+      const p = r.precheck
+      const head = p ? `${String(p.result).padEnd(8)}${String(p.at || '').padEnd(22)}${p.note || ''}` : S.acc.listNone()
+      console.log(`  ${r.id.padEnd(8)}${head}${r.shots || r.rounds ? `  [${S.acc.listShots(r.shots, r.rounds)}]` : ''}`)
+    }
+    console.log(S.acc.listTail(c))
+    return
+  }
+  if (!itemId) die(S.acc.precheckUsage())
+  const { n, li, ii, item } = accFind(ctx.doc, prArg, itemId)
+  if (flags.clear) {
+    if (flags.result !== undefined || flags.note !== undefined || flags.shots || flags['new-round']) die(S.acc.clearAlone())
+    if (item.precheck === undefined) { say({ ok: true, pr: n, item: itemId, cleared: false }, S.acc.clearNone(n, itemId)); return }
+    const next = { ...item }
+    delete next.precheck
+    accWrite(ctx, li, ii, next)
+    say({ ok: true, pr: n, item: itemId, cleared: true }, S.acc.cleared(n, itemId))
+    return
+  }
+  if (!PRE_RESULTS.includes(flags.result)) die(S.acc.resultBad(flags.result))
+  const note = String(flags.note ?? '').trim()
+  if (!note) die(S.acc.noteNeeded())
+  const at = flags.at ?? nowIso()
+  if (!isIso(at)) die(S.acc.atBad(at))
+  if (flags.round !== undefined && !flags['new-round']) die(S.acc.roundOnly())
+  const add = (flags.shots || []).map((x) => accShot(x.file, x.caption)) // 全部校验完才动手
+  let base = item, round = ''
+  if (flags['new-round']) {
+    if (roundTaken(item, flags.round)) die(S.acc.roundDup(flags.round))
+    const r = rotateItem(item, { round: flags.round || '', at: roundAtOf(item) })
+    if (r.empty) console.error(S.acc.newRoundNothing())
+    else { base = r.item; round = r.round }
+  }
+  const precheck = { at, by: String(flags.by || 'agent'), result: flags.result, note, ...(flags.env ? { env: String(flags.env) } : {}) }
+  const cur = Array.isArray(base.shots) ? base.shots : []
+  const seen = new Set(cur.map(shotKey))
+  const merged = [...cur]
+  for (const x of add) { const k = shotKey(x); if (!seen.has(k)) { seen.add(k); merged.push(x) } }
+  const added = merged.length - cur.length
+  const next = { ...base, precheck, ...(added || Array.isArray(base.shots) ? { shots: merged } : {}) }
+  accWrite(ctx, li, ii, next)
+  say({ ok: true, pr: n, item: itemId, precheck, shotsAdded: added, rotated: round || null }, S.acc.written(n, itemId, flags.result, added, round))
+}
+
+function cmdAccShots() {
+  if (pos[2] !== 'rotate') die(S.acc.rotateUsage())
+  const [prArg, itemId] = pos.slice(3)
+  if (!itemId) die(S.acc.rotateUsage())
+  const ctx = accLoad()
+  const { n, li, ii, item } = accFind(ctx.doc, prArg, itemId)
+  if (flags.at !== undefined && !isIso(flags.at)) die(S.acc.atBad(flags.at))
+  if (roundTaken(item, flags.round)) die(S.acc.roundDup(flags.round))
+  const r = rotateItem(item, { round: flags.round || '', at: roundAtOf(item, flags.at) })
+  if (r.empty) die(S.acc.rotateEmpty(n, itemId))
+  accWrite(ctx, li, ii, r.item)
+  const k = r.item.shotsHistory[r.item.shotsHistory.length - 1].shots.length
+  say({ ok: true, pr: n, item: itemId, round: r.round }, S.acc.rotated(n, itemId, r.round, k))
+}
+
 // ---- 分派 ----------------------------------------------------------------
 const CARD_CMDS = { new: cmdNew, set: cmdSet, status: cmdStatus, note: cmdNote, link: cmdLink, after: cmdAfter, show: cmdShow, list: cmdList, history: cmdHistory }
 if (pos[0] === 'card') {
   const run = CARD_CMDS[pos[1]]
   if (!run) die(S.unknownCardCmd(String(pos[1] ?? ''), Object.keys(CARD_CMDS)))
+  run()
+} else if (pos[0] === 'acc') {
+  const ACC_CMDS = { precheck: cmdAccPrecheck, shots: cmdAccShots }
+  const run = ACC_CMDS[pos[1]]
+  if (!run) die(S.acc.unknownCmd(String(pos[1] ?? '')))
   run()
 } else if (pos[0] === 'export') {
   cmdExport()

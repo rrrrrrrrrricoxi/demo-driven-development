@@ -72,6 +72,56 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 **发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。**归版切在「打 tag 那一刻」**(v0.15.14):`releases[].at` 取 tag 自己的时间(annotated 取 `tagger.date`,lightweight 退到它指的 commit),不是 release 的 `publishedAt`。tag 是「这一版包含什么」的那一刀,`publishedAt` 只是「什么时候按下发布键」—— 两者之间合并的 PR 不算进这一版。已落盘的 `at` 不回填。
 
+## 代验(agent 先测一遍)(v0.17.16)
+
+验收清单的每一条,可以先派一个 agent 在临时口上跑一遍,把看到的截下来绑到那一条上,并记一句「代验 ok / 不对 / 没跑成 · 看到了什么」。人再看清单时,先看图和这一句,再决定自己要不要亲手复跑。**判定(✓ / ✕)仍然只有人能点**,代验不替人判,不进「已判 N/M」,也不改清单的 `revision`。
+
+写回只走 CLI(板上要开着 `acceptanceTab`):
+
+| 要做的事 | 命令 |
+|---|---|
+| 记一条代验 | `ddd.mjs acc precheck 293 AC3 --result ok\|bad\|blocked --note "看到了什么" --env 5177+8003 --shot shots/pre-293/AC3-1.png --caption "这一步看到什么"`(`--shot` 可给几组) |
+| 同一条重跑一轮 | 同上再加 `--new-round`:上一轮的图与代验先搬进旧轮(`shotsHistory`),板上最外层只剩新一轮,旧轮折叠在下面 |
+| 只搬轮不写 | `ddd.mjs acc shots rotate 293 AC3 [--round r2]` |
+| 撤掉代验 / 看全表 | `ddd.mjs acc precheck 293 AC3 --clear` / `ddd.mjs acc precheck 293 --list` |
+
+`ok` = 看到的与 exp 一致;`bad` = 不一致(note 写看到了什么);`blocked` = 没跑成(环境、数据、权限)。CLI 只改那一条的字节,清单 / 条目 / result / 图任一不对就当场拒写、退出码非 0。收工守卫会把「代验不对」点名成一行家务,只提示。
+
+**八条规矩,每条后面跟自查判据**(派活的需求书里原样带上):
+
+1. **不碰人的口**:命令与 URL 里出现 5175 / 8002(或 config 里标为常驻测试口的端口)即违规。临时口只许 5177–5179 / 8003–8004。自查:跑完 `grep -c "5175\|8002" <自己的命令记录>` 必须为 0。
+2. **自起浏览器**:用 node playwright 自己起 chromium,不用 playwright MCP 的共享浏览器。自查:进程列表里自己起的浏览器带自己的 user-data-dir。
+3. **自造数据、用完即删**:产品名/批号带统一前缀(如 `代验-<PR>-`),跑完用界面的删除路径删掉;删不掉的写进 precheck note。自查:结束时按前缀搜列表为 0 条。
+4. **一条一图起步**:每条至少一张截图,截到 exp 说的那个东西或者不一致的那个东西;多步的每步一张,caption 写这一步看到什么。自查:`acc precheck <PR> --list` 里每条都带「N 张图」,N ≥ 1。
+5. **只记事实,不改期望**:exp / bad / why 一个字不改;与预期不符写 `bad` + 看到了什么。自查:`git diff` 里 acceptance-manifest.json 的改动只落在 `precheck` / `shots` / `shotsHistory` 三个键上。
+6. **不替人判**:不写 acceptance-feedback.jsonl,不点 ✓ / ✕。自查:`git status` 里 acceptance-feedback.jsonl 不在改动列表。
+7. **收尾**:停掉自己起的前后端进程(只杀自己记下的 pid),不动别人的;不在主树跑裸 `vite build`。自查:自己记下的 pid 全部不在进程表里,5175 / 8002 那几台照旧在监听。
+8. **写回走 CLI**:`acc precheck …`,不手改 manifest;截图落 `shots/pre-<pr>/`(不用 `acc-` 前缀,那是 gitignore 的人工签字截图)。自查:截图全在 `shots/pre-<PR>/` 下,没有一张以 `acc-` 打头。
+
+**需求书样板**(给 agent 的 prompt,填掉尖括号直接用):
+
+```text
+你是代验 agent。PR #<PR> 的验收清单在 app/kanban/acceptance-manifest.json(只读;写回只许用下面的 CLI)。
+临时口:前端 <5177>,后端 <8003>。分支 <分支名>,在自己的 worktree <路径> 里起服务,记下每个 pid。
+
+对清单里每一条(先跑 `node <plugin>/scripts/ddd.mjs acc precheck <PR> --list` 拿全表):
+1. 照 do 做一遍,看 exp 说的那个东西;多步的每步截一张,存 app/kanban/shots/pre-<PR>/<条目>-<步>.png。
+2. 写回:node <plugin>/scripts/ddd.mjs acc precheck <PR> <条目> --result ok|bad|blocked \
+     --note "<看到了什么,事实不写判断>" --env <5177>+<8003> --shot shots/pre-<PR>/<条目>-1.png --caption "<这一步看到什么>" …
+   同一条已经有上一轮的代验时加 --new-round。
+
+硬规矩(每条都要自查,违反任何一条就停下来报告,不要自己绕):
+- 命令与 URL 里出现 5175 或 8002 即违规。自查:结束时 grep -c "5175\|8002" <你的命令记录> 必须为 0。
+- 浏览器用 node playwright 自己起 chromium(带自己的 user-data-dir),不用 playwright MCP 的共享浏览器。
+- 自造的数据一律带前缀「代验-<PR>-」,跑完从界面删掉;删不掉的写进那一条的 note。自查:按前缀搜列表为 0 条。
+- exp / bad / why 一个字不改;与预期不符就写 bad,把看到的写进 note。
+- 不写 acceptance-feedback.jsonl,不点 ✓ / ✕ —— 判定是人的。
+- 收尾只杀自己记下的 pid;不在主树跑裸 vite build。
+- 不手改 acceptance-manifest.json;截图不用 acc- 前缀。
+
+交付:每条一行「条目 · ok/bad/blocked · 一句看到了什么」,外加自查结果(grep 计数、前缀搜索条数、pid 是否全停)。
+```
+
 ## 看板只在主线上改(v0.15.14)
 
 卡、manifest、`kanban.config.json` 与产物都属于主线。**feature 分支上不动 `app/kanban`**;这条线的活需要新 demo 或新卡,就在主线上单独提交。

@@ -8925,6 +8925,356 @@ console.log('T86 验收条目的证据截图(item.shots)')
   ok(sha(idxP) === offSha86, '关掉 acceptanceTab 后与本节开始前的基线逐字节相同')
 }
 
+// ============ T87 验收代验 precheck + 证据分轮 shotsHistory(0.17.16)============
+console.log('T87 验收代验(precheck)与证据分轮(shotsHistory)')
+{
+  const fx87 = mkFixture('fx87', { 's.html': demoHtml('s') })
+  const cfgP = join(fx87.kb, 'kanban.config.json'), idxP = join(fx87.kb, 'index.html')
+  const accP = join(fx87.kb, 'acceptance-manifest.json')
+  const cfg87 = JSON.parse(readFileSync(cfgP, 'utf8'))
+  const PNG = Buffer.from('89504e470d0a1a0a', 'hex')
+  mkdirSync(join(fx87.kb, 'shots', 'pre-293'), { recursive: true })
+  for (const f of ['s1.png', 'pre-293/A1.png', 'pre-293/A2.png', 'pre-293/old1.png', 'pre-293/old2.png']) writeFileSync(join(fx87.kb, 'shots', f), PNG)
+  const PRE = (result, extra = {}) => ({ at: '2026-09-24T01:12:00Z', by: 'agent', result, note: `看到 ${result}`, ...extra })
+  const LIST = (pr, items, title = '清单甲') => ({ pr, title, groups: [{ id: 'K', title: 'K 组', tip: '' }], items })
+  const ITEMS = [
+    { id: 'A1', group: 'K', title: '一', do: 'x', exp: 'y', why: '因为', precheck: PRE('ok', { env: '5177+8003' }), shots: ['shots/pre-293/A1.png'] },
+    { id: 'A2', group: 'K', title: '二', do: 'x', exp: 'y', precheck: PRE('ok') },
+    { id: 'A3', group: 'K', title: '三', do: 'x', exp: 'y', precheck: PRE('ok', { by: 'tester-a' }) },
+    { id: 'A4', group: 'K', title: '四', do: 'x', exp: 'y', precheck: PRE('bad', { note: '没弹确认' }) },
+    { id: 'A5', group: 'K', title: '五', do: 'x', exp: 'y', precheck: PRE('blocked', { note: '账号登不上' }) },
+    { id: 'A6', group: 'K', title: '六', do: 'x', exp: 'y' },
+  ]
+  const PLAIN = [{ id: 'B1', group: 'K', title: '乙一', do: 'x', exp: 'y' }]
+  const OKONLY = [{ id: 'C1', group: 'K', title: '丙一', do: 'x', exp: 'y', precheck: PRE('ok') }]
+  const setCfg = (o) => { const c = { ...cfg87, ...o }; for (const k of Object.keys(c)) if (c[k] === undefined) delete c[k]; writeFileSync(cfgP, JSON.stringify(c, null, 2) + '\n') }
+  const putAcc = (lists, current = 293) => writeFileSync(accP, JSON.stringify({ current, lists }, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx87.kb)
+  const offSha87 = sha(idxP)
+  setCfg({ acceptanceTab: true })
+  putAcc([LIST(293, ITEMS), LIST(294, PLAIN, '清单乙'), LIST(295, OKONLY, '清单丙')])
+  const r1 = runGen(NEW_SCRIPTS, fx87.kb)
+  ok(r1.status === 0, '挂了 precheck 的清单:gen exit 0', r1.stderr.slice(0, 200))
+  const on = readFileSync(idxP, 'utf8')
+  const itemOf = (pr, id, html = on) => {
+    const i = html.indexOf(`id="acc-${pr}-${id}"`)
+    if (i < 0) return ''
+    const j = html.indexOf('class="accitem"', i + 1)
+    return html.slice(i, j < 0 ? html.indexOf('</section>', i) : j)
+  }
+  const listOf = (key, html = on) => { const i = html.indexOf(`<section class="acclist" id="acc-${key}"`); return i < 0 ? '' : html.slice(i, html.indexOf('</header>', i)) }
+
+  // ---- ① 三档各渲染一次 ----
+  const a1 = itemOf(293, 'A1')
+  ok(a1.includes('<div class="accpre ok" title="跑在 5177+8003"><span class="accpreb">🤖 代验 ok</span> · <time data-accat="2026-09-24T01:12:00Z">09-24 01:12</time> · 看到:看到 ok</div>'),
+    '① ok:类名 accpre ok、🤖、「代验 ok」、时间烤 ISO 进 data-accat(可见字是 UTC 的 MM-DD HH:mm 兜底)、「看到:」+ note、env 进 title', a1.slice(0, 600))
+  ok(itemOf(293, 'A4').includes('<div class="accpre bad"><span class="accpreb">🤖 代验 不对</span>') && itemOf(293, 'A4').includes('看到:没弹确认</div>'),
+    '① bad:类名 accpre bad、「代验 不对」、note 原文')
+  ok(itemOf(293, 'A5').includes('<div class="accpre blocked"><span class="accpreb">🤖 代验 没跑成</span>') && itemOf(293, 'A5').includes('看到:账号登不上'),
+    '① blocked:类名 accpre blocked、「代验 没跑成」')
+  ok(itemOf(293, 'A3').includes('<span class="accpreb">tester-a 代验 ok</span>') && !itemOf(293, 'A3').includes('🤖'),
+    '① by 不是 agent:🤖 换成 by 原文')
+  ok(!itemOf(293, 'A6').includes('accpre') && !itemOf(293, 'A2').includes('title="跑在'), '① 没 precheck 的条目一个字节不多;没 env 不出 title')
+  const iw = a1.indexOf('class="accwhy"'), ip = a1.indexOf('class="accpre'), is = a1.indexOf('class="accshots"')
+  ok(iw > 0 && ip > iw && is > ip, '① 次序:accwhy → accpre → 证据带(accshots)', `${iw} ${ip} ${is}`)
+  ok(/<\/div>\n {16}<div class="accpre ok"/.test(a1), '① accpre 与 accwhy / accshots 同一层缩进(.accib 的直接子件)')
+  ok(on.includes('.accpre.ok { border-left-color: ') && on.includes('.accpre.bad { border-left-color: #d44c47; }') && on.includes('.accpre.blocked .accpreb { color: var(--mut); }'),
+    '① 三档色取现成令牌:ok-ink 绿 / #d44c47 红 / --mut 灰')
+  ok(/\.accpre\.ok \.accpreb \{ color: ([^;]+); \}/.exec(on)?.[1] === /\.accexp \{ border-left-color: ([^;]+); \}/.exec(on)?.[1],
+    '① ok 的绿与「预期」那支绿是同一个令牌取值')
+
+  // ---- ② 清单头计数 ----
+  ok(listOf('293').includes('<button type="button" class="accprec" data-accprec aria-pressed="false" title="只看代验不对的那几条(再点一下看全部)">代验 3 通过 · <span class="accpcb">1 不对</span> · 1 没跑成</button>'),
+    '② 3/1/1:「代验 3 通过 · 1 不对 · 1 没跑成」,有不对 → 是一枚筛选钮', listOf('293').slice(-300))
+  ok(!listOf('294').includes('accprec'), '② 一条代验都没有的清单:不出 .accprec')
+  ok(listOf('295').includes('<span class="accprec">代验 1 通过</span>'), '② 只有通过:零的档不出,也不是钮(没有可筛的)')
+  ok(listOf('293').indexOf('class="accmeta"') < listOf('293').indexOf('class="accprec"'), '② 位置:清单头「N 条」之后')
+  ok(on.includes('{"id":"A4","g":"K","pr":293,"rd":"","pc":"bad"}') && on.includes('{"id":"A6","g":"K","pr":293,"rd":""}'),
+    '② 数据块:有代验的条目多一个 pc,没有的原样')
+  ok(on.includes("&& (w.pre !== 'bad' || it.pc === 'bad')") && on.includes("var pq = ev.target.closest('[data-accprec]')")
+    && on.includes("view[pl.k].pre = view[pl.k].pre === 'bad' ? 'all' : 'bad'") && /pq = [\s\S]{0,400}syncList\(pl\); spy\(\)/.test(on),
+    '② 点它 = 第三个筛选维度:同一份 view、同一个 syncList(进度与分组计数跟着筛)')
+  ok(on.includes("document.querySelectorAll('#pane-acceptance time[data-accat]')") && on.includes("t.dataset.accfmt === 'd' ? md : md + ' ' + p2(d.getHours())"),
+    '② 时间在浏览器按本地时区换算(gen 零时间:gen 不读钟,只烤 ISO)')
+
+  // ---- ③ 形制坏了:软校验 ----
+  {
+    putAcc([LIST(293, [
+      { id: 'X1', group: 'K', title: '坏 result', do: 'x', exp: 'y', precheck: { result: 'maybe', note: 'n' } },
+      { id: 'X2', group: 'K', title: '坏时间', do: 'x', exp: 'y', precheck: { result: 'ok', note: 'n', at: '09-24 01:12' } },
+    ])])
+    const rb = runGen(NEW_SCRIPTS, fx87.kb)
+    const h = readFileSync(idxP, 'utf8')
+    ok(rb.status === 0 && rb.stderr.includes('条目 X1 的 precheck result「maybe」不在 ok / bad / blocked 里,这一行不渲') && !itemOf(293, 'X1', h).includes('accpre'),
+      '③ result 不认得:warn 点名、那一行不渲、不阻断', rb.stderr.slice(0, 300))
+    ok(rb.stderr.includes('条目 X2 的 precheck.at「09-24 01:12」不是带时区的 ISO 时刻,时间那一格不渲')
+      && itemOf(293, 'X2', h).includes('<span class="accpreb">🤖 代验 ok</span> · 看到:n</div>'),
+      '③ 时间写坏:只丢时间那一格,结论照出')
+  }
+
+  // ---- ④ 证据分轮:两轮折叠 ----
+  const HIST = [
+    { round: 'r1', at: '2026-09-22T09:00:00Z', precheck: PRE('bad', { at: '2026-09-22T09:00:00Z', note: '第一轮不对' }), shots: ['shots/pre-293/old1.png'] },
+    { round: 'r2', at: '2026-09-23T10:00:00Z', shots: [{ file: 'shots/pre-293/old2.png', caption: '第二轮' }, 'gone-h.png'] },
+    { round: 'r3', at: '2026-09-23T11:00:00Z', shots: ['gone-all.png'] },
+  ]
+  putAcc([LIST(293, [{ id: 'H1', group: 'K', title: '分轮', do: 'x', exp: 'y', why: 'w', precheck: PRE('ok'), shots: ['shots/pre-293/A2.png'], shotsHistory: HIST }, { id: 'H2', group: 'K', title: '没分轮', do: 'x', exp: 'y', shots: ['s1.png'] }])])
+  const rh = runGen(NEW_SCRIPTS, fx87.kb)
+  const hh = readFileSync(idxP, 'utf8')
+  const h1 = itemOf(293, 'H1', hh)
+  ok(rh.status === 0 && rh.stderr.includes('条目 H1 旧轮 r2 引用了不存在的截图「shots/gone-h.png」,这一格不渲')
+    && rh.stderr.includes('条目 H1 旧轮 r3 引用了不存在的截图「shots/gone-all.png」,这一格不渲'),
+    '④ 旧轮里的缺图同一档:warn 点名是哪一轮哪张、不阻断', rh.stderr.slice(0, 400))
+  ok(!hh.includes('gone-h.png') && !hh.includes('gone-all.png'), '④ 缺的那几格一个字节都没进板')
+  ok(h1.includes('<details class="accsh"><summary>旧轮 2 · 最近 r2 <time data-accat="2026-09-23T10:00:00Z" data-accfmt="d">09-23</time></summary>'),
+    '④ summary「旧轮 N · 最近 rX MM-DD」;整轮都缺且没代验的 r3 不算一轮', h1.slice(h1.indexOf('accsh') - 20, h1.indexOf('accsh') + 200))
+  ok(!/<details class="accsh" open/.test(h1), '④ 默认收起')
+  const iR2 = h1.indexOf('<div class="accshh">r2'), iR1 = h1.indexOf('<div class="accshh">r1')
+  ok(iR2 > 0 && iR1 > iR2, '④ 展开后最近的旧轮在上')
+  ok(h1.includes('<div class="accshh">r1 · <time data-accat="2026-09-22T09:00:00Z">09-22 09:00</time></div><div class="accpre bad"><span class="accpreb">🤖 代验 不对</span>')
+    && h1.includes('<div class="wtshots"><a href="shots/pre-293/old1.png" target="_blank" rel="noopener"'),
+    '④ 每轮一段:轮次 · 时间 · 该轮代验一行(同 .accpre 形制)· 缩略图带(复用 .wtshots,点开原图)')
+  ok(h1.includes('<div class="accshh">r2 · <time') && !h1.slice(iR2, iR1).includes('accpre') && h1.slice(iR2, iR1).includes('<span>第二轮</span>'),
+    '④ 没跑代验的那一轮不出代验行;caption 照旧')
+  const iS = h1.indexOf('class="accshots"'), iH = h1.indexOf('class="accsh"')
+  ok(iS > 0 && iH > iS && h1.indexOf('class="accpre') < iS, '④ 最外层:代验行 → 证据带(最新一轮)→ 旧轮折叠')
+  ok(count(h1, '<div class="accshots">') === 1 && h1.slice(iS, iH).includes('pre-293/A2.png') && !h1.slice(iS, iH).includes('old1'),
+    '④ 证据带只画最新一轮')
+  ok(!itemOf(293, 'H2', hh).includes('class="accsh"'), '④ 没 shotsHistory 的条目不出折叠')
+  ok(hh.includes('.accsh > summary::before { content: "▸ "; font-size: 10px; }') && hh.includes('.accsh[open] > summary::before { content: "▾ "; }'),
+    '④ 折叠三角与板上各处同一套 ▸/▾')
+
+  { // ④' 只有 shotsHistory、没有 precheck 的板:折叠照出,清单头不出计数
+    putAcc([LIST(293, [{ id: 'H3', group: 'K', title: '只有旧轮', do: 'x', exp: 'y', shotsHistory: [HIST[1]] }])])
+    runGen(NEW_SCRIPTS, fx87.kb)
+    const x = readFileSync(idxP, 'utf8')
+    ok(itemOf(293, 'H3', x).includes('<details class="accsh"><summary>旧轮 1 · 最近 r2') && !listOf('293', x).includes('accprec'),
+      "④' 只有旧轮:折叠照出,一条代验都没有 → 清单头不出计数")
+  }
+
+  // ---- ⑤ lazyTabs:代验行随 part 走,样式与运行时留在壳里 ----
+  {
+    putAcc([LIST(293, ITEMS)])
+    setCfg({ acceptanceTab: true, lazyTabs: true })
+    runGen(NEW_SCRIPTS, fx87.kb)
+    const part = readFileSync(join(fx87.kb, 'parts', 'acceptance.html'), 'utf8'), shell = readFileSync(idxP, 'utf8')
+    ok(part.includes('<div class="accpre bad">') && part.includes('data-accprec') && !shell.includes('<div class="accpre'),
+      '⑤ lazyTabs:代验行与计数钮在 parts/acceptance.html 里')
+    ok(shell.includes('.accpre.bad {') && shell.includes("closest('[data-accprec]')") && shell.includes('time[data-accat]'),
+      '⑤ lazyTabs:样式与运行时在壳里(注入后跑 initAcceptance 时生效)')
+    ok(/function initAcceptance[\s\S]*time\[data-accat\][\s\S]*accRoute\(\)/.test(shell), '⑤ 时间换算在 initAcceptance 里 —— part 注入之后才跑')
+    setCfg({ acceptanceTab: true, lazyTabs: undefined })
+  }
+
+  // ---- ⑥ CLI:acc precheck / --clear / --list / shots rotate ----
+  const cli = (args) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), ...args, '--dir', fx87.kb], { encoding: 'utf8' })
+  const BASE6 = () => ({ current: 293, lists: [
+    LIST(293, [
+      { id: 'P1', group: 'K', title: '一', do: 'x', exp: 'y' },
+      { id: 'P2', group: 'K', title: '二', do: 'x', exp: 'y', shots: ['s1.png'], revision: 3 },
+      { id: 'P3', group: 'K', title: '三', do: 'x', exp: 'y', precheck: PRE('bad', { at: '2026-09-22T08:00:00Z' }), shots: ['shots/pre-293/old1.png'] },
+    ]),
+    LIST([294, 296], [{ id: 'Q1', group: 'K', title: '乙', do: 'x', exp: 'y', precheck: PRE('ok') }], '清单乙'),
+  ] })
+  const canon = (d) => JSON.stringify(d, null, 2) + '\n'
+  const reset = (d = BASE6()) => { writeFileSync(accP, canon(d)); return d }
+  const readAcc = () => readFileSync(accP, 'utf8')
+  const withItem = (d, li, ii, f) => { const x = JSON.parse(JSON.stringify(d)); x.lists[li].items[ii] = f(x.lists[li].items[ii]); return x }
+  {
+    const d0 = reset()
+    const r = cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', '角标出了', '--env', '5177+8003',
+      '--shot', 'shots/pre-293/A1.png', '--caption', '角标', '--shot', join(fx87.kb, 'shots', 'pre-293', 'A2.png'), '--at', '2026-09-24T01:12:00Z'])
+    ok(r.status === 0, '⑥ precheck 写入:exit 0', r.stderr)
+    const want = withItem(d0, 0, 0, (it) => ({ ...it, precheck: { at: '2026-09-24T01:12:00Z', by: 'agent', result: 'ok', note: '角标出了', env: '5177+8003' },
+      shots: [{ file: 'shots/pre-293/A1.png', caption: '角标' }, 'shots/pre-293/A2.png'] }))
+    ok(readAcc() === canon(want), '⑥ 只改目标条目:整份文件与「原样 + 这一条换掉」逐字节相同(绝对路径换成相对看板根)', readAcc().slice(0, 400))
+    // 再写同一张图(同一写法 / 另一种写法):按 file 去重,不重复追加;precheck 覆盖
+    const r2 = cli(['acc', 'precheck', '293', 'P1', '--result', 'bad', '--note', '第二次', '--shot', 'shots/pre-293/A1.png', '--shot', 's1.png', '--shot', 'shots/s1.png', '--at', '2026-09-24T02:00:00Z'])
+    const it2 = JSON.parse(readAcc()).lists[0].items[0]
+    ok(r2.status === 0 && it2.shots.length === 3 && it2.shots[2] === 's1.png' && it2.precheck.result === 'bad' && it2.precheck.note === '第二次',
+      '⑥ shots 按 file 去重(s1.png 与 shots/s1.png 是同一张,已有的那张不再追加);precheck 覆盖成最新一次', JSON.stringify(it2))
+    // at 缺省 = 当前 UTC
+    const t0 = Date.now()
+    cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', '缺省时间'])
+    const at = JSON.parse(readAcc()).lists[0].items[0].precheck.at
+    ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at) && Math.abs(Date.parse(at) - t0) < 60000, '⑥ --at 缺省取当前 UTC(秒级 ISO,Z 结尾)', at)
+    // 多 PR 清单:按其中任一个号找得到
+    const r3 = cli(['acc', 'precheck', '#296', 'Q1', '--result', 'blocked', '--note', '没环境', '--by', 'tester-b', '--at', '2026-09-24T03:00:00Z'])
+    ok(r3.status === 0 && JSON.parse(readAcc()).lists[1].items[0].precheck.by === 'tester-b', '⑥ 多 PR 清单按任一个号(#296)都找得到;--by 照写', r3.stderr)
+  }
+  { // 紧凑写法的清单(一行):别的条目照样一个字节不动,这一条也仍是一行
+    const d0 = BASE6()
+    writeFileSync(accP, JSON.stringify(d0))
+    const before = readAcc()
+    cli(['acc', 'precheck', '293', 'P2', '--result', 'ok', '--note', 'n', '--at', '2026-09-24T01:00:00Z'])
+    const it = { ...d0.lists[0].items[1], precheck: { at: '2026-09-24T01:00:00Z', by: 'agent', result: 'ok', note: 'n' } }
+    ok(readAcc() === before.replace(JSON.stringify(d0.lists[0].items[1]), JSON.stringify(it)), '⑥ 单行清单:只换那一条,仍是单行')
+  }
+  { // 拒写:每种都 exit ≠ 0,文件一个字节不变
+    reset()
+    const s0 = sha(accP)
+    const bad = [
+      [['acc', 'precheck', '293', 'NOPE', '--result', 'ok', '--note', 'n'], '没有条目「NOPE」', '未知条目'],
+      [['acc', 'precheck', '999', 'P1', '--result', 'ok', '--note', 'n'], '没有哪份清单含 PR #999', '未知 PR'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'maybe', '--note', 'n'], '--result「maybe」不对', '非法 result'],
+      [['acc', 'precheck', '293', 'P1', '--note', 'n'], '--result「」不对', '缺 result'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok'], '--note 不能空', '缺 note'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--shot', 'pre-293/none.png'], '那里没有这个文件', '不存在的 shot'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--shot', '../outside.png'], '不在看板目录里', '看板目录外的 shot'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--shot', join(WORK, 'x.png')], '不在看板目录里', '看板目录外的绝对路径'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--shot', 'https://example.invalid/a.png'], '是远程地址', '远程 shot'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--at', '09-24'], '不是带时区的 ISO 时刻', '坏 --at'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--caption', 'c'], '--caption 要跟在某个 --shot 后面', '孤儿 --caption'],
+      [['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--round', 'r9'], '--round 只和 --new-round 一起用', '--round 没配 --new-round'],
+      [['acc', 'shots', 'rotate', '293', 'P1'], '没有可搬的', '空轮 rotate'],
+      [['acc', 'precheck', '293', 'P3', '--result', 'ok', '--note', 'n', '--new-round', '--round', 'r1', '--shot', 'pre-293/none.png'], '那里没有这个文件', '--new-round 也是先校验完才动手'],
+      [['acc', 'nope'], '不认识的子命令「nope」', '未知子命令'],
+    ]
+    for (const [args, msg, name] of bad) {
+      const r = cli(args)
+      ok(r.status !== 0 && r.stderr.includes(msg) && sha(accP) === s0, `⑥ 拒写:${name} —— 退出码非 0、说清原因、文件一个字节不变`, `${r.status} ${r.stderr.slice(0, 200)}`)
+    }
+  }
+  { // --clear / --list
+    const d0 = reset()
+    const r = cli(['acc', 'precheck', '293', 'P3', '--clear'])
+    const want = withItem(d0, 0, 2, (it) => { const x = { ...it }; delete x.precheck; return x })
+    ok(r.status === 0 && readAcc() === canon(want), '⑥ --clear:只删 precheck,shots 不动,别的字节不动', r.stderr)
+    const s1 = sha(accP)
+    const r2 = cli(['acc', 'precheck', '293', 'P3', '--clear'])
+    ok(r2.status === 0 && sha(accP) === s1 && r2.stdout.includes('本来就没有 precheck'), '⑥ --clear 在没有 precheck 的条目上:不写')
+    const r3 = cli(['acc', 'precheck', '293', 'P3', '--clear', '--result', 'ok'])
+    ok(r3.status !== 0 && sha(accP) === s1, '⑥ --clear 不许和 --result 一起')
+    reset()
+    const l = cli(['acc', 'precheck', '293', '--list'])
+    ok(l.status === 0 && /P3\s+bad\s+2026-09-22T08:00:00Z\s+看到 bad\s+\[1 张图\]/.test(l.stdout) && /P1\s+—/.test(l.stdout)
+      && l.stdout.includes('代验 0 通过 · 1 不对 · 0 没跑成 · 2 条没代验'), '⑥ --list:逐条状态 + 汇总', l.stdout)
+    const lj = JSON.parse(cli(['acc', 'precheck', '293', '--list', '--json']).stdout)
+    ok(lj.count.bad === 1 && lj.items.length === 3 && lj.items[2].precheck.result === 'bad', '⑥ --list --json 形状')
+  }
+  { // rotate:shots 空、history 尾项正确、precheck 随轮走;只动这一条
+    const d0 = reset()
+    const r = cli(['acc', 'shots', 'rotate', '293', 'P3'])
+    const it = JSON.parse(readAcc()).lists[0].items[2]
+    const tail = it.shotsHistory[it.shotsHistory.length - 1]
+    ok(r.status === 0 && Array.isArray(it.shots) && it.shots.length === 0 && !('precheck' in it), '⑦ rotate:shots 清空、precheck 删除', JSON.stringify(it))
+    ok(tail.round === 'r1' && tail.at === '2026-09-22T08:00:00Z' && tail.precheck.result === 'bad' && tail.shots.join() === 'shots/pre-293/old1.png',
+      '⑦ history 尾项:自动编号 r1、时间取那一轮代验的 at、precheck 与 shots 随轮走', JSON.stringify(tail))
+    const want = withItem(d0, 0, 2, (x) => { const y = { ...x, shots: [], shotsHistory: [{ round: 'r1', at: x.precheck.at, precheck: x.precheck, shots: x.shots }] }; delete y.precheck; return y })
+    ok(readAcc() === canon(want), '⑦ rotate 只动目标条目:整份与「原样 + 这一条换掉」逐字节相同')
+    cli(['acc', 'precheck', '293', 'P3', '--result', 'ok', '--note', '修好了', '--shot', 'shots/pre-293/A2.png', '--at', '2026-09-23T12:00:00Z'])
+    const r2 = cli(['acc', 'shots', 'rotate', '293', 'P3', '--round', 'r1'])
+    ok(r2.status !== 0 && r2.stderr.includes('已经有「r1」'), '⑦ --round 撞名:拒')
+    const r3 = cli(['acc', 'shots', 'rotate', '293', 'P3', '--at', '2026-09-23T13:00:00Z'])
+    const h = JSON.parse(readAcc()).lists[0].items[2].shotsHistory
+    ok(r3.status === 0 && h.length === 2 && h[1].round === 'r2' && h[1].at === '2026-09-23T13:00:00Z' && h[1].precheck.note === '修好了',
+      '⑦ 第二次 rotate:按 history 长度编 r2,--at 显式给的优先', JSON.stringify(h[1]))
+    const rg = runGen(NEW_SCRIPTS, fx87.kb)
+    const x = itemOf(293, 'P3', readFileSync(idxP, 'utf8'))
+    const outer = x.slice(0, x.indexOf('<details class="accsh">'))
+    ok(rg.status === 0 && outer.length > 0 && !outer.includes('class="accpre') && !outer.includes('class="accshots"') && x.includes('<summary>旧轮 2 · 最近 r2'),
+      '⑦ rotate 之后渲染:最外层没有代验行与证据带(都随轮进了折叠),折叠写「旧轮 2 · 最近 r2」', x.slice(0, 400))
+  }
+  { // --new-round ≡ rotate + precheck
+    const args = ['--result', 'ok', '--note', '第二轮通过', '--shot', 'shots/pre-293/A2.png', '--at', '2026-09-24T05:00:00Z']
+    reset()
+    cli(['acc', 'shots', 'rotate', '293', 'P3'])
+    cli(['acc', 'precheck', '293', 'P3', ...args])
+    const viaTwo = readAcc()
+    reset()
+    const r = cli(['acc', 'precheck', '293', 'P3', ...args, '--new-round'])
+    ok(r.status === 0 && readAcc() === viaTwo, '⑦ --new-round 与「先 rotate 再写」逐字节等价', r.stderr)
+    reset()
+    const r2 = cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--new-round', '--at', '2026-09-24T05:00:00Z'])
+    ok(r2.status === 0 && !('shotsHistory' in JSON.parse(readAcc()).lists[0].items[0]) && r2.stderr.includes('没有可搬的'),
+      '⑦ --new-round 在没有上一轮的条目上:不造空轮,直接写,并说一句')
+  }
+
+  // ---- ⑧ audit:有 bad 出一条家务,没有不出 ----
+  {
+    putAcc([LIST(293, ITEMS), LIST(294, [{ id: 'B2', group: 'K', title: 'x', do: 'x', exp: 'y', precheck: PRE('bad') }, { id: 'B3', group: 'K', title: 'x', do: 'x', exp: 'y', shotsHistory: [{ round: 'r1', precheck: PRE('bad'), shots: [] }] }], '清单乙')])
+    const j = JSON.parse(runAudit(fx87.kb, ['--json']).stdout)
+    const e = (j.chore || []).find((x) => x.key === 'precheckBad')
+    ok(e && e.n === 2 && e.text.startsWith('代验发现 2 条与预期不符待人看:#293 A4 · #294 B2'), '⑧ audit:代验不对 2 条,按 PR 点名(旧轮里的不对不算)', JSON.stringify(e))
+    ok(j.summary && j.summary.includes(' · 代验不对待人看 2 条(#293 A4、#294 B2)') || j.summary.includes(':代验不对待人看 2 条(#293 A4、#294 B2)'),
+      '⑧ 守卫那一条里是短标签(人话、点到 PR 条目、条内没有冒号)', j.summary)
+    putAcc([LIST(293, ITEMS.filter((it) => it.precheck?.result !== 'bad'))])
+    const j2 = JSON.parse(runAudit(fx87.kb, ['--json']).stdout)
+    ok(!(j2.chore || []).some((x) => x.key === 'precheckBad'), '⑧ 没有 bad:不出这一类')
+  }
+  { // 守卫:这一类排在积压之前(CHORE_KEYS 次序)
+    setCfg({ acceptanceTab: true, wip: { soft: 0, hard: 0 } })
+    putAcc([LIST(293, ITEMS)])
+    const g = runStop(NEW_SCRIPTS, fx87.root)
+    let msg = ''
+    try { msg = JSON.parse(g.stdout || '{}').systemMessage || '' } catch {}
+    const last = msg.split('\n').pop()
+    ok(/代验不对待人看 1 条\(#293 A4\) · 可立即做 \d+\/0/.test(last), '⑧ 守卫那一条:代验不对紧挨在积压之前', last)
+    setCfg({ acceptanceTab: true, wip: undefined })
+  }
+
+  // ---- ⑨ 冻结:没有 precheck / shotsHistory 的板,产物与 0.17.15 逐字节相同 ----
+  {
+    const TAG15 = 'demo-driven-development--v0.17.15'
+    const have15 = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG15}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+    if (!have15) console.log(`  · 跳过:本地没有 ${TAG15}(浅克隆 / 未取 tag),0.17.15 冻结对照本次不比`)
+    else {
+      const oldRoot = join(WORK, 'v01715')
+      mkdirSync(oldRoot, { recursive: true })
+      const tar = join(WORK, 'v01715.tar')
+      spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG15], { cwd: REPO })
+      spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+      const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+      const plain = ITEMS.map(({ precheck, ...rest }) => rest) // A1 仍带 0.17.15 的 shots
+      const mk = (name, accOn, lazy, fb) => {
+        const fx = mkFixture(name, { 's.html': demoHtml('s') })
+        mkdirSync(join(fx.kb, 'shots', 'pre-293'), { recursive: true })
+        writeFileSync(join(fx.kb, 'shots', 'pre-293', 'A1.png'), PNG)
+        const c = JSON.parse(readFileSync(join(fx.kb, 'kanban.config.json'), 'utf8'))
+        c.stickyTabs = true
+        if (lazy) c.lazyTabs = true
+        if (accOn) {
+          c.acceptanceTab = true
+          if (fb) c.acceptanceFeedback = true
+          writeFileSync(join(fx.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 293, lists: [LIST(293, plain), LIST(294, PLAIN, '清单乙')] }, null, 2) + '\n')
+        }
+        writeFileSync(join(fx.kb, 'kanban.config.json'), JSON.stringify(c, null, 2) + '\n')
+        return fx
+      }
+      for (const [accOn, lazy, fb, label] of [[false, false, false, 'acceptanceTab 关'], [false, true, false, 'acceptanceTab 关 + lazyTabs'],
+        [true, false, false, 'acceptanceTab 开'], [true, true, false, 'acceptanceTab 开 + lazyTabs'], [true, true, true, 'acceptanceTab + acceptanceFeedback + lazyTabs']]) {
+        const tag = `${accOn ? 'a' : 'x'}${lazy ? 'l' : 'e'}${fb ? 'f' : ''}`
+        const a = mk(`fx87z-old-${tag}`, accOn, lazy, fb), b = mk(`fx87z-new-${tag}`, accOn, lazy, fb)
+        runGen(join(oldRoot, 'scripts'), a.kb); runGen(NEW_SCRIPTS, b.kb)
+        const same = ml(join(a.kb, 'index.html')) === ml(join(b.kb, 'index.html'))
+          && (!lazy || !accOn || ml(join(a.kb, 'parts', 'acceptance.html')) === ml(join(b.kb, 'parts', 'acceptance.html')))
+        ok(same, `⑨ 冻结:${label}、没有 precheck / shotsHistory —— 归一化版本戳后与 0.17.15 逐字节相同(样式表也不多一行)`)
+      }
+      const ya = mk('fx87y-old', true), yb = mk('fx87y-new', true)
+      writeFileSync(join(yb.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 293, lists: [LIST(293, ITEMS)] }, null, 2) + '\n')
+      writeFileSync(join(ya.kb, 'acceptance-manifest.json'), JSON.stringify({ current: 293, lists: [LIST(293, ITEMS)] }, null, 2) + '\n')
+      runGen(join(oldRoot, 'scripts'), ya.kb); runGen(NEW_SCRIPTS, yb.kb)
+      ok(ml(join(ya.kb, 'index.html')) !== ml(join(yb.kb, 'index.html')) && !readFileSync(join(ya.kb, 'index.html'), 'utf8').includes('accpre'),
+        '⑨ 有 precheck 的板产物确实变了(旧版不认这个字段,一个字不渲)')
+    }
+  }
+
+  // ---- ⑩ 路径规矩只有一把尺:gen 与 CLI 共用 accpre.mjs 的 shotHref ----
+  {
+    const { shotHref } = await import(join(NEW_SCRIPTS, 'accpre.mjs'))
+    const gsrc = readFileSync(join(NEW_SCRIPTS, 'gen.mjs'), 'utf8'), dsrc = readFileSync(join(NEW_SCRIPTS, 'ddd.mjs'), 'utf8')
+    ok(!/const shotHref\s*=/.test(gsrc) && /import \{[^}]*\bshotHref\b[^}]*\} from '\.\/accpre\.mjs'/.test(gsrc) && /import \{[^}]*\bshotHref\b[^}]*\} from '\.\/accpre\.mjs'/.test(dsrc),
+      '⑩ shotHref 只定义在 accpre.mjs 一处,gen 与 ddd.mjs 都从那儿 import')
+    ok(shotHref('x.png') === 'shots/x.png' && shotHref({ file: 'evidence/a.png' }) === 'evidence/a.png' && shotHref('') === '' && shotHref({}) === '',
+      '⑩ 规矩本身:纯文件名落 shots/,带 / 的按相对看板根,空的给空')
+  }
+
+  delete cfg87.acceptanceTab
+  writeFileSync(cfgP, JSON.stringify(cfg87, null, 2) + '\n')
+  runGen(NEW_SCRIPTS, fx87.kb)
+  ok(sha(idxP) === offSha87, '关掉 acceptanceTab 后与本节开始前的基线逐字节相同')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

@@ -9,6 +9,68 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.16] - 2026-09-24
+
+### Added
+
+- Acceptance items take an optional `precheck` — `{at, by, result, note, env}` —
+  the record of an agent running that item first. `result` is `ok` (what it saw
+  matches `exp`), `bad` (it does not; `note` says what was seen) or `blocked`
+  (it could not be run). It renders as one line inside the item, after `why`
+  and before the evidence strip: `🤖 代验 ok · 09-24 01:12 · 看到:…`, the label
+  in the existing tokens (the `ok-ink` green of `预期`, the `#d44c47` red of
+  `不对`, `--mut` grey for `没跑成`). When `by` is not `agent`, its text replaces
+  the robot. The time is baked as ISO into `data-accat` and turned into local
+  `MM-DD HH:mm` by the browser, so `gen` still never reads a clock. A pre-check
+  is a lead, not a verdict: it is not counted in `已判 N/M` and does not touch
+  `revision`, so nobody's ticks are voided because an agent ran the list.
+- The checklist header gains `代验 3 通过 · 1 不对 · 1 没跑成` next to the item
+  count, only on checklists where at least one item has a `precheck`. When
+  something is `bad` it is a button: one click narrows the list to those items,
+  a second click brings the rest back — a third dimension of the same `view`
+  the round and pull-request chips use, so progress and group counts follow
+  the filter. The sidebar and the two chip rows at 640px and below are
+  unchanged.
+- Evidence comes in rounds. `shots` keeps its meaning — the latest round — and
+  an optional `shotsHistory: [{round, at, precheck?, shots}]` holds the earlier
+  ones, oldest first. Below the evidence strip a collapsed
+  `<details class="accsh">` reads `旧轮 N · 最近 r1 09-23`; opened, it lists each
+  round newest first with its time, its pre-check line if it had one, and its
+  thumbnails (the same `.wtshots` cells). A missing file in an earlier round is
+  dropped with one warning, exactly as in `shots`; a round left with neither a
+  picture nor a pre-check is not shown.
+- `ddd acc precheck <pr> <item> --result ok|bad|blocked --note "…" [--env]
+  [--by] [--shot <path> [--caption "…"]]… [--at ISO] [--new-round]` writes one
+  item's pre-check and appends its shots, deduplicated by file. Every shot must
+  be a file under the board directory, read with the same path rule the board
+  uses (`shotHref`, now in `scripts/accpre.mjs` and imported by both `gen` and
+  the CLI); an absolute path inside the board is stored relative to it. `--at`
+  defaults to the current UTC time. `--clear` drops the pre-check and leaves
+  the shots; `acc precheck <pr> --list` prints the checklist's pre-check table.
+  `ddd acc shots rotate <pr> <item> [--round r2] [--at ISO]` moves the current
+  shots and pre-check to the end of `shotsHistory` (round names default to
+  `r1`, `r2`… by history length; the round's time defaults to its own
+  pre-check's `at`), and `--new-round` on `acc precheck` is exactly that
+  rotation followed by the write. The CLI replaces only the byte range of the
+  target item in `acceptance-manifest.json` — every other item, list and the
+  header stay byte for byte — and refuses an unknown checklist or item, a bad
+  `result`, a missing, remote or out-of-board shot, or a malformed `--at`
+  before writing anything, with a non-zero exit.
+- `ddd audit` gains a ninth chore, `代验发现 N 条与预期不符待人看:#293 AC3、AC4`,
+  counting only the latest round. On Stop it joins the one-line notice as
+  `代验不对待人看 N 条(#293 AC3、AC4)`, just before the backlog count.
+- The `ddd-workflow` skill gets a section on pre-checks: eight rules for the
+  agent, each with the check that tells it whether it broke the rule (no
+  `5175`/`8002` in its commands, its own browser, prefixed test data removed
+  afterwards, at least one shot per item, `exp`/`bad`/`why` untouched, no
+  verdicts, only its own processes stopped, write-back through the CLI into
+  `shots/pre-<pr>/`), and a brief to paste into the agent's prompt.
+
+A board with no `precheck` and no `shotsHistory` anywhere builds byte for byte
+what 0.17.15 built, stylesheet included, with lazy tabs on or off: the new
+styles and runtime are emitted only when some item carries one of the two
+fields.
+
 ## [0.17.15] - 2026-09-23
 
 ### Added

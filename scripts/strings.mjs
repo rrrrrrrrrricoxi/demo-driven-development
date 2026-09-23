@@ -18,6 +18,12 @@ const depRow = (r, words, br = '()') => `${r.id}${br[0]}${r.items.map((x) => dep
  * 剩下的只报个总数 —— 点名是为了认得出是哪张卡,不是为了把一段列表塞回这一行里。
  */
 const zhCards = (e) => `${e.ids.join('、')}${e.n > e.ids.length ? ` 等 ${e.n} 张` : ''}`
+/** 代验不对的点名(v0.17.16):按 PR 聚成「#293 AC3、AC4 · #294 AD1」 */
+const byPr = (rows, sep) => {
+  const m = new Map()
+  for (const r of rows) { if (!m.has(r.pr)) m.set(r.pr, []); m.get(r.pr).push(r.id) }
+  return [...m.entries()].map(([pr, ids]) => `#${pr} ${ids.join(sep)}`)
+}
 const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} in all` : ''}`
 
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
@@ -139,6 +145,9 @@ const zh = {
   },
   depsUnlocked: (rows, total) =>
     `前置已清:${rows.map((r) => depRow(r, DEP_WORDS_ZH)).join('、')}${total > rows.length ? ` …等 ${total} 张` : ''} —— 这几张卡等的东西都清掉了,可以开工。`,
+  // v0.17.16:代验不对 —— 只提示,不催人判(判定仍然只有人能点)
+  precheckBad: (rows) =>
+    `代验发现 ${rows.length} 条与预期不符待人看:${byPr(rows, '、').join(' · ')} —— agent 先跑过一遍、记下与预期不符,是人去复跑与判定的先手线索,不是结论。`,
   // waiting > 0 才提前置那半句:板上一条 after 都没有时,这句与 0.15.x 一字不差
   wipOver: (n, hard, waiting = 0) =>
     `⚠ 看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
@@ -160,6 +169,8 @@ const zh = {
     reopen: (e) => `已收但 PR 还开着 ${zhCards(e)}`,
     hold: (e) => `暂不收账满 ${SETTLE_HOLD_DAYS} 天 ${zhCards(e)}`,
     depsUnlocked: (e) => `前置已清可开工 ${zhCards(e)}`,
+    // v0.17.16:点的是「PR 条目」,不是卡号 —— 代验是清单条目上的事
+    precheckBad: (e) => `代验不对待人看 ${e.n} 条(${e.ids.join('、')}${e.n > e.ids.length ? ` 等 ${e.n} 条` : ''})`,
     // v0.17.11:常驻。写成「N/上限」是为了一眼看出还剩多少额度;超了才多两个字「超上限」。
     wip: (e) => `可立即做 ${e.n}/${e.hard}${e.n > e.hard ? ' 超上限' : ''}${e.waiting ? `(另 ${e.waiting} 张等前置)` : ''}`,
   },
@@ -260,6 +271,19 @@ const zh = {
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
   card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
 
+验收代验(v0.17.16,板上开了 acceptanceTab 时;写 acceptance-manifest.json 里的那一条,别的条目一个字节不动):
+  acc precheck <pr> <条目> --result ok|bad|blocked --note "看到了什么" [--env 5177+8003] [--by agent]
+               [--shot <路径> [--caption "…"]]… [--at ISO] [--new-round [--round r2]]
+      记一条代验:agent 先跑一遍、看到了什么。ok = 与预期一致,bad = 不一致,blocked = 没跑成。
+      --shot 可以给几组,每张都得真在看板目录里(纯文件名落 shots/ 下,带 / 的按相对看板根);
+      按文件去重追加进这一条的 shots。--at 缺省取当前 UTC。--new-round:先把上一轮搬进旧轮再写。
+      代验不替人判:不进「已判 N/M」,不改 revision。
+  acc precheck <pr> <条目> --clear   删掉这一条的 precheck(shots 不动)
+  acc precheck <pr> --list           这份清单各条的代验状态
+  acc shots rotate <pr> <条目> [--round r2] [--at ISO]
+      把当前这一轮(shots + precheck)整体搬进 shotsHistory 末尾,shots 清空、precheck 删除。
+      --round 缺省按旧轮数自动编号(r1、r2…);--at 缺省取那一轮代验的时间,没有就取现在。
+
 其它:
   audit [--json] [--session <session 标签>]
       只读跑一遍看板审计,把三级(阻断 / 坏了 / 家务)的完整文案打全 —— 收工时守卫把「家务」
@@ -281,7 +305,38 @@ const zh = {
     },
     unknownFlag: (flag) => `ddd:不认识的旗子 ${flag}。看 --help;要把它当普通参数传就先写一个 -- 隔开。`,
     flagNeedsValue: (name) => `ddd:--${name} 后面要跟一个值。`,
-    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / audit / export / pr-sync;看 --help。`,
+    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / acc … / audit / export / pr-sync;看 --help。`,
+    // v0.17.16:验收代验。每条拒写都说清「一个字节都没写」—— agent 跑在循环里,半截写进去的清单比报错难收拾得多。
+    acc: {
+      unknownCmd: (cmd) => `ddd acc:不认识的子命令「${cmd}」。可用:precheck / shots rotate;看 --help。`,
+      noManifest: (err) => `ddd acc:读不了 acceptance-manifest.json(不在,或不是合法 JSON),一个字节都没写:${err}`,
+      prBad: (v) => `ddd acc:PR 号「${v}」不对,要一个正整数(#293 或 293)。`,
+      noList: (n) => `ddd acc:acceptance-manifest.json 里没有哪份清单含 PR #${n},一个字节都没写。`,
+      noItem: (n, id, ids) => `ddd acc:#${n} 那份清单里没有条目「${id}」,一个字节都没写。有的是:${ids.join(' ') || '(空)'}`,
+      precheckUsage: () => 'ddd acc precheck:写法 acc precheck <pr> <条目> --result ok|bad|blocked --note "看到了什么" [--shot <路径> [--caption "…"]]…;--clear 删掉;acc precheck <pr> --list 看全表。',
+      rotateUsage: () => 'ddd acc shots:写法 acc shots rotate <pr> <条目> [--round r2] [--at ISO]。',
+      resultBad: (v) => `ddd acc precheck:--result「${v ?? ''}」不对,只认 ok(与预期一致)/ bad(不一致)/ blocked(没跑成),一个字节都没写。`,
+      noteNeeded: () => 'ddd acc precheck:--note 不能空 —— 写看到了什么(事实,不写判断),一个字节都没写。',
+      atBad: (v) => `ddd acc:--at「${v}」不是带时区的 ISO 时刻(如 2026-09-24T01:12:00Z),一个字节都没写。`,
+      captionAlone: () => 'ddd acc precheck:--caption 要跟在某个 --shot 后面(给它前面那张图配说明)。',
+      clearAlone: () => 'ddd acc precheck --clear:只删 precheck,后面别再跟 --result / --note / --shot 这些。',
+      roundOnly: () => 'ddd acc precheck:--round 只和 --new-round 一起用(给搬走的那一轮起名)。',
+      roundDup: (r) => `ddd acc:旧轮里已经有「${r}」了,换一个名字(或者不写 --round,自动编号),一个字节都没写。`,
+      shotRemote: (v) => `ddd acc precheck:--shot「${v}」是远程地址 —— 代验截图要落在看板目录里(建议 shots/pre-<PR>/),一个字节都没写。`,
+      shotOutside: (v) => `ddd acc precheck:--shot「${v}」不在看板目录里 —— 板上只渲看板目录下的图(建议 shots/pre-<PR>/),一个字节都没写。`,
+      shotMissing: (v, href) => `ddd acc precheck:--shot「${v}」按看板的路径规矩是 ${href},那里没有这个文件,一个字节都没写。纯文件名落 shots/ 下,带 / 的按相对看板根。`,
+      shotAccPrefix: (v) => `⚠ ddd acc precheck:「${v}」以 acc- 打头 —— 那是验收反馈里人贴的截图(默认 gitignore,合并满期会被清),代验截图请放 shots/pre-<PR>/。这次照写。`,
+      rotateEmpty: (n, id) => `ddd acc shots rotate:#${n} ${id} 这一轮没有 shots 也没有 precheck,没有可搬的,一个字节都没写。`,
+      clearNone: (n, id) => `ddd acc precheck --clear:#${n} ${id} 本来就没有 precheck,一个字节都没写。`,
+      cleared: (n, id) => `ddd acc precheck --clear:#${n} ${id} 的 precheck 删了(shots 没动)。`,
+      rotated: (n, id, round, k) => `ddd acc shots rotate:#${n} ${id} 当前这一轮搬进旧轮「${round}」(${k} 张图),shots 清空、precheck 已随轮走。`,
+      written: (n, id, result, added, round) => `ddd acc precheck:#${n} ${id} 代验 ${result}${added ? `,shots 追加 ${added} 张` : ''}${round ? `;上一轮先搬进了旧轮「${round}」` : ''}。`,
+      newRoundNothing: () => '(--new-round:这一条还没有上一轮的图和代验,没有可搬的,直接写。)',
+      listHead: (n, title) => `#${n} · ${title}`,
+      listNone: () => '—',
+      listTail: (c) => `代验 ${c.ok} 通过 · ${c.bad} 不对 · ${c.blocked} 没跑成 · ${c.none} 条没代验`,
+      listShots: (k, h) => `${k} 张图${h ? ` · 旧轮 ${h}` : ''}`,
+    },
     unknownCardCmd: (cmd, list) => `ddd card:不认识的子命令「${cmd}」。可用:${list.join(' / ')};看 --help。`,
     kindBad: (kind) => `ddd card new:第一个参数要写 backlog 或 decision(给的是「${kind}」)。`,
     readFailed: (what, err) => `ddd:读不了 ${what}(不在,或不是合法 JSON):${err}`,
@@ -602,6 +657,8 @@ const en = {
   },
   wipOver: (n, hard, waiting = 0) =>
     `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  precheckBad: (rows) =>
+    `Pre-check found ${rows.length} item(s) not as expected, waiting for a person: ${byPr(rows, ', ').join(' · ')} — an agent ran them first and saw something other than the expectation; it is a lead for the person re-running and judging them, not a verdict.`,
   // v0.17.11: reported under the limit too — the same fact, minus the advice to clear the pile.
   wipUnder: (n, hard, waiting = 0) =>
     `Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, against config.wip.hard = ${hard} — under the limit. Since v0.17.11 this count is always reported, so the headroom is visible before the limit is hit.`,
@@ -617,6 +674,7 @@ const en = {
     reopen: (e) => `settled while a pull request is still open ${enCards(e)}`,
     hold: (e) => `on settle hold for ${SETTLE_HOLD_DAYS} days ${enCards(e)}`,
     depsUnlocked: (e) => `prerequisites cleared, ready to start ${enCards(e)}`,
+    precheckBad: (e) => `pre-check says not as expected ${e.n} item(s) (${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} in all` : ''})`,
     // v0.17.11: always on. "N/limit" shows the headroom at a glance; over it adds three words.
     wip: (e) => `can start now ${e.n}/${e.hard}${e.n > e.hard ? ' over the limit' : ''}${e.waiting ? ` (${e.waiting} more waiting on prerequisites)` : ''}`,
   },
@@ -725,6 +783,24 @@ Cards:
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
   card history <id>                 git history of that card's file (needs one file per card)
 
+Acceptance pre-checks (v0.17.16, on boards with acceptanceTab; writes that one item of
+acceptance-manifest.json and leaves every other byte alone):
+  acc precheck <pr> <item> --result ok|bad|blocked --note "what was seen" [--env 5177+8003] [--by agent]
+               [--shot <path> [--caption "…"]]… [--at ISO] [--new-round [--round r2]]
+      Record a pre-check: an agent ran the item first and says what it saw. ok = matches the
+      expectation, bad = does not, blocked = could not be run. --shot can repeat; every file
+      must exist under the board directory (a bare name lives in shots/, anything with a / is
+      relative to the board root) and is appended to the item's shots, deduplicated by file.
+      --at defaults to the current UTC time. --new-round moves the previous round into the
+      history first. A pre-check never judges for a person: it is not counted in "judged N/M"
+      and does not bump the revision.
+  acc precheck <pr> <item> --clear   drop that item's precheck (its shots stay)
+  acc precheck <pr> --list           pre-check status of every item in that checklist
+  acc shots rotate <pr> <item> [--round r2] [--at ISO]
+      Move the current round (shots + precheck) to the end of shotsHistory; shots is emptied
+      and precheck removed. --round defaults to r1, r2… by history length; --at defaults to
+      that round's pre-check time, or now when it has none.
+
 Other:
   audit [--json] [--session <session tag>]
       Run the board audits read-only and print all three levels (blocking / broken / chores) in
@@ -750,7 +826,37 @@ kanban.config.json). This command never commits — git add the card files yours
     },
     unknownFlag: (flag) => `ddd: unknown flag ${flag}. See --help; to pass it as a plain argument, put a -- in front of it.`,
     flagNeedsValue: (name) => `ddd: --${name} needs a value after it.`,
-    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / audit / export / pr-sync; see --help.`,
+    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / acc … / audit / export / pr-sync; see --help.`,
+    acc: {
+      unknownCmd: (cmd) => `ddd acc: unknown subcommand "${cmd}". Available: precheck / shots rotate; see --help.`,
+      noManifest: (err) => `ddd acc: cannot read acceptance-manifest.json (missing, or not valid JSON); nothing was written: ${err}`,
+      prBad: (v) => `ddd acc: "${v}" is not a pull request number (#293 or 293).`,
+      noList: (n) => `ddd acc: no checklist in acceptance-manifest.json covers pull request #${n}; nothing was written.`,
+      noItem: (n, id, ids) => `ddd acc: the checklist for #${n} has no item "${id}"; nothing was written. It has: ${ids.join(' ') || '(none)'}`,
+      precheckUsage: () => 'ddd acc precheck: acc precheck <pr> <item> --result ok|bad|blocked --note "what was seen" [--shot <path> [--caption "…"]]…; --clear drops it; acc precheck <pr> --list shows the table.',
+      rotateUsage: () => 'ddd acc shots: acc shots rotate <pr> <item> [--round r2] [--at ISO].',
+      resultBad: (v) => `ddd acc precheck: --result "${v ?? ''}" is not one of ok (matches) / bad (does not) / blocked (could not run); nothing was written.`,
+      noteNeeded: () => 'ddd acc precheck: --note cannot be empty — say what was seen (a fact, not a verdict); nothing was written.',
+      atBad: (v) => `ddd acc: --at "${v}" is not an ISO time with a zone (e.g. 2026-09-24T01:12:00Z); nothing was written.`,
+      captionAlone: () => 'ddd acc precheck: --caption has to follow a --shot (it captions the shot before it).',
+      clearAlone: () => 'ddd acc precheck --clear: only drops the precheck; do not pass --result / --note / --shot with it.',
+      roundOnly: () => 'ddd acc precheck: --round only goes with --new-round (it names the round being moved).',
+      roundDup: (r) => `ddd acc: the history already has a round "${r}"; pick another name (or leave --round out to number it); nothing was written.`,
+      shotRemote: (v) => `ddd acc precheck: --shot "${v}" is a remote address — pre-check shots belong under the board directory (shots/pre-<PR>/ is the convention); nothing was written.`,
+      shotOutside: (v) => `ddd acc precheck: --shot "${v}" is outside the board directory — the board only renders pictures under it (shots/pre-<PR>/ is the convention); nothing was written.`,
+      shotMissing: (v, href) => `ddd acc precheck: --shot "${v}" resolves to ${href} under the board's path rule and there is no such file; nothing was written. A bare name lives in shots/, anything with a / is relative to the board root.`,
+      shotAccPrefix: (v) => `⚠ ddd acc precheck: "${v}" starts with acc- — that prefix belongs to screenshots people attach as acceptance feedback (gitignored by default and pruned after merge); put pre-check shots in shots/pre-<PR>/. Written anyway.`,
+      rotateEmpty: (n, id) => `ddd acc shots rotate: #${n} ${id} has neither shots nor a precheck in its current round, so there is nothing to move; nothing was written.`,
+      clearNone: (n, id) => `ddd acc precheck --clear: #${n} ${id} has no precheck; nothing was written.`,
+      cleared: (n, id) => `ddd acc precheck --clear: dropped the precheck of #${n} ${id} (its shots stay).`,
+      rotated: (n, id, round, k) => `ddd acc shots rotate: moved the current round of #${n} ${id} into history as "${round}" (${k} shot${k === 1 ? '' : 's'}); shots emptied, the precheck went with the round.`,
+      written: (n, id, result, added, round) => `ddd acc precheck: #${n} ${id} pre-check ${result}${added ? `, ${added} shot${added === 1 ? '' : 's'} appended` : ''}${round ? `; the previous round moved into history as "${round}" first` : ''}.`,
+      newRoundNothing: () => '(--new-round: this item has no previous shots or pre-check to move, so it was written straight away.)',
+      listHead: (n, title) => `#${n} · ${title}`,
+      listNone: () => '—',
+      listTail: (c) => `pre-check ${c.ok} ok · ${c.bad} bad · ${c.blocked} blocked · ${c.none} not pre-checked`,
+      listShots: (k, h) => `${k} shot${k === 1 ? '' : 's'}${h ? ` · ${h} earlier round${h === 1 ? '' : 's'}` : ''}`,
+    },
     unknownCardCmd: (cmd, list) => `ddd card: unknown subcommand "${cmd}". Available: ${list.join(' / ')}; see --help.`,
     kindBad: (kind) => `ddd card new: the first argument must be backlog or decision (got "${kind}").`,
     readFailed: (what, err) => `ddd: cannot read ${what} (missing, or not valid JSON): ${err}`,
