@@ -10,7 +10,8 @@
 //                 清单引用未知卡号 / 分支工作区里有生成物改动 / 生成物处在冲突里 /
 //                 .gitattributes 写了 merge=ours 而驱动未配 / 看板改动落在非主线分支。
 //   家务 chore  —— 平时常有,是每条线各自的日常账,谁在意谁去看:长正文(老卡)、验收反馈未提交、
-//                 可清截图、待收账、收早了、挂账到期、前置已清、积压计数 —— 共八类,顺序见 CHORE_KEYS。
+//                 可清截图、待收账、收早了、挂账到期、前置已清、代验不对、积压计数 —— 共九类,顺序见 CHORE_KEYS
+//                 (代验不对是 v0.17.16 加的第九类,排在积压之前:积压自 0.17.11 起固定压最后一条)。
 //                 (积压那一类自 v0.17.11 起常驻:配了 config.wip 的板每次收工都报一个「可立即做 N/上限」。)
 //
 // 「产物版本戳更新 / plugin 安装异常 / 非主线不重渲 / 无戳自愈 / gen 跑失败」那几条不在这份模块里:
@@ -26,15 +27,16 @@ import { DEPS_FRESH_DAYS, afterOf, afterStates, clearedAt, depCtxFrom, openCount
 import { GEN_RE, dirtyBoardFiles, genAttrPaths } from './board-branch-check.mjs'
 import { accFeedback } from './accfb.mjs'
 import { ACC_FB_PRUNE_DAYS, ACC_FB_PRUNE_MIN, prunable } from './acc-feedback-prune.mjs'
+import { readPrecheck } from './accpre.mjs'
 
 /** 三份头文件 →(文件, 数组键, 卡目录子目录);cardsDir 开着时后两者的真源在卡目录 */
 export const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifest.json', 'items', 'backlog'], ['decisions-manifest.json', 'entries', 'decisions']]
 
 /**
- * 家务八类在那一条里的固定次序 —— 也正是 0.17.4 及以前守卫各段的出场次序。
+ * 家务九类在那一条里的固定次序 —— 也正是 0.17.4 及以前守卫各段的出场次序。
  * 固定,是因为这一条每次收工都出:次序一变,人就得重新读一遍才知道哪个数是哪类。
  */
-export const CHORE_KEYS = ['longText', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'wip']
+export const CHORE_KEYS = ['longText', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'precheckBad', 'wip']
 
 /**
  * 家务那几条里点得到名的卡号上限(v0.17.7)。点名是为了「不必先跑一条命令才知道是哪张卡」,
@@ -266,6 +268,32 @@ export function auditAcceptance(ctx, S) {
     }
     for (const c of l.cards || []) if (!ids.has(String(c))) out.push({ key: 'accUnknownCard', level: 'broken', n: 1, text: S.accUnknownCard(l.key, c) })
   }
+  return out
+}
+
+/**
+ * 代验不对(家务,v0.17.16,acceptanceTab 开 + 清单在场才跑):agent 先跑过一遍、记下「与预期不符」的条目,
+ * 等人去看。只提示 —— 代验不替人判,这一条也不催人判,只让「有几条 agent 说不对」不被埋在清单里。
+ * 只数最新一轮(items[].precheck);旧轮里的「不对」是已经翻过去的那一页。口径与板上的红字同一道
+ * readPrecheck:板上画成「代验 不对」的,这里一条不少。
+ */
+export function auditPrecheck(ctx, S) {
+  const out = []
+  if (ctx.cfg.acceptanceTab !== true) return out
+  let acm = null
+  try { acm = JSON.parse(readFileSync(join(ctx.dir, 'acceptance-manifest.json'), 'utf8')) } catch { return out } // 坏了那一级 auditAcceptance 已经在报
+  const rows = []
+  for (const l of (acm && acm.lists) || []) {
+    const nums = (Array.isArray(l.pr) ? l.pr : [l.pr]).map(Number).filter((n) => Number.isFinite(n) && n > 0)
+    for (const it of l.items || []) {
+      const p = readPrecheck(it && it.precheck)
+      if (p && p.result === 'bad') rows.push({ pr: it.pr != null ? Number(it.pr) : nums[0], id: String(it.id ?? '') })
+    }
+  }
+  if (!rows.length) return out
+  // 点名按 PR 聚:「#293 AC3、AC4」;封顶与卡号那几类同一个 CHORE_IDS
+  const ids = rows.slice(0, CHORE_IDS)
+  out.push({ key: 'precheckBad', level: 'chore', n: rows.length, ids: ids.map((r) => `#${r.pr} ${r.id}`), text: S.precheckBad(rows) })
   return out
 }
 
@@ -545,6 +573,7 @@ export function collect(ctx, S, { branch = null, gen = '' } = {}) {
     ...auditAccFeedback(ctx, S),
     ...auditResponse(ctx, S),
     ...auditDeps(ctx, S),
+    ...auditPrecheck(ctx, S),
     ...auditBoardBranch(ctx, S, branch),
     ...auditWip(ctx, S),
   ]

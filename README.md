@@ -124,6 +124,13 @@ of evidence thumbnails at the end of the item, each opening the full image in a
 new tab. A screenshot that is not there is left out of the strip and warns once,
 so a missing file costs a line in `gen`'s output rather than a broken-image icon
 on the board.
+An agent can run an item first and record what it saw as `precheck`
+(`ok` / `bad` / `blocked`, a one-line note, when and where) with
+`ddd acc precheck <pr> <item> … --shot <path>`; the board shows it as one line
+above the evidence and counts the results in the checklist header, but the
+verdict stays with a person. When an item is shot again, `--new-round` (or
+`ddd acc shots rotate`) folds the previous round into `shotsHistory`, shown as
+a collapsed list of earlier rounds under the latest one.
 Ticks live in `localStorage`, keyed by the checklist's `revision` — bump it and
 the previous round's ticks retire (switch on `acceptanceFeedback`, below, and
 the tick becomes a shared ✓ / ✕ verdict instead). A "copy result" button produces
