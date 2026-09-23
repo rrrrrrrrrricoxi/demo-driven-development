@@ -9190,6 +9190,63 @@ console.log('T87 验收代验(precheck)与证据分轮(shotsHistory)')
       '⑦ --new-round 在没有上一轮的条目上:不造空轮,直接写,并说一句')
   }
 
+  // ---- ⑦' 评审补的四条(并发丢写 / 看板根的绝对路径 / 旧轮时间倒序 / CRLF)----
+  { // 并发:12 个进程同时各写一条,一条都不能丢;锁文件用完即删
+    const many = BASE6()
+    many.lists[0].items = Array.from({ length: 12 }, (_, i) => ({ id: `M${i}`, group: 'K', title: 'm', do: 'x', exp: 'y' }))
+    reset(many)
+    const runs = many.lists[0].items.map((it) => new Promise((res) => {
+      const c = spawn(process.execPath, [join(NEW_SCRIPTS, 'ddd.mjs'), 'acc', 'precheck', '293', it.id, '--result', 'ok', '--note', it.id, '--at', '2026-09-24T01:00:00Z', '--dir', fx87.kb])
+      c.on('close', (code) => res(code))
+    }))
+    const codes = await Promise.all(runs)
+    const got = JSON.parse(readAcc()).lists[0].items.filter((it) => it.precheck && it.precheck.note === it.id).length
+    ok(codes.every((c) => c === 0) && got === 12 && !existsSync(accP + '.lock'),
+      "⑦' 并发:12 路同时写不同条目,12 条全在(读-换-写在锁里),锁文件用完即删", `${codes.join(',')} got=${got}`)
+    // 过期的锁(上一个进程死在半路)接管;拒写那条路也放锁
+    reset()
+    writeFileSync(accP + '.lock', '')
+    const old = new Date(Date.now() - 60000)
+    utimesSync(accP + '.lock', old, old)
+    const rs = cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--at', '2026-09-24T01:00:00Z'])
+    ok(rs.status === 0 && !existsSync(accP + '.lock') && JSON.parse(readAcc()).lists[0].items[0].precheck.note === 'n', "⑦' 超过 30 秒的锁算过期,接管后写入并放锁", rs.stderr)
+    const rd = cli(['acc', 'precheck', '293', 'P1', '--result', 'maybe', '--note', 'n'])
+    ok(rd.status !== 0 && !existsSync(accP + '.lock'), "⑦' 拒写(die)那条路也放锁")
+  }
+  { // 看板根上的一张给的是绝对路径:存成 ./x.png,不被读成 shots/x.png(哪怕 shots/ 下有同名图)
+    reset()
+    writeFileSync(join(fx87.kb, 'rootshot.png'), PNG)
+    const r0 = cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--shot', join(fx87.kb, 'rootshot.png'), '--at', '2026-09-24T01:00:00Z'])
+    ok(r0.status === 0 && JSON.stringify(JSON.parse(readAcc()).lists[0].items[0].shots) === '["./rootshot.png"]', "⑦' 看板根的绝对路径 → ./rootshot.png(shots/ 下没有同名图也不拒)", r0.stderr)
+    writeFileSync(join(fx87.kb, 'shots', 'rootshot2.png'), PNG); writeFileSync(join(fx87.kb, 'rootshot2.png'), PNG)
+    cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--shot', join(fx87.kb, 'rootshot2.png'), '--at', '2026-09-24T01:00:00Z'])
+    const sh = JSON.parse(readAcc()).lists[0].items[0].shots
+    ok(sh.includes('./rootshot2.png') && !sh.includes('rootshot2.png'), "⑦' shots/ 下恰有同名图时也不张冠李戴", JSON.stringify(sh))
+    runGen(NEW_SCRIPTS, fx87.kb)
+    ok(itemOf(293, 'P1', readFileSync(idxP, 'utf8')).includes('href="./rootshot.png"'), "⑦' 板上照 ./rootshot.png 渲出那一格")
+    for (const f of ['rootshot.png', 'rootshot2.png', 'shots/rootshot2.png']) rmSync(join(fx87.kb, f), { force: true })
+  }
+  { // 旧轮按时间先后:搬进去的这一轮比末项早 → 拒(rotate 与 --new-round 两条路)
+    reset()
+    cli(['acc', 'shots', 'rotate', '293', 'P3']) // r1 @ 2026-09-22T08:00:00Z
+    cli(['acc', 'precheck', '293', 'P3', '--result', 'ok', '--note', 'n', '--at', '2026-09-21T08:00:00Z'])
+    const s0 = sha(accP)
+    const r1 = cli(['acc', 'shots', 'rotate', '293', 'P3'])
+    ok(r1.status !== 0 && r1.stderr.includes('比旧轮最后一轮「r1」') && sha(accP) === s0, "⑦' rotate:这一轮(取代验的 at)比旧轮末项早 → 拒,一个字节不动", r1.stderr)
+    const r2 = cli(['acc', 'precheck', '293', 'P3', '--result', 'ok', '--note', 'n2', '--new-round'])
+    ok(r2.status !== 0 && sha(accP) === s0, "⑦' --new-round 同一道闸")
+    const r3 = cli(['acc', 'shots', 'rotate', '293', 'P3', '--at', '2026-09-22T09:00:00Z'])
+    const h = JSON.parse(readAcc()).lists[0].items[2].shotsHistory
+    ok(r3.status === 0 && h.map((x) => x.at).join() === '2026-09-22T08:00:00Z,2026-09-22T09:00:00Z', "⑦' 显式 --at 不早于末项:照搬,history 仍按时间先后", JSON.stringify(h))
+  }
+  { // CRLF 的清单:别的字节不动,换进去的这一段也是 CRLF
+    const d0 = BASE6()
+    writeFileSync(accP, canon(d0).replace(/\n/g, '\r\n'))
+    cli(['acc', 'precheck', '293', 'P1', '--result', 'ok', '--note', 'n', '--at', '2026-09-24T01:00:00Z'])
+    const want = canon(withItem(d0, 0, 0, (it) => ({ ...it, precheck: { at: '2026-09-24T01:00:00Z', by: 'agent', result: 'ok', note: 'n' } }))).replace(/\n/g, '\r\n')
+    ok(readAcc() === want, "⑦' CRLF 清单:整份与「原样 + 这一条换掉」逐字节相同,不混行尾")
+  }
+
   // ---- ⑧ audit:有 bad 出一条家务,没有不出 ----
   {
     putAcc([LIST(293, ITEMS), LIST(294, [{ id: 'B2', group: 'K', title: 'x', do: 'x', exp: 'y', precheck: PRE('bad') }, { id: 'B3', group: 'K', title: 'x', do: 'x', exp: 'y', shotsHistory: [{ round: 'r1', precheck: PRE('bad'), shots: [] }] }], '清单乙')])

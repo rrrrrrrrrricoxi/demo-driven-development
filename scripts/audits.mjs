@@ -33,7 +33,7 @@ import { readPrecheck } from './accpre.mjs'
 export const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifest.json', 'items', 'backlog'], ['decisions-manifest.json', 'entries', 'decisions']]
 
 /**
- * 家务八类在那一条里的固定次序 —— 也正是 0.17.4 及以前守卫各段的出场次序。
+ * 家务九类在那一条里的固定次序 —— 也正是 0.17.4 及以前守卫各段的出场次序。
  * 固定,是因为这一条每次收工都出:次序一变,人就得重新读一遍才知道哪个数是哪类。
  */
 export const CHORE_KEYS = ['longText', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'precheckBad', 'wip']

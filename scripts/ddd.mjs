@@ -690,6 +690,26 @@ function cmdAudit() {
 // 一切校验(清单 / 条目 / result / 图在不在)都在写之前做完;拒了就是一个字节都没写、退出码非 0。
 const nowIso = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
 
+// 并发:几个 agent 同时给同一份清单的不同条目写代验,「读原文 → 换一段 → 整份落盘」之间谁后落盘谁就把
+// 别人刚写的那条盖回去(30 路并发实测丢 5 条,每一路都报成功)。所以写路径先独占一把锁文件(openSync 'wx'),
+// 读、换、写都在锁里;抢不到就每 25ms 再试,10 秒还抢不到就拒(一个字节都没写)。
+// ponytail: 锁超过 30 秒算上一个进程死在半路,直接接管 —— 两个进程同时判它过期的极小窗口不处理;真要严就换 flock。
+const ACC_LOCK_WAIT_MS = 10000, ACC_LOCK_STALE_MS = 30000
+function accLock() {
+  const lock = join(KANBAN, 'acceptance-manifest.json.lock')
+  const until = Date.now() + ACC_LOCK_WAIT_MS
+  const nap = new Int32Array(new SharedArrayBuffer(4))
+  for (;;) {
+    try { closeSync(openSync(lock, 'wx')); break } catch (e) {
+      if (e.code !== 'EEXIST') die(S.writeFailed('acceptance-manifest.json.lock', e.message))
+    }
+    try { if (Date.now() - statSync(lock).mtimeMs > ACC_LOCK_STALE_MS) { rmSync(lock, { force: true }); continue } } catch { continue }
+    if (Date.now() > until) die(S.acc.locked(lock))
+    Atomics.wait(nap, 0, 0, 25)
+  }
+  process.on('exit', () => { try { rmSync(lock, { force: true }) } catch {} }) // die() 走 process.exit,也会放锁
+}
+
 function accLoad() {
   const p = join(KANBAN, 'acceptance-manifest.json')
   let text, doc
@@ -726,6 +746,8 @@ function accShot(raw, caption) {
     const rel = relative(KANBAN, file)
     if (!rel || rel.startsWith('..') || isAbsolute(rel)) die(S.acc.shotOutside(raw))
     file = rel.split(sep).join('/')
+    // 看板根上的一张(没有 /):照 shotHref 纯文件名会被读成 shots/ 下的同名图 —— 补 ./ 让它仍指这一张
+    if (!file.includes('/')) file = './' + file
   }
   const href = shotHref(file)
   const abs = resolve(KANBAN, href)
@@ -741,9 +763,16 @@ function accShot(raw, caption) {
 /** 被搬走那一轮的时刻:显式 --at > 那一轮代验自己的时间 > 现在 */
 const roundAtOf = (item, explicit) => explicit ?? (item.precheck && isIso(item.precheck.at) ? item.precheck.at : nowIso())
 const roundTaken = (item, r) => r && Array.isArray(item.shotsHistory) && item.shotsHistory.some((h) => h && String(h.round) === r)
+/** shotsHistory 按时间先后排、末项是最近的旧轮(板上「最近 rN」就取末项):搬进去的这一轮不许比末项早 */
+function roundOrderOk(item, at) {
+  const hist = Array.isArray(item.shotsHistory) ? item.shotsHistory : []
+  const tail = hist[hist.length - 1]
+  if (tail && isIso(tail.at) && isIso(at) && Date.parse(at) < Date.parse(tail.at)) die(S.acc.roundEarly(at, String(tail.round ?? ''), tail.at))
+}
 
 function cmdAccPrecheck() {
   const [prArg, itemId] = pos.slice(2)
+  if (!flags.list) accLock()
   const ctx = accLoad()
   if (flags.list) {
     const { n, list, items } = accFind(ctx.doc, prArg)
@@ -787,9 +816,10 @@ function cmdAccPrecheck() {
   let base = item, round = ''
   if (flags['new-round']) {
     if (roundTaken(item, flags.round)) die(S.acc.roundDup(flags.round))
-    const r = rotateItem(item, { round: flags.round || '', at: roundAtOf(item) })
+    const rat = roundAtOf(item)
+    const r = rotateItem(item, { round: flags.round || '', at: rat })
     if (r.empty) console.error(S.acc.newRoundNothing())
-    else { base = r.item; round = r.round }
+    else { roundOrderOk(item, rat); base = r.item; round = r.round }
   }
   const precheck = { at, by: String(flags.by || 'agent'), result: flags.result, note, ...(flags.env ? { env: String(flags.env) } : {}) }
   const cur = Array.isArray(base.shots) ? base.shots : []
@@ -806,12 +836,15 @@ function cmdAccShots() {
   if (pos[2] !== 'rotate') die(S.acc.rotateUsage())
   const [prArg, itemId] = pos.slice(3)
   if (!itemId) die(S.acc.rotateUsage())
+  accLock()
   const ctx = accLoad()
   const { n, li, ii, item } = accFind(ctx.doc, prArg, itemId)
   if (flags.at !== undefined && !isIso(flags.at)) die(S.acc.atBad(flags.at))
   if (roundTaken(item, flags.round)) die(S.acc.roundDup(flags.round))
-  const r = rotateItem(item, { round: flags.round || '', at: roundAtOf(item, flags.at) })
+  const rat = roundAtOf(item, flags.at)
+  const r = rotateItem(item, { round: flags.round || '', at: rat })
   if (r.empty) die(S.acc.rotateEmpty(n, itemId))
+  roundOrderOk(item, rat)
   accWrite(ctx, li, ii, r.item)
   const k = r.item.shotsHistory[r.item.shotsHistory.length - 1].shots.length
   say({ ok: true, pr: n, item: itemId, round: r.round }, S.acc.rotated(n, itemId, r.round, k))

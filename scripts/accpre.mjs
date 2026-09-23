@@ -125,7 +125,8 @@ export function spliceItem(text, li, ii, item) {
     const base = /^[ \t]*$/.test(lead) ? lead : ''
     const inner = (/\n([ \t]*)"/.exec(old) || [])[1] || base + '  '
     const unit = inner.startsWith(base) && inner.length > base.length ? inner.slice(base.length) : '  '
-    out = JSON.stringify(item, null, unit).replace(/\n/g, '\n' + base)
+    const nl = old.includes('\r\n') ? '\r\n' : '\n' // CRLF 的清单(Windows 检出)换进去的这一段也是 CRLF,不混行尾
+    out = JSON.stringify(item, null, unit).replace(/\n/g, nl + base)
   }
   return text.slice(0, node.start) + out + text.slice(node.end)
 }

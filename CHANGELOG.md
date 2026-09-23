@@ -53,9 +53,15 @@ downgrade would freeze every already-stamped board. See
   pre-check's `at`), and `--new-round` on `acc precheck` is exactly that
   rotation followed by the write. The CLI replaces only the byte range of the
   target item in `acceptance-manifest.json` — every other item, list and the
-  header stay byte for byte — and refuses an unknown checklist or item, a bad
-  `result`, a missing, remote or out-of-board shot, or a malformed `--at`
-  before writing anything, with a non-zero exit.
+  header stay byte for byte, a CRLF file keeps CRLF — and refuses an unknown
+  checklist or item, a bad `result`, a missing, remote or out-of-board shot, a
+  malformed `--at`, or a round older than the last one already in
+  `shotsHistory` before writing anything, with a non-zero exit. Writes hold
+  `acceptance-manifest.json.lock` from read to rename, so agents pre-checking
+  different items of one checklist at the same time no longer overwrite each
+  other; a lock older than 30 seconds is taken over. A shot given as an
+  absolute path at the board root is stored as `./name.png`, since a bare name
+  would mean `shots/name.png`.
 - `ddd audit` gains a ninth chore, `代验发现 N 条与预期不符待人看:#293 AC3、AC4`,
   counting only the latest round. On Stop it joins the one-line notice as
   `代验不对待人看 N 条(#293 AC3、AC4)`, just before the backlog count.

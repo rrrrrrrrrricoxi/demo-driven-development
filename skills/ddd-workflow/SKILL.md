@@ -95,7 +95,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 4. **一条一图起步**:每条至少一张截图,截到 exp 说的那个东西或者不一致的那个东西;多步的每步一张,caption 写这一步看到什么。自查:`acc precheck <PR> --list` 里每条都带「N 张图」,N ≥ 1。
 5. **只记事实,不改期望**:exp / bad / why 一个字不改;与预期不符写 `bad` + 看到了什么。自查:`git diff` 里 acceptance-manifest.json 的改动只落在 `precheck` / `shots` / `shotsHistory` 三个键上。
 6. **不替人判**:不写 acceptance-feedback.jsonl,不点 ✓ / ✕。自查:`git status` 里 acceptance-feedback.jsonl 不在改动列表。
-7. **收尾**:停掉自己起的前后端进程(只杀自己记下的 pid),不动别人的;不在主树跑裸 `vite build`。自查:自己记下的 pid 全部不在进程表里,5175 / 8002 那几台照旧在监听。
+7. **收尾**:停掉自己起的前后端进程(只杀自己记下的 pid),不动别人的;不在主树跑裸 `vite build`。自查:自己记下的 pid 全部不在进程表里(`ps -p <pid>` 逐个查空);不为「确认别人的口还在」去探 5175 / 8002 —— 探一下就已经违反第 1 条。
 8. **写回走 CLI**:`acc precheck …`,不手改 manifest;截图落 `shots/pre-<pr>/`(不用 `acc-` 前缀,那是 gitignore 的人工签字截图)。自查:截图全在 `shots/pre-<PR>/` 下,没有一张以 `acc-` 打头。
 
 **需求书样板**(给 agent 的 prompt,填掉尖括号直接用):
@@ -112,12 +112,12 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 硬规矩(每条都要自查,违反任何一条就停下来报告,不要自己绕):
 - 命令与 URL 里出现 5175 或 8002 即违规。自查:结束时 grep -c "5175\|8002" <你的命令记录> 必须为 0。
-- 浏览器用 node playwright 自己起 chromium(带自己的 user-data-dir),不用 playwright MCP 的共享浏览器。
+- 浏览器用 node playwright 自己起 chromium(带自己的 user-data-dir),不用 playwright MCP 的共享浏览器。自查:命令记录里没有一次 playwright MCP 的工具调用;ps 里你起的 chromium 带你自己的 user-data-dir。
 - 自造的数据一律带前缀「代验-<PR>-」,跑完从界面删掉;删不掉的写进那一条的 note。自查:按前缀搜列表为 0 条。
-- exp / bad / why 一个字不改;与预期不符就写 bad,把看到的写进 note。
-- 不写 acceptance-feedback.jsonl,不点 ✓ / ✕ —— 判定是人的。
-- 收尾只杀自己记下的 pid;不在主树跑裸 vite build。
-- 不手改 acceptance-manifest.json;截图不用 acc- 前缀。
+- exp / bad / why 一个字不改;与预期不符就写 bad,把看到的写进 note。自查:git diff app/kanban/acceptance-manifest.json 的改动只落在 precheck / shots / shotsHistory 三个键上。
+- 不写 acceptance-feedback.jsonl,不点 ✓ / ✕ —— 判定是人的。自查:git status 里 acceptance-feedback.jsonl 不在你新增的改动里。
+- 收尾只杀自己记下的 pid;不在主树跑裸 vite build。自查:你记下的 pid 用 ps -p 逐个查都已不在;不要去探 5175 / 8002 还在不在(一探就违反第一条)。
+- 不手改 acceptance-manifest.json;截图不用 acc- 前缀。自查:截图全在 shots/pre-<PR>/ 下,没有一张以 acc- 打头;acc precheck <PR> --list 里每条都至少 1 张图。
 
 交付:每条一行「条目 · ok/bad/blocked · 一句看到了什么」,外加自查结果(grep 计数、前缀搜索条数、pid 是否全停)。
 ```
