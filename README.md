@@ -26,7 +26,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `decisionArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install
 
@@ -454,6 +454,18 @@ they reached the backlog. With `lazyTabs` on it becomes a third part file,
 `parts/archive.html`, with its own entry in the card → pane map, so a deep link
 to an archived card still fetches the right part. Left unset, output is
 byte-identical to a board without the feature.
+
+Decision cards can follow. With `backlogArchive` on, set
+`config.decisionArchive` to `true` and decisions that are `live` or `closed`
+leave the decisions tab for the archive, which then holds two sections,
+`Backlog · n` and `决策/Demo · j` (landed first, then closed, newest first in
+each). A segmented control at the top of the archive, `全部 · Backlog · 决策
+Demo`, shows one source or both; the choice is not saved. The decisions tab
+keeps what is still being decided or decided but not landed, drops the
+`live` and `closed` filter chips, and ends with one grey line saying how many
+cards moved and linking to the archive. Deep links and the lazy part map follow
+the card. `decisionArchive` without `backlogArchive` prints a warning and does
+nothing. Left unset, output is byte-identical to a board without the feature.
 
 ## Backlog sort control (optional)
 

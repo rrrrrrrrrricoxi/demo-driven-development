@@ -9,6 +9,50 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.17.17] - 2026-09-24
+
+### Added
+
+- `decisionArchive: true` in `kanban.config.json` moves decision cards whose
+  status is `live` or `closed` out of the 决策/Demo tab and into the archive
+  tab, the same way `backlogArchive` already moves backlog cards that are
+  `done`. The decisions tab keeps `deciding`, `mockup` and `decided`: what is
+  still being decided and what was decided but has not landed. Only the literal
+  `true` counts. The archive pane is built by `backlogArchive`, so turning on
+  `decisionArchive` without it prints one warning and is treated as off.
+- The 决策/Demo tab counts only the cards it still shows. Its status chips drop
+  `live` and `closed` (they would always read zero there), the type dropdown
+  and session chips count the same set, and a grey line at the end of the pane
+  reads `已落地 / 已关闭的 J 张在归档 tab`, linking to `#archive`. The line is
+  left out when nothing has been archived.
+- The archive tab counts backlog `done` plus archived decisions. At the top of
+  the pane a single-choice segmented control, `全部 · Backlog · 决策 Demo`, uses
+  the `.lseg` style of the lane filter. It only shows or hides one of the two
+  sections below it: the selection is not saved, and it does not change the tab
+  count or the group counts. The sections are `Backlog · n` (the existing
+  `done` group, unchanged) and `决策/Demo · j`, which renders cards with the
+  usual `decCard` in two groups, `live` then `closed`, each with its count and
+  sorted newest first. `closed` cards keep their `不做` / `归档` badge from
+  `closedKind`, and `live` cards keep their `→ 去 live 页` link. The global
+  search and the lane and time filters apply to both sections, and the section
+  counts follow them. The generic `.pane-empty` placeholder is unchanged.
+- Deep links follow the card. With `lazyTabs`, archived decisions map to the
+  `archive` part in `LAZY_PANE_OF`, written after the decisions entries so the
+  archive entry wins, as for archived backlog cards. Each card is rendered in
+  exactly one pane. A deep link to a card in a section that the segmented
+  control has hidden switches it back to `全部` before scrolling.
+- `gen`'s closing line reads `决策/Demo K 条,其中 J 张已归档` when the option
+  is on. With it off, the line is unchanged.
+- The `ddd-workflow` skill's note on demo tables of contents gets a third
+  pitfall. Set either `scroll-padding-top` on `html` or `scroll-margin-top` on
+  the sections, not both: together they add up to a double offset, the
+  landing point falls below the scrollspy line, and the highlight stays on the
+  previous section. Put the spy line at the landing offset plus 20 to 30px.
+
+With `decisionArchive` unset, `false`, or set without `backlogArchive`, a board
+builds byte for byte what 0.17.16 built, including `parts/` with lazy tabs on
+or off and with `backlogArchive` on or off.
+
 ## [0.17.16] - 2026-09-24
 
 ### Added

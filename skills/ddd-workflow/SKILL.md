@@ -44,7 +44,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
    **文稿必挂文档库(v0.11.3 起为机制,与「demo 必挂卡」同源)**:spec / 评审稿 / 实施 plan / 交接档 / 运维手册落进 `docs/` 或 `plans/` 的**同一次提交**里,就要加进 `config.docs[]`(字段 `path` / `out` 纯文件名不重名 / `title` / `baseDir` / `category` / `desc` 一句话定位 / 可选 `order`、`line`),让它在看板文档库可读。**产出必须可被发现**——只躺在仓库里的文稿,协作者和其他会话线都看不见,等于没写。别攒着批量补:攒出来的欠账要靠「`config.docs` 的 path 集合 vs `docs/`+`plans/` 下 .md 求差集」才盘得回来。挂之前先扫一眼内容是否还准,过期或与现状冲突的先修再挂(挂上一份错的比不挂更伤信任),确属只考古的就别挂。
    **demo 形制(宿主实战定型,v0.10.0 起为机制)**:
    - **多方案选型 demo 一律单 HTML 文件**,一页含全部变体。禁止一方案一文件——拍板的动作是并排比较,分文件等于把比较成本转嫁给用户,让人在看板与 demo 之间点出点进。
-   - **方案 ≥3 或页面长,左侧带固定可导航目录**(`position:fixed`,点击直达 + scrollspy 高亮)。两个实测坑:①守卫注入的返回栏占顶部 44px,目录的 `top` 要让位(参考值 76px);②页底最后一节的 `offsetTop` 可能永远够不到判定线,须加「滚到底 = 点亮末项」的兜底。
+   - **方案 ≥3 或页面长,左侧带固定可导航目录**(`position:fixed`,点击直达 + scrollspy 高亮)。三个实测坑:①守卫注入的返回栏占顶部 44px,目录的 `top` 要让位(参考值 76px);②页底最后一节的 `offsetTop` 可能永远够不到判定线,须加「滚到底 = 点亮末项」的兜底;③`scroll-padding-top`(html)与 `scroll-margin-top`(节)二选一,两个同时写会叠加成双倍偏移,落点跑到 scrollspy 判定线下面、目录高亮停在上一节(2026-09-24 D116 病例,8 个 demo 同修);spy 判定线 = 落点偏移 + 20~30px。
    - **多轮 demo 时,卡片的 `demo` 字段(主按钮)必须指向最新一轮**;旧轮留在 `links` 里并标注轮次。旧轮的多个文件可按「合订术」归并成单页存档(同源 iframe 组装,交互零损失,配方见 plugin 根 `docs/demo-binding.md`);被已挂卡 demo 用 iframe 内嵌的子页,守卫自动豁免,不必挂占位链接。
    **建卡时的现场留存(v0.11.4 起为机制)**:
    - **prompt 里带了截图,就把它留进卡**:图片存进看板的 `shots/`(文件名以卡号打头,如 `bl-c72-filter-jump.png` —— 截图廊会据此自动归组并跳回该卡),卡上加 `shots`:`ddd.mjs card set <id> shots --json '["bl-c72-filter-jump.png"]'`(要配说明就写 `[{"file":"…","caption":"点 chip 后整页横移"}]`)。卡片详情里直接看得到缩略图,点开原图。**理由**:隔一段时间回来翻卡,一句文字描述常唤不回当时看到的东西,一张现场图能。
