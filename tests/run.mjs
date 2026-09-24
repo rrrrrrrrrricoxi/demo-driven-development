@@ -9332,6 +9332,221 @@ console.log('T87 验收代验(precheck)与证据分轮(shotsHistory)')
   ok(sha(idxP) === offSha87, '关掉 acceptanceTab 后与本节开始前的基线逐字节相同')
 }
 
+// ============ T88 决策卡归档(0.17.17:config.decisionArchive;要 backlogArchive 同开)============
+console.log('T88 决策卡归档 decisionArchive')
+{
+  const DEC88 = [
+    { id: 'D10', code: 'D10', status: 'deciding', date: '2026-03-01', title: '还在拍', question: 'q' },
+    { id: 'D11', code: 'D11', status: 'mockup', date: '2026-03-02', title: '草稿', question: 'q' },
+    { id: 'D12', code: 'D12', status: 'decided', date: '2026-03-03', title: '拍了没落地', question: 'q', decision: '做' },
+    { id: 'D40', code: 'D40', status: 'live', date: '2026-02-10', title: '落地甲', question: 'q', decision: '做', route: '/x', routeLive: true },
+    { id: 'D41', code: 'D41', status: 'live', date: '2026-02-20', title: '落地乙', question: 'q', decision: '做' },
+    { id: 'D50', code: 'D50', status: 'closed', closedKind: 'dropped', date: '2026-01-05', title: '不做丙', question: 'q', decision: '不做' },
+    { id: 'D51', code: 'D51', status: 'closed', closedKind: 'archived', date: '2026-01-06', title: '收口丁', question: 'q', decision: '收口' },
+  ]
+  const BL88 = [
+    { id: 'BL-1', status: 'ready', priority: 'high', tier: '1', date: '2026-02-01', title: '待办甲' },
+    { id: 'BL-3', status: 'done', priority: 'low', tier: '1', date: '2026-01-03', title: '旧账丙' },
+    { id: 'BL-4', status: 'done', priority: 'low', tier: '1', date: '2026-01-04', title: '旧账丁' },
+  ]
+  const mk88 = (name, over = {}) => {
+    const fx = mkFixture(name, { 's.html': demoHtml('s') })
+    const dP = join(fx.kb, 'decisions-manifest.json'), bP = join(fx.kb, 'backlog-manifest.json'), cP = join(fx.kb, 'kanban.config.json')
+    const d = JSON.parse(readFileSync(dP, 'utf8')); d.entries = DEC88; writeFileSync(dP, JSON.stringify(d, null, 2) + '\n')
+    const bl = JSON.parse(readFileSync(bP, 'utf8')); bl.tiers = { 1: '核心' }; bl.items = BL88; writeFileSync(bP, JSON.stringify(bl, null, 2) + '\n')
+    const c = JSON.parse(readFileSync(cP, 'utf8'))
+    for (const [k, v] of Object.entries(over)) { if (v === undefined) delete c[k]; else c[k] = v }
+    writeFileSync(cP, JSON.stringify(c, null, 2) + '\n')
+    return fx
+  }
+  const setCfg88 = (fx, over) => {
+    const cP = join(fx.kb, 'kanban.config.json')
+    const c = JSON.parse(readFileSync(cP, 'utf8'))
+    for (const [k, v] of Object.entries(over)) { if (v === undefined) delete c[k]; else c[k] = v }
+    writeFileSync(cP, JSON.stringify(c, null, 2) + '\n')
+  }
+  const slice = (html, from, to) => {
+    const i = html.indexOf(`id="pane-${from}"`)
+    const j = to ? html.indexOf(`id="pane-${to}"`) : html.length
+    return i < 0 ? '' : html.slice(i, j > i ? j : html.length)
+  }
+  const compiles = (html) => { const sc = html.match(/<script>([\s\S]*?)<\/script>/); try { new Function(sc[1]); return true } catch { return false } }
+
+  // ---- ① 关着:未配 / false / 配了但 backlogArchive 没开 —— 自己跟自己比,逐字节相同 ----
+  const fx = mk88('fx88', { backlogArchive: true })
+  const idxP = join(fx.kb, 'index.html')
+  const r0 = runGen(NEW_SCRIPTS, fx.kb)
+  const offSha = sha(idxP)
+  const tailOf = (r) => r.stdout.trim().split('\n').filter((l) => l.startsWith('index.html 已生成')).pop() || ''
+  ok(r0.status === 0 && / · 决策\/Demo 7 条$/.test(tailOf(r0)), '收尾行(关):「决策/Demo 7 条」原句不变,后面不多一个字', tailOf(r0))
+  setCfg88(fx, { decisionArchive: false })
+  runGen(NEW_SCRIPTS, fx.kb)
+  ok(sha(idxP) === offSha, '① decisionArchive:false 与未配逐字节相同')
+  setCfg88(fx, { decisionArchive: 'true' })
+  runGen(NEW_SCRIPTS, fx.kb)
+  ok(sha(idxP) === offSha, '① decisionArchive:"true"(字符串)不认,与未配逐字节相同')
+  {
+    const fw = mk88('fx88w', { decisionArchive: true })
+    const rw = runGen(NEW_SCRIPTS, fw.kb)
+    const fw0 = mk88('fx88w0', {})
+    runGen(NEW_SCRIPTS, fw0.kb)
+    ok(rw.status === 0 && rw.stderr.includes('decisionArchive') && rw.stderr.includes('backlogArchive'), '① 开了 decisionArchive 没开 backlogArchive:warn 一句点名两个开关', rw.stderr.slice(0, 300))
+    ok(sha(join(fw.kb, 'index.html')) === sha(join(fw0.kb, 'index.html')), '① …并当没开:产物与两项都没配逐字节相同')
+  }
+
+  {
+    const tc = JSON.parse(readFileSync(join(REPO, 'templates/kanban.config.json'), 'utf8')).$comment
+    ok(/decisionArchive\(v0\.17\.17[^)]*backlogArchive 同开\)/.test(tc) && tc.includes('只开它不开 backlogArchive'), '① kanban.config 模板的 $comment 写了 decisionArchive(要 backlogArchive 同开)')
+  }
+
+  // ---- ② 开着:决策 pane 只留三档,归档 pane 两节 ----
+  setCfg88(fx, { decisionArchive: true })
+  const r1 = runGen(NEW_SCRIPTS, fx.kb)
+  ok(r1.status === 0, '② 开着 gen exit 0', r1.stderr.slice(0, 200))
+  const on = readFileSync(idxP, 'utf8')
+  const decP = slice(on, 'decisions', 'backlog'), arP = slice(on, 'archive')
+  ok(['D10', 'D11', 'D12'].every((id) => decP.includes(`id="${id}"`)), '② 决策 pane 留下 deciding / mockup / decided')
+  ok(['D40', 'D41', 'D50', 'D51'].every((id) => !decP.includes(`id="${id}"`)) && !decP.includes('dec-live') && !decP.includes('dec-closed'),
+    '② 决策 pane 里没有 live / closed 卡')
+  ok(!decP.includes('data-k="live"') && !decP.includes('data-k="closed"') && decP.includes('data-k="deciding"'),
+    '② 决策工具条不出 live / closed 两枚 chip(别的照旧)')
+  ok(decP.includes('全部类型 (3)'), '② 类型下拉的「全部」数的是决策 pane 里的张数')
+  ok(on.includes('data-label="决策/Demo">决策/Demo · 3</button>'), '② 决策 tab 标签 = 未归档张数 3')
+  ok(on.includes('data-label="归档">归档 · 6</button>'), '② 归档 tab 标签 = backlog done 2 + 决策已归档 4')
+  ok(decP.includes('<p class="archnote">已落地 / 已关闭的 4 张在<a href="#archive">归档 tab</a></p>'), '② 决策 pane 末尾一行灰字,张数对、链到 #archive')
+  ok(decP.indexOf('已落地 / 已关闭的') > decP.indexOf('id="decempty"') && decP.indexOf('已落地 / 已关闭的') < decP.indexOf('class="legend"'),
+    '② 灰字在卡片与空态之后、图例之前(pane 的末尾)')
+  for (const id of ['D40', 'D41', 'D50', 'D51', 'D10', 'BL-3']) ok(count(on, `id="${id}"`) === 1, `② ${id} 全页只渲染一次`)
+  ok(arP.includes('id="archseg"') && count(arP, 'data-src="all" class="on">全部</button>') === 1
+    && arP.includes('data-src="backlog">Backlog</button>') && arP.includes('data-src="decisions">决策 Demo</button>'),
+  '② 归档顶上一排分段钮:全部(默认选中)· Backlog · 决策 Demo')
+  ok(arP.includes('<div class="lseg" id="archseg"'), '② 分段钮借线别那套 .lseg 样式')
+  ok(!on.includes('.archseg') && !/\.archsrc\[hidden\]\s*\{/.test(on), '② 分段显隐走 hidden 属性,不为它加样式')
+  const iB = arP.indexOf('<div class="archsrc" data-src="backlog">'), iD = arP.indexOf('<div class="archsrc" data-src="decisions">')
+  ok(iB > 0 && iD > iB, '② 两节:先 Backlog 后 决策/Demo')
+  const blSec = arP.slice(iB, iD), dSec = arP.slice(iD, arP.indexOf('class="pane-empty"'))
+  ok(blSec.includes('Backlog · <span class="archn">2</span>') && blSec.includes('id="BL-3"') && blSec.includes('id="BL-4"'), '② Backlog 一节:标题带张数 2,收两张 done')
+  ok(blSec.includes('<section class="group" id="g-done">'), '② Backlog 一节就是原来那段 blSection(不动)')
+  ok(dSec.includes('决策/Demo · <span class="archn">4</span>'), '② 决策一节标题带张数 4')
+  const iL = dSec.indexOf('id="dg-live"'), iC = dSec.indexOf('id="dg-closed"')
+  ok(iL > 0 && iC > iL, '② 决策一节内:已落地 → 已关闭 两小节')
+  ok(/id="dg-live">\s*<header[^>]*>\s*<span class="gid">2<\/span>/.test(dSec) && /id="dg-closed">\s*<header[^>]*>\s*<span class="gid">2<\/span>/.test(dSec), '② 两小节标题各带张数')
+  ok(dSec.indexOf('id="D41"') < dSec.indexOf('id="D40"') && dSec.indexOf('id="D51"') < dSec.indexOf('id="D50"'), '② 小节内按日期新→旧')
+  const cardOf = (id) => { const i = dSec.indexOf(`id="${id}"`); return dSec.slice(i, dSec.indexOf('</article>', i)) }
+  ok(cardOf('D50').includes('>不做</span>') && cardOf('D51').includes('>归档</span>'), '② closed 徽章沿用 closedKind:不做 / 归档')
+  ok(cardOf('D40').includes('→ 去 live 页') && dSec.includes('<article class="deccard lcard rcard dec-live" id="D40"'), '② live 卡用 decCard 渲染,「→ 去 live 页」照旧')
+  ok(arP.includes('<p class="pane-empty">当前筛选下归档里没有卡片。</p>'), '② 通用空态 .pane-empty 照旧')
+  ok(count(on, 'id="dg-live"') === 1 && count(on, 'id="dg-closed"') === 1, '② dg-live / dg-closed 全页各一个(决策 pane 不再出这两组,锚不重名)')
+  ok(tailOf(r1).endsWith(' · 决策/Demo 7 条,其中 4 张已归档'), '收尾行(开):「决策/Demo 7 条,其中 4 张已归档」', tailOf(r1))
+  ok(on.includes("function setArchSrc(src)") && on.includes("if (el.closest('.archsrc[hidden]')) setArchSrc('all')"),
+    '② 运行时:分段函数 + 深链落到被藏的一节时先回「全部」')
+  ok(compiles(on), '② 开着的整壳内联 JS 可编译')
+  ok(/#pane-archive \.lcard/.test(on) && on.includes("pane.id === 'pane-archive'"), '② 时间筛选 / 组头收起照旧覆盖归档 pane(决策那一节也在里面)')
+
+  // ---- ③ 分段钮行为(源码形态):抠出 setArchSrc 跑在假 DOM 上 ----
+  {
+    const src = on.match(/function setArchSrc\(src\) \{[\s\S]*?\n  \}/)[0]
+    const mkEl = (ds) => ({ dataset: ds, hidden: false, cls: new Set(), classList: { toggle(c, v) { v ? this.o.cls.add(c) : this.o.cls.delete(c) } } })
+    const btns = ['all', 'backlog', 'decisions'].map((s) => { const e = mkEl({ src: s }); e.classList.o = e; return e })
+    const secs = ['backlog', 'decisions'].map((s) => mkEl({ src: s }))
+    const doc = { querySelectorAll: (q) => (q.startsWith('#archseg') ? btns : q.startsWith('#pane-archive .archsrc') ? secs : []) }
+    let relines = 0
+    const setArchSrc = new Function('document', 'setLine', 'curLine', `${src}; return setArchSrc`)(doc, () => { relines++ }, 'all')
+    const st = () => secs.map((s) => (s.hidden ? '藏' : '出')).join('') + '|' + btns.filter((b) => b.cls.has('on')).map((b) => b.dataset.src).join()
+    setArchSrc('backlog'); const a = st()
+    setArchSrc('decisions'); const b2 = st()
+    setArchSrc('all'); const c = st()
+    ok(a === '出藏|backlog', '③ 点 Backlog:决策一节藏起、只 Backlog 钮亮', a)
+    ok(b2 === '藏出|decisions', '③ 点 决策 Demo:Backlog 一节藏起', b2)
+    ok(c === '出出|all', '③ 点 全部:两节都出', c)
+    ok(!/localStorage/.test(src), '③ 分段状态不持久化')
+    ok(relines === 3, '③ 每切一次分段都走一趟 setLine(露着的那一节变了,空态 / 计数要重判)', String(relines))
+  }
+
+  // ---- ③b 空态只数露着的那一节(复验坑:分段选 Backlog + 搜索只命中决策那一节 → 通用判据数到藏起来的卡,不出空态,只剩「Backlog · 0」)----
+  {
+    const iGen = on.indexOf(`document.querySelectorAll('.pane .pane-empty').forEach`)
+    const m = on.match(/\n    const archPe = [^\n]*\n    if \(archPe\)[^\n]*/)
+    ok(m && iGen > 0 && on.indexOf(m[0]) > iGen, '③b 归档空态的专判跟在通用那一趟后面(后写的赢)')
+    const run = (hiddenSrc) => {
+      // 决策那一节有一张命中搜索的卡,Backlog 那一节全被筛掉
+      const cards = [{ sec: 'backlog', vis: false }, { sec: 'decisions', vis: true }]
+      const root = { querySelectorAll: (sel) => sel === '.lcard' ? cards : sel === '.archsrc:not([hidden]) .lcard' ? cards.filter((c) => c.sec !== hiddenSrc) : [] }
+      const pe = { style: { display: '' }, closest: () => root }
+      const nVis = (r, sel) => r.querySelectorAll(sel).filter((c) => c.vis).length
+      const doc = { querySelector: (q) => (q === '#pane-archive .pane-empty' ? pe : null), getElementById: (id) => (id === 'pane-archive' ? root : null) }
+      pe.style.display = nVis(pe.closest('.pane'), '.lcard') ? 'none' : 'block' // 通用那一趟
+      new Function('document', 'nVis', m[0])(doc, nVis)
+      return pe.style.display
+    }
+    if (m) {
+      ok(run('decisions') === 'block', '③b 分段 = Backlog、只有决策那一节有命中:出空态', run('decisions'))
+      ok(run(null) === 'none', '③b 分段 = 全部:命中卡露着,不出空态', run(null))
+      ok(run('backlog') === 'none', '③b 分段 = 决策 Demo:命中卡露着,不出空态', run('backlog'))
+    }
+  }
+
+  // ---- ④ 深链:#D40(live)落到归档 pane ----
+  ok(slice(on, 'archive').includes('id="D40"') && !slice(on, 'decisions', 'backlog').includes('id="D40"'), '④ 非懒:#D40 的元素住在归档 pane(routeHash 按 closest(.pane) 切过去)')
+
+  // ---- ⑤ lazyTabs 同开:决策已归档 → archive part ----
+  setCfg88(fx, { lazyTabs: true })
+  runGen(NEW_SCRIPTS, fx.kb)
+  const lz = readFileSync(idxP, 'utf8')
+  const pA = readFileSync(join(fx.kb, 'parts/archive.html'), 'utf8'), pD = readFileSync(join(fx.kb, 'parts/decisions.html'), 'utf8')
+  const map = JSON.parse(lz.match(/const LAZY_PANE_OF = (\{[^\n]*?\})\n/)[1])
+  ok(['D40', 'D41', 'D50', 'D51'].every((id) => map[id] === 'archive') && map.D10 === 'decisions' && map['BL-3'] === 'archive' && map['BL-1'] === 'backlog',
+    '⑤ LAZY_PANE_OF:决策已归档 → archive,其余照旧', JSON.stringify(map))
+  ok(Object.keys(map).indexOf('D40') < Object.keys(map).indexOf('BL-1'), '⑤ 键序不变(决策赋值在前,归档后写覆盖)')
+  ok(pA.includes('id="D40"') && pA.includes('id="D51"') && pA.includes('id="archseg"'), '⑤ parts/archive.html 含决策卡与分段钮')
+  ok(!pD.includes('id="D40"') && !pD.includes('id="D50"') && pD.includes('id="D10"'), '⑤ parts/decisions.html 不含已归档的决策卡')
+  {
+    const bd = lz.match(/archive: (\d+)/), bdd = lz.match(/decisions: (\d+)/)
+    ok(bd && Number(bd[1]) === Buffer.byteLength(pA, 'utf8') && bdd && Number(bdd[1]) === Buffer.byteLength(pD, 'utf8'), '⑤ LAZY_BYTES 与两个 part 实际字节一致')
+  }
+  ok(!lz.includes('id="D40"') && compiles(lz), '⑤ 壳里不含归档卡正文,壳 JS 可编译')
+  for (const part of ['decisions.html', 'archive.html']) {
+    const pp = join(fx.kb, 'parts', part)
+    touch(idxP)
+    rmSync(pp)
+    const rs = runStop(NEW_SCRIPTS, fx.root)
+    ok(rs.status === 0 && existsSync(pp) && readFileSync(pp, 'utf8') === (part === 'archive.html' ? pA : pD), `⑤ 删 parts/${part} → 守卫自愈,补回的与原来一字不差`, rs.stderr)
+  }
+
+  // ---- ⑥ 关回:逐字节回到基线 ----
+  setCfg88(fx, { lazyTabs: undefined, decisionArchive: undefined })
+  runGen(NEW_SCRIPTS, fx.kb)
+  ok(sha(idxP) === offSha, '⑥ 关回后 index 与开之前的基线逐字节相同')
+
+  // ---- ⑦ 冻结:与 0.17.16 对照(lazyTabs 开/关 × backlogArchive 开/关;decisionArchive 未配 / false / 配了但没 backlogArchive)----
+  const TAG16 = 'demo-driven-development--v0.17.16'
+  const have16 = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${TAG16}^{commit}`], { cwd: REPO, encoding: 'utf8' }).status === 0
+  if (!have16) console.log(`  · 跳过:本地没有 ${TAG16}(浅克隆 / 未取 tag),0.17.16 冻结对照本次不比`)
+  else {
+    const oldRoot = join(WORK, 'v01716')
+    mkdirSync(oldRoot, { recursive: true })
+    const tar = join(WORK, 'v01716.tar')
+    spawnSync('git', ['archive', '--format=tar', '-o', tar, TAG16], { cwd: REPO })
+    spawnSync('tar', ['-xf', tar, '-C', oldRoot])
+    const ml = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !l.includes('<!-- ddd-gen v')).join('\n')
+    const PARTS = ['decisions.html', 'backlog.html', 'archive.html']
+    for (const lazy of [false, true]) for (const barch of [false, true]) for (const darch of [undefined, false, true]) {
+      if (darch === true && barch) continue // 这一格就是开着,不冻结
+      const over = { stickyTabs: true, lazyTabs: lazy || undefined, backlogArchive: barch || undefined, decisionArchive: darch }
+      const tag = `${lazy ? 'l' : 'e'}${barch ? 'a' : 'x'}${darch === undefined ? 'u' : darch ? 't' : 'f'}`
+      const a = mk88(`fx88z-old-${tag}`, over), b = mk88(`fx88z-new-${tag}`, over)
+      runGen(join(oldRoot, 'scripts'), a.kb); runGen(NEW_SCRIPTS, b.kb)
+      const same = ml(join(a.kb, 'index.html')) === ml(join(b.kb, 'index.html'))
+        && PARTS.every((f) => existsSync(join(a.kb, 'parts', f)) === existsSync(join(b.kb, 'parts', f))
+          && (!existsSync(join(a.kb, 'parts', f)) || readFileSync(join(a.kb, 'parts', f), 'utf8') === readFileSync(join(b.kb, 'parts', f), 'utf8')))
+      ok(same, `⑦ 冻结:lazyTabs ${lazy ? '开' : '关'} · backlogArchive ${barch ? '开' : '关'} · decisionArchive ${darch === undefined ? '未配' : darch} —— 与 0.17.16 逐字节相同(含 parts)`)
+    }
+    const ya = mk88('fx88y-old', { backlogArchive: true, decisionArchive: true }), yb = mk88('fx88y-new', { backlogArchive: true, decisionArchive: true })
+    runGen(join(oldRoot, 'scripts'), ya.kb); runGen(NEW_SCRIPTS, yb.kb)
+    ok(ml(join(ya.kb, 'index.html')) !== ml(join(yb.kb, 'index.html')), '⑦ 两项都开的板产物确实变了(这一版要改的就是它)')
+  }
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })

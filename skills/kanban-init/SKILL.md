@@ -263,8 +263,22 @@ gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「�
 - **计数跟着走**:Backlog tab 徽章 = 非 done 数,归档 tab 徽章 = done 数;Backlog 状态筛选芯片里的 done 一档自动消失。
 - **深链照旧**:`#卡号` 直接落到归档 pane;`lazyTabs` 开着时归档是**第三个 part**(`parts/archive.html`),
   归档卡在卡号→pane 映射里指向 `archive`,深链跨 part 会先取回再跳。关掉归档时这个 part 的陈迹一并清除。
-- **一期只归 backlog**:决策卡的 `live`/`closed` 不归档(决策是走过的路径,不是待办)。
+- **决策卡另有一个开关**:v0.13 只归 backlog;v0.17.17 起加 `decisionArchive`(见下一节)。
 - **字节冻结**:不配或 `false` 时输出逐字节不变。
+
+## 决策卡归档(decisionArchive,v0.17.17:opt-in,要 backlogArchive 同开)
+
+`config.decisionArchive` 只认字面 `true`,且**要 `backlogArchive: true` 同开**(归档 pane 由它造);只开这一项
+= gen warn 一句、当没开。开着时决策卡 `status ∈ {live, closed}` 搬进归档 tab,决策/Demo tab 只留
+`deciding / mockup / decided` —— 拍板用的 tab 不再一大半是历史。
+
+- **计数**:决策/Demo tab = 未归档张数;归档 tab = backlog done + 决策已归档;决策工具条不出 live / closed 两枚 chip;
+  决策 pane 末尾一行灰字「已落地 / 已关闭的 J 张在归档 tab」链到 `#archive`;gen 收尾行多「其中 J 张已归档」。
+- **归档 pane**:顶上一排单选分段钮 全部 · Backlog · 决策 Demo(`.lseg` 样式,状态不持久化,只切两节显隐);
+  下面「Backlog · n」(原样)与「决策/Demo · j」(`decCard` 渲染,已落地 → 已关闭两小节,各按日期新→旧)。
+  全局搜索 / 线别 / 时间筛选照旧作用于两节。
+- **深链**:`LAZY_PANE_OF` 里决策已归档的卡指向 `archive`;每张卡只渲染在一个 pane 里。
+- **字节冻结**:未配 / `false` / 配了但 `backlogArchive` 没开时,输出逐字节不变。
 
 ## Backlog 排序分段(backlogSort,v0.15.12,四档定于 v0.15.13:opt-in)
 

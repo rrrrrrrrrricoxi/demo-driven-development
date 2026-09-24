@@ -1821,6 +1821,13 @@ const tbEmpty = (pre) => `
 // 「归档」——同一张 blCard、同一个顺序,只是换了个门牌;徽章/状态 chips/优先级下拉一并按新口径算。
 const ARCH = cfg.backlogArchive === true
 const ARCH_ST = 'done' // 归档收的状态 id(与 backlog-manifest 模板同名;宿主没这一档 = 归档空)
+// ———— 决策卡归档(v0.17.17;config.decisionArchive:只认字面 true)————
+// 关 = 决策 pane 照旧五档全列,输出逐字节冻结(decMain 就是 dm.entries 本尊)。
+// 开 = live / closed 两档搬进归档 pane(与 backlog 的 done 同一个道理:落地了的、不做的都不用再拍),
+// 决策 pane 只留 deciding / mockup / decided。归档 pane 本身由 backlogArchive 造:只开这一项 = warn、当没开。
+if (cfg.decisionArchive === true && !ARCH) console.warn(`[gen] ⚠ ${GS.decArchiveNeedsBacklogArchive()}`)
+const DEC_ARCH = ARCH && cfg.decisionArchive === true
+const DEC_ARCH_ST = ['live', 'closed'] // 归档 pane 里的小节次序:已落地 → 已关闭
 const blMain = !ARCH ? b.items : b.items.filter((it) => it.status !== ARCH_ST)
 const blCount = blMain.length
 // 时间降序(2026-07-07 用户定向:打开当页先看到最新卡):date 新的在前,无 date 的按 id 数字倒序垫底
@@ -1983,25 +1990,6 @@ const backlogPane = `
   <div class="legend">${blLegend}</div>
   <p class="stamp">${LANE.blStamp}</p>`
 
-// ———— 归档 pane(ARCH 开才有;lazyTabs 开着时它是第三个 part)————
-// 没有自己的工具条:归档是「翻旧账」的地方,全局搜索 + 线别/时间筛选足够,再加一排控件是噪音。
-const archivePane = !ARCH ? '' : `
-  <div class="topbar">
-    <h1>${esc(BRAND)} · 归档</h1>
-    <span class="branch">branch: ${esc(b.instance.branch)}</span>
-  </div>
-  <p class="archnote">已落地的卡从 Backlog 收进这里,不再排队。渲染、全局搜索、线别与时间筛选都照旧,深链(<code>#卡号</code>)直接落到这一页。</p>
-  ${b.groups.filter((g) => g.id === ARCH_ST).map((g) => blSection(g, archItems)).join('')}
-  <p class="pane-empty">当前筛选下归档里没有卡片。</p>
-  <div class="legend">${blLegend}</div>
-  <p class="stamp">${LANE.blStamp}</p>`
-
-// 归档 / 积压的门控注入片(两项都关时全为空串,插值点自身不带空白 = 逐字节冻结)
-const ARCH_TAB = !ARCH ? '' : `\n    <button class="tab" data-pane="archive" data-label="归档">归档 · ${archItems.length}</button>`
-const ARCH_PANE_HTML = !ARCH ? '' : `\n  <section class="pane" id="pane-archive"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : archivePane}</section>`
-const ARCH_PANE_ID = !ARCH ? '' : `, 'archive'`
-const ARCH_TF_SEL = !ARCH ? '' : ', #pane-archive .lcard' // 时间筛选对归档同样生效
-const ARCH_GRP = !ARCH ? '' : ` || pane.id === 'pane-archive'` // 线别把归档筛空时收起组头
 // 积压重算:计数 = backlog pane 里可见的 ready 卡(线别 ∧ 时间 ∧ 搜索 ∧ 工具条,与徽章同一 visOk)
 const WIP_SETLINE = !WIP ? '' : `
     const wipPane = document.getElementById('pane-backlog')
@@ -2030,14 +2018,18 @@ const WIP_SETLINE = !WIP ? '' : `
 // ============================================================================
 //  决策 / Demo
 // ============================================================================
-const decCount = dm.entries.length
-const decByStatus = (id) => dm.entries.filter((e) => e.status === id).sort(byDateDesc)
+// 决策 pane 的那一份(DEC_ARCH 关 = dm.entries 本尊);已归档的另成一表,顺序同一把尺
+const decMain = !DEC_ARCH ? dm.entries : dm.entries.filter((e) => !DEC_ARCH_ST.includes(e.status))
+const decArchItems = !DEC_ARCH ? [] : dm.entries.filter((e) => DEC_ARCH_ST.includes(e.status))
+const decCount = decMain.length
+const decByStatus = (id) => decMain.filter((e) => e.status === id).sort(byDateDesc)
 
 // 决策工具条:状态 chips + 类型下拉(按实际存在的 id 前缀生成,出现序;lamos-legacy 附中文标签)
+// 决策归档开着时 live / closed 两档计数为 0 → tbChips 自然不出这两枚(与 backlog 的 done 同一个办法)
 const decChips = tbChips(dm.groups, dm.statuses, DEC_STATUS_COLOR, (id) => decByStatus(id).length)
 const decDimOpts = (() => {
   const counts = new Map()
-  for (const e of dm.entries) { const p = tbPrefix(e.id); counts.set(p, (counts.get(p) || 0) + 1) }
+  for (const e of decMain) { const p = tbPrefix(e.id); counts.set(p, (counts.get(p) || 0) + 1) }
   return [`<option value="all">全部类型 (${decCount})</option>`]
     .concat([...counts].map(([p, n]) => `<option value="${esc(p)}">${esc(p)}${LANE.typeLabels[p] ? ' · ' + LANE.typeLabels[p] : ''} (${n})</option>`))
     .join('')
@@ -2096,11 +2088,8 @@ const decCard = (e) => {
   </article>`
 }
 
-const decGroups = dm.groups
-  .map((g) => {
-    const items = decByStatus(g.id)
-    if (!items.length) return ''
-    return `
+// 一个状态分区(决策 pane 与归档 pane 的「决策/Demo」一节共用;空分区不出段)
+const decSection = (g, items) => !items.length ? '' : `
   <section class="group" id="dg-${esc(g.id)}">
     <header class="ghead" style="--c:${escC(DEC_STATUS_COLOR[g.id])}">
       <span class="gid">${items.length}</span>
@@ -2109,12 +2098,19 @@ const decGroups = dm.groups
     </header>
     <div class="cards">${items.map(decCard).join('')}</div>
   </section>`
-  })
+
+const decGroups = dm.groups
+  .map((g) => decSection(g, decByStatus(g.id)))
   .join('')
 
 const decLegend = Object.entries(dm.statuses)
   .map(([k, v]) => `<span class="lg"><i style="background:${escC(DEC_STATUS_COLOR[k])}"></i>${esc(v)}</span>`)
   .join('')
+
+// 决策 pane 末尾那行灰字:搬走的卡去哪儿了(一张都没搬 = 不出;关着 = 空串,逐字节冻结)。
+// 借归档说明那一档 .archnote 的灰字样式 —— 同一块板上「归档」相关的小字只有一种长相。
+const DEC_ARCH_NOTE = !decArchItems.length ? '' : `
+  <p class="archnote">已落地 / 已关闭的 ${decArchItems.length} 张在<a href="#archive">归档 tab</a></p>`
 
 const decisionsPane = `
   <div class="topbar">
@@ -2122,11 +2118,79 @@ const decisionsPane = `
     <span class="sess">demo-驱动决策 · 动 schema/后端前先用自包含 demo 跑 UI/操作流确认认知</span>
     <span class="branch">branch: ${esc(dm.instance.branch)}</span>
   </div>
-  ${tbHtml('dec', decChips, decDimOpts, '类型筛选', tbSessChips('dec', dm.entries))}
+  ${tbHtml('dec', decChips, decDimOpts, '类型筛选', tbSessChips('dec', decMain))}
   ${decGroups}
-  ${tbEmpty('dec')}
+  ${tbEmpty('dec')}${DEC_ARCH_NOTE}
   <div class="legend">${decLegend}</div>
   <p class="stamp">${LANE.decStamp}</p>`
+
+// ———— 归档 pane(ARCH 开才有;lazyTabs 开着时它是第三个 part)————
+// 只收 backlog 的 done 时没有自己的工具条:归档是「翻旧账」的地方,全局搜索 + 线别/时间筛选足够。
+// v0.17.17 决策卡也归档后,这里有了两种来源,顶上加一排单选分段钮(全部 / Backlog / 决策 Demo):
+// 只切两节的显隐,不是筛选维度 —— 不持久化、不动 tab 徽章与组头计数。分段样式借线别那套 .lseg。
+// 这一段要在 decCard / decSection 定义之后才组装得起来(const 不提升),所以住在决策节后面。
+const archBlSection = b.groups.filter((g) => g.id === ARCH_ST).map((g) => blSection(g, archItems)).join('')
+const archBody = !DEC_ARCH ? archBlSection : `
+  <div class="dectb">
+    <div class="tbrow">
+      <div class="tgroup"><span class="tlab">来源</span>
+        <div class="lseg" id="archseg" aria-label="归档来源">
+          <button type="button" data-src="all" class="on">全部</button><button type="button" data-src="backlog">Backlog</button><button type="button" data-src="decisions">决策 Demo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="archsrc" data-src="backlog">
+    <h2 class="archh">Backlog · <span class="archn">${archItems.length}</span></h2>${archBlSection}
+  </div>
+  <div class="archsrc" data-src="decisions">
+    <h2 class="archh">决策/Demo · <span class="archn">${decArchItems.length}</span></h2>${DEC_ARCH_ST
+    .map((id) => dm.groups.find((g) => g.id === id))
+    .filter(Boolean)
+    .map((g) => decSection(g, decArchItems.filter((e) => e.status === g.id).sort(byDateDesc)))
+    .join('')}
+  </div>`
+const archivePane = !ARCH ? '' : `
+  <div class="topbar">
+    <h1>${esc(BRAND)} · 归档</h1>
+    <span class="branch">branch: ${esc(b.instance.branch)}</span>
+  </div>
+  <p class="archnote">${DEC_ARCH ? '已落地的 Backlog 卡、已落地 / 已关闭的决策卡都收进这里,不再排队。' : '已落地的卡从 Backlog 收进这里,不再排队。'}渲染、全局搜索、线别与时间筛选都照旧,深链(<code>#卡号</code>)直接落到这一页。</p>
+  ${archBody}
+  <p class="pane-empty">当前筛选下归档里没有卡片。</p>
+  <div class="legend">${blLegend}</div>
+  <p class="stamp">${LANE.blStamp}</p>`
+
+// 归档 / 积压的门控注入片(两项都关时全为空串,插值点自身不带空白 = 逐字节冻结)
+const ARCH_TAB = !ARCH ? '' : `\n    <button class="tab" data-pane="archive" data-label="归档">归档 · ${archItems.length + decArchItems.length}</button>`
+const ARCH_PANE_HTML = !ARCH ? '' : `\n  <section class="pane" id="pane-archive"${LAZY ? ' data-lazy-pending' : ''}>${LAZY ? LAZY_SKEL : archivePane}</section>`
+const ARCH_PANE_ID = !ARCH ? '' : `, 'archive'`
+const ARCH_TF_SEL = !ARCH ? '' : ', #pane-archive .lcard' // 时间筛选对归档同样生效
+const ARCH_GRP = !ARCH ? '' : ` || pane.id === 'pane-archive'` // 线别把归档筛空时收起组头
+// 决策归档的运行时(DEC_ARCH 关 = 全空串):
+// ① 分段钮:只切 .archsrc 的 hidden;点击委托在 document 上,懒注入的 part 也接得住;
+// ② 深链落到被分段藏起来的那一节:先回「全部」再跳,否则 scrollIntoView 对着 display:none 什么都不做;
+// ③ 两节标题的张数随线别 / 时间 / 搜索重算(与组头 .gid 同一个 visOk);
+// ④ 空态只数露着的那一节(DARCH_EMPTY)。
+const DARCH_JS = !DEC_ARCH ? '' : `
+  function setArchSrc(src) {
+    document.querySelectorAll('#archseg [data-src]').forEach((b) => b.classList.toggle('on', b.dataset.src === src))
+    document.querySelectorAll('#pane-archive .archsrc').forEach((s) => { s.hidden = src !== 'all' && s.dataset.src !== src })
+    setLine(curLine) // 露着的那一节变了:空态要重判(见 DARCH_EMPTY)
+  }
+  document.addEventListener('click', (ev) => {
+    const ab = ev.target.closest('#archseg [data-src]')
+    if (ab) setArchSrc(ab.dataset.src)
+  })`
+const DARCH_ROUTE = !DEC_ARCH ? '' : `
+      if (el.closest('.archsrc[hidden]')) setArchSrc('all')`
+// 分段选了 Backlog、搜索只命中决策那一节时,通用判据会数到藏起来的卡而不出空态,页面只剩一行「Backlog · 0」。
+// 跟在通用那一趟后面、只改归档这一枚,别的 pane 不受影响。
+const DARCH_EMPTY = !DEC_ARCH ? '' : `
+    const archPe = document.querySelector('#pane-archive .pane-empty')
+    if (archPe) archPe.style.display = nVis(document.getElementById('pane-archive'), '.archsrc:not([hidden]) .lcard') ? 'none' : 'block'`
+const DARCH_SETLINE = !DEC_ARCH ? '' : `
+    document.querySelectorAll('#pane-archive .archsrc').forEach((s) => { const an = s.querySelector('.archn'); if (an) an.textContent = String(nVis(s, '.lcard')) })`
 
 // ============================================================================
 //  决策路径(C 线叙事:理念转向 → demo 探索历程 → 五拍板项 → 服务化决策 D22–D30)
@@ -5670,7 +5734,10 @@ ${RESP ? '' : `
 const ARCH_CSS = !ARCH ? '' : `
   /* ============ done 卡归档(v0.13.0,config.backlogArchive)============ */
   .archnote { margin: 0 0 16px; font-size: 12.5px; color: var(--mut); }
-  .archnote code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; font-size: .92em; }`
+  .archnote code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; font-size: .92em; }${!DEC_ARCH ? '' : `
+  /* 决策卡归档(v0.17.17,config.decisionArchive):归档 pane 两节来源的标题 */
+  .archsrc { margin-top: 14px; }
+  .archh { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--mut); letter-spacing: .02em; }`}`
 const WIP_CSS = !WIP ? '' : `
   /* ============ 积压提醒(v0.13.0,config.wip)============ */
   .tab.wip-soft::after, .tab.wip-hard::after { content: ""; display: inline-block; width: 6px; height: 6px;
@@ -5699,6 +5766,7 @@ if (LAZY) {
   for (const e of dm.entries) LAZY_IDMAP[e.id] = 'decisions'
   for (const it of b.items) LAZY_IDMAP[it.id] = 'backlog'
   for (const it of archItems) LAZY_IDMAP[it.id] = 'archive' // 归档卡改判到第三个 part(深链跨 part 靠这张表)
+  for (const e of decArchItems) LAZY_IDMAP[e.id] = 'archive' // 决策已归档的卡同样改判(v0.17.17;后写覆盖)
 }
 const LAZY_SHOW = !LAZY ? '' : `ensurePane(name)\n    `
 // 验收的锚不止上面烤进表的那两种:分组锚(accg-<键>-<组>)一直都有,0.17.13 起每个条目也有一个
@@ -6378,7 +6446,7 @@ ${PATH_CSS_B}
     if (name === 'docs') docsNavSync() // docsnav 在隐藏 pane 里 offsetHeight=0,切进来才量得到真高(函数声明提升,此处可前向引用)${ACC_SHOW}${REL_SHOW}
   }
   tabs.forEach((t) => t.addEventListener('click', () => { show(t.dataset.pane); history.replaceState(null, '', t.dataset.pane === 'progress' ? '#' : '#' + t.dataset.pane) }))
-  const PANES = new Set(['progress'${PATH_PANE_ID}, 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}${ARCH_PANE_ID}])
+  const PANES = new Set(['progress'${PATH_PANE_ID}, 'decisions', 'backlog', 'docs'${ACC_PANE_ID}${REL_PANE_ID}${ARCH_PANE_ID}])${DARCH_JS}
   function routeHash() {
     const id = decodeURIComponent(location.hash.slice(1))
     if (!id) return
@@ -6393,7 +6461,7 @@ ${PATH_CSS_B}
       const curL = wrapEl.getAttribute('data-line')
       if (curL !== 'all' && cl && !cl.split(' ').includes(curL)) setLine(cl.split(' ')[0])
       if (el.classList.contains('tf-hide')) setTime(0)
-      if (el.classList.contains('flt-hide')) toolbars.forEach((tb) => tb.clearAll()) // 被工具条筛掉:放开筛选再跳
+      if (el.classList.contains('flt-hide')) toolbars.forEach((tb) => tb.clearAll()) // 被工具条筛掉:放开筛选再跳${DARCH_ROUTE}
     }
     const ppanel = el.closest('.pathpanel') // 目标在某步详情面板里(如决策路径跳 TCx 任务卡)→ 先激活该面板
     if (ppanel) selectIter(ppanel.dataset.iter)${OV_ROUTE}
@@ -6477,7 +6545,7 @@ ${PATH_CSS_B}
     document.querySelectorAll('.tab[data-label]').forEach((t) => {
       const pane = document.getElementById('pane-' + t.dataset.pane)
       ${LAZY_BADGE}if (pane) t.textContent = t.dataset.label + ' · ' + nVis(pane, '.lcard')
-    })${WIP_SETLINE}${OV_SETLINE}${TABRAIL_BADGE}
+    })${WIP_SETLINE}${OV_SETLINE}${TABRAIL_BADGE}${DARCH_SETLINE}
     // 汇总行(决策/Backlog 各一条):总数 + 分状态 chip 重算
     // 进度条按线路重算(与 gen 同口径:separate 不计;非全部档加线路前缀)
     const pbi = document.querySelector('#pane-progress .pbar i')
@@ -6495,7 +6563,7 @@ ${PATH_CSS_B}
     // 筛空的 pane 显示占位,避免空壳像坏页
     document.querySelectorAll('.pane .pane-empty').forEach((pe) => {
       pe.style.display = nVis(pe.closest('.pane'), '.lcard') ? 'none' : 'block'
-    })
+    })${DARCH_EMPTY}
     try { localStorage.setItem('${LANE.lsLineKey}', line) } catch (e) {}
     clampScan(document.querySelector('.pane-active')) // 换档后新露出的卡补量折叠
     selectIter(curIter) // 保持选中步;若被本线路筛掉则退回最新可见步
@@ -6799,5 +6867,5 @@ const tailCount = (g) => {
 console.log(
   `index.html 已生成:进度 ${m.tasks.length} 任务/${pct}% · backlog ${b.items.length} 条` +
     `(${b.groups.map(tailCount).join(' / ')})` +
-    `${ARCH ? `,其中 ${archItems.length} 张已归档` : ''} · 决策/Demo ${dm.entries.length} 条`,
+    `${ARCH ? `,其中 ${archItems.length} 张已归档` : ''} · 决策/Demo ${dm.entries.length} 条${DEC_ARCH ? `,其中 ${decArchItems.length} 张已归档` : ''}`,
 )
