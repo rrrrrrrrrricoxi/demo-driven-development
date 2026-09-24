@@ -35,7 +35,10 @@ downgrade would freeze every already-stamped board. See
   sorted newest first. `closed` cards keep their `不做` / `归档` badge from
   `closedKind`, and `live` cards keep their `→ 去 live 页` link. The global
   search and the lane and time filters apply to both sections, and the section
-  counts follow them. The generic `.pane-empty` placeholder is unchanged.
+  counts follow them. The pane's `.pane-empty` placeholder counts only the
+  section on show, so with `Backlog` picked and a search that matches only an
+  archived decision, the pane says it is empty instead of showing a bare
+  `Backlog · 0`.
 - Deep links follow the card. With `lazyTabs`, archived decisions map to the
   `archive` part in `LAZY_PANE_OF`, written after the decisions entries so the
   archive entry wins, as for archived backlog cards. Each card is rendered in

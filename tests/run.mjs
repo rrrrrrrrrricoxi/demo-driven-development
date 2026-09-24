@@ -9394,6 +9394,11 @@ console.log('T88 决策卡归档 decisionArchive')
     ok(sha(join(fw.kb, 'index.html')) === sha(join(fw0.kb, 'index.html')), '① …并当没开:产物与两项都没配逐字节相同')
   }
 
+  {
+    const tc = JSON.parse(readFileSync(join(REPO, 'templates/kanban.config.json'), 'utf8')).$comment
+    ok(/decisionArchive\(v0\.17\.17[^)]*backlogArchive 同开\)/.test(tc) && tc.includes('只开它不开 backlogArchive'), '① kanban.config 模板的 $comment 写了 decisionArchive(要 backlogArchive 同开)')
+  }
+
   // ---- ② 开着:决策 pane 只留三档,归档 pane 两节 ----
   setCfg88(fx, { decisionArchive: true })
   const r1 = runGen(NEW_SCRIPTS, fx.kb)
@@ -9445,7 +9450,8 @@ console.log('T88 决策卡归档 decisionArchive')
     const btns = ['all', 'backlog', 'decisions'].map((s) => { const e = mkEl({ src: s }); e.classList.o = e; return e })
     const secs = ['backlog', 'decisions'].map((s) => mkEl({ src: s }))
     const doc = { querySelectorAll: (q) => (q.startsWith('#archseg') ? btns : q.startsWith('#pane-archive .archsrc') ? secs : []) }
-    const setArchSrc = new Function('document', `${src}; return setArchSrc`)(doc)
+    let relines = 0
+    const setArchSrc = new Function('document', 'setLine', 'curLine', `${src}; return setArchSrc`)(doc, () => { relines++ }, 'all')
     const st = () => secs.map((s) => (s.hidden ? '藏' : '出')).join('') + '|' + btns.filter((b) => b.cls.has('on')).map((b) => b.dataset.src).join()
     setArchSrc('backlog'); const a = st()
     setArchSrc('decisions'); const b2 = st()
@@ -9454,6 +9460,30 @@ console.log('T88 决策卡归档 decisionArchive')
     ok(b2 === '藏出|decisions', '③ 点 决策 Demo:Backlog 一节藏起', b2)
     ok(c === '出出|all', '③ 点 全部:两节都出', c)
     ok(!/localStorage/.test(src), '③ 分段状态不持久化')
+    ok(relines === 3, '③ 每切一次分段都走一趟 setLine(露着的那一节变了,空态 / 计数要重判)', String(relines))
+  }
+
+  // ---- ③b 空态只数露着的那一节(复验坑:分段选 Backlog + 搜索只命中决策那一节 → 通用判据数到藏起来的卡,不出空态,只剩「Backlog · 0」)----
+  {
+    const iGen = on.indexOf(`document.querySelectorAll('.pane .pane-empty').forEach`)
+    const m = on.match(/\n    const archPe = [^\n]*\n    if \(archPe\)[^\n]*/)
+    ok(m && iGen > 0 && on.indexOf(m[0]) > iGen, '③b 归档空态的专判跟在通用那一趟后面(后写的赢)')
+    const run = (hiddenSrc) => {
+      // 决策那一节有一张命中搜索的卡,Backlog 那一节全被筛掉
+      const cards = [{ sec: 'backlog', vis: false }, { sec: 'decisions', vis: true }]
+      const root = { querySelectorAll: (sel) => sel === '.lcard' ? cards : sel === '.archsrc:not([hidden]) .lcard' ? cards.filter((c) => c.sec !== hiddenSrc) : [] }
+      const pe = { style: { display: '' }, closest: () => root }
+      const nVis = (r, sel) => r.querySelectorAll(sel).filter((c) => c.vis).length
+      const doc = { querySelector: (q) => (q === '#pane-archive .pane-empty' ? pe : null), getElementById: (id) => (id === 'pane-archive' ? root : null) }
+      pe.style.display = nVis(pe.closest('.pane'), '.lcard') ? 'none' : 'block' // 通用那一趟
+      new Function('document', 'nVis', m[0])(doc, nVis)
+      return pe.style.display
+    }
+    if (m) {
+      ok(run('decisions') === 'block', '③b 分段 = Backlog、只有决策那一节有命中:出空态', run('decisions'))
+      ok(run(null) === 'none', '③b 分段 = 全部:命中卡露着,不出空态', run(null))
+      ok(run('backlog') === 'none', '③b 分段 = 决策 Demo:命中卡露着,不出空态', run('backlog'))
+    }
   }
 
   // ---- ④ 深链:#D40(live)落到归档 pane ----

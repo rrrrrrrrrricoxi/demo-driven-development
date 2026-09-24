@@ -2170,11 +2170,13 @@ const ARCH_GRP = !ARCH ? '' : ` || pane.id === 'pane-archive'` // 线别把归�
 // 决策归档的运行时(DEC_ARCH 关 = 全空串):
 // ① 分段钮:只切 .archsrc 的 hidden;点击委托在 document 上,懒注入的 part 也接得住;
 // ② 深链落到被分段藏起来的那一节:先回「全部」再跳,否则 scrollIntoView 对着 display:none 什么都不做;
-// ③ 两节标题的张数随线别 / 时间 / 搜索重算(与组头 .gid 同一个 visOk)。
+// ③ 两节标题的张数随线别 / 时间 / 搜索重算(与组头 .gid 同一个 visOk);
+// ④ 空态只数露着的那一节(DARCH_EMPTY)。
 const DARCH_JS = !DEC_ARCH ? '' : `
   function setArchSrc(src) {
     document.querySelectorAll('#archseg [data-src]').forEach((b) => b.classList.toggle('on', b.dataset.src === src))
     document.querySelectorAll('#pane-archive .archsrc').forEach((s) => { s.hidden = src !== 'all' && s.dataset.src !== src })
+    setLine(curLine) // 露着的那一节变了:空态要重判(见 DARCH_EMPTY)
   }
   document.addEventListener('click', (ev) => {
     const ab = ev.target.closest('#archseg [data-src]')
@@ -2182,6 +2184,11 @@ const DARCH_JS = !DEC_ARCH ? '' : `
   })`
 const DARCH_ROUTE = !DEC_ARCH ? '' : `
       if (el.closest('.archsrc[hidden]')) setArchSrc('all')`
+// 分段选了 Backlog、搜索只命中决策那一节时,通用判据会数到藏起来的卡而不出空态,页面只剩一行「Backlog · 0」。
+// 跟在通用那一趟后面、只改归档这一枚,别的 pane 不受影响。
+const DARCH_EMPTY = !DEC_ARCH ? '' : `
+    const archPe = document.querySelector('#pane-archive .pane-empty')
+    if (archPe) archPe.style.display = nVis(document.getElementById('pane-archive'), '.archsrc:not([hidden]) .lcard') ? 'none' : 'block'`
 const DARCH_SETLINE = !DEC_ARCH ? '' : `
     document.querySelectorAll('#pane-archive .archsrc').forEach((s) => { const an = s.querySelector('.archn'); if (an) an.textContent = String(nVis(s, '.lcard')) })`
 
@@ -6556,7 +6563,7 @@ ${PATH_CSS_B}
     // 筛空的 pane 显示占位,避免空壳像坏页
     document.querySelectorAll('.pane .pane-empty').forEach((pe) => {
       pe.style.display = nVis(pe.closest('.pane'), '.lcard') ? 'none' : 'block'
-    })
+    })${DARCH_EMPTY}
     try { localStorage.setItem('${LANE.lsLineKey}', line) } catch (e) {}
     clampScan(document.querySelector('.pane-active')) // 换档后新露出的卡补量折叠
     selectIter(curIter) // 保持选中步;若被本线路筛掉则退回最新可见步
