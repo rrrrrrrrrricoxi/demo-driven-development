@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/codex-hook.mjs\" stop",
+            "timeout": 60,
+            "statusMessage": "DDD: audit decisions and refresh the board"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|exec_command|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/codex-hook.mjs\" pre-tool",
+            "timeout": 15,
+            "statusMessage": "DDD: check generated reads and board merges"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|exec_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/codex-hook.mjs\" post-tool",
+            "timeout": 15,
+            "statusMessage": "DDD: remind about PR-linked card state"
+          }
+        ]
+      }
+    ]
+  }
+}

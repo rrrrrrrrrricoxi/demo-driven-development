@@ -9,6 +9,47 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.18.0] - 2026-10-15
+
+### Added
+
+- A portable plugin manifest, native Codex compatibility manifest, and Git
+  marketplace catalog. Both hosts use the same skills, templates, card CLI,
+  audits, generator, acceptance records, and release tracking.
+- A Codex adapter for Stop, PreToolUse, and PostToolUse. It preserves orphan
+  blocking, repeated-Stop loop protection, mainline-only automatic generation,
+  merge rejection, PR reminders, and version-stamp downgrade protection.
+  Tool hooks follow the command's actual working directory, including linked
+  worktrees. Codex never forwards stale hooks through a Claude installation.
+- A generated-read cost guard for literal direct shell and structured reads.
+  Targeted searches and deterministic scripts remain available. This guard is
+  not a security boundary and does not interpret arbitrary shell expansion or
+  code.
+- Runtime-selective initialization: `--runtime claude|codex|both`. Codex mode
+  adds AGENTS guidance and either project hooks or native plugin integration
+  with `--codex-hooks project|plugin`. Hook trust remains a user-controlled
+  Codex action. Re-enrollment refreshes DDD-owned project handlers; switching
+  to native hooks removes those handlers while preserving unrelated hooks.
+- Runtime-independent package and release validation in `scripts/release.mjs`,
+  with clean-main and monotonic-version gates and the existing annotated tag
+  convention.
+
+### Changed
+
+- CLI board discovery now works from a project root, subdirectory, board
+  directory, or linked worktree without Claude environment variables.
+  `DDD_PROJECT_DIR` provides an explicit host-neutral project context.
+- Shared skills derive ports, data, service ownership, and browser rules from
+  the target project's instructions instead of assuming the first host's
+  environment. Machine prechecks remain separate from human acceptance.
+- Codex and dual-runtime init leave Git staging and commits to the caller.
+  `--no-commit` also makes that choice explicit for Claude; initially dirty
+  Claude targets skip automatic staging and committing to preserve user work.
+- Root `plugin.json` is the version source for portable bundles. Existing
+  Claude-only bundles retain their version fallback; release validation checks
+  all packaged versions agree. Generated board content is unchanged apart from
+  its version stamp.
+
 ## [0.17.17] - 2026-09-24
 
 ### Added

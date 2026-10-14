@@ -10,8 +10,8 @@
 
 ## Language policy
 
-- Code comments and design docs are Chinese first. They carry the design reasoning, and the maintainers think in Chinese; translation tends to lose exactly the nuance the comments exist for.
+- Code comments and skill design guidance are Chinese first. They carry the design reasoning, and the maintainers think in Chinese; translation tends to lose exactly the nuance the comments exist for.
 - Anything a user can see at runtime (guard messages, gen's hard-failure errors) must go through the tables in `scripts/strings.mjs` and exist in both `zh` and `en`. The board's `config.lang` picks the table. The few gen failures that happen before the config is readable carry both languages in one string.
 - Repo-facing documents (README, CONTRIBUTING, LICENSE) are English.
 
-Claude reads both languages equally well; the split above is for the humans who audit and maintain this.
+Claude Code and Codex can both use either language; the split above is for the humans who audit and maintain this.

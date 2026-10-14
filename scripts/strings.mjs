@@ -29,6 +29,7 @@ const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} i
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
 const zh = {
+  generatedReadDenied: (paths) => `看板生成物不读全文:${paths.join('、')}。请读 manifest、docs 等源文件;用 DDD CLI 点查字段、audit 查审计、gen 验证渲染,或用 rg 精确检索生成物中的字符串。不要用 cat/head/sed 绕读。`,
   genFail: (err) =>
     `看板守卫:gen.mjs 重跑失败(多半是 manifest JSON 语法错),请修好再收工:\n${err}`,
   stampNewer: (stamp, mine) =>
@@ -406,6 +407,29 @@ const zh = {
     exportWrote: (file) => `ddd export:已写入 ${file}`,
   },
   init: {
+    failRuntime: (runtime) => `--runtime 只支持 claude|codex|both,给了 ${runtime} / --runtime supports claude|codex|both only: ${runtime}`,
+    failCodexHooks: (mode) => `--codex-hooks 只支持 project|plugin,给了 ${mode} / --codex-hooks supports project|plugin only: ${mode}`,
+    runtime: (stage, runtime) => `[${stage}] 运行时:${runtime}`,
+    failCodexInlineHooks: '.codex/config.toml 已含 inline hooks;为避免两种表示并存,本轮未写入。使用 --codex-hooks plugin 保留原生 plugin wiring,或先人工把 inline hooks 合入 .codex/hooks.json。',
+    failCodexFeatures: '.codex/config.toml 的 features 写法无法安全追加 hooks 开关;本轮未写入。请人工配置 [features] hooks = true,保留原有设置后重试。',
+    failCodexHookShape: '.codex/hooks.json 顶层/hooks 必须是对象,事件必须是数组;拒绝覆盖已有配置。',
+    planAgentsAdd: '[plan] AGENTS.md:追加 DDD 源文件/生成物保护段,保留原文',
+    planAgentsOk: '[plan] AGENTS.md:DDD 段已在,不变',
+    planCodexPlugin: (removed) => `[plan] Codex hooks:使用已安装 plugin 的原生 hooks;移除 ${removed} 个 init 生成的项目 handler,不添加项目 hooks/config`,
+    planCodexHooks: (n, replaced) => `[plan] .codex/hooks.json:追加 ${n} 个 DDD handler,替换 ${replaced} 个旧安装路径 handler,保留用户 hooks`,
+    planCodexFeature: '[plan] .codex/config.toml:只追加缺失的 [features] hooks = true,不重排原文',
+    planCodexFeatureOk: '[plan] .codex/config.toml:已有 hooks 开关,原文不变',
+    codexDisabled: '[init] ⚠ 保留宿主 hooks = false;Codex hooks 当前禁用,需人工启用才能运行守卫。',
+    codexTrust: '[init] 项目 .codex 层需受信任;打开 Codex /hooks 审阅并信任新增/变更的 hooks。init 不绕过信任。',
+    applyAgents: '[apply] ± AGENTS.md(追加 DDD 段)',
+    applyCodexHooks: (n, replaced, removed) => `[apply] ± .codex/hooks.json(追加 ${n} 个 DDD handler,替换 ${replaced} 个旧安装路径 handler,移除 ${removed} 个项目 handler)`,
+    applyCodexFeature: '[apply] ± .codex/config.toml(追加 hooks 开关)',
+    moveNoStage: 'mv(保留暂存区,待人工提交)',
+    planNoCommit: '[plan] git:保留工作区变更,不暂存/不提交(--no-commit 或 Codex 运行时缺省)',
+    planDirtyNoCommit: '[plan] git:目标已有变更,为保留用户修改和暂存区,本轮不自动提交',
+    applyNoCommit: '[apply] ✓ 变更留在工作区,未暂存/未提交',
+    applyDirtyNoCommit: '[apply] ⚠ 目标已有变更,本轮未自动暂存/提交;请审阅后手动提交',
+
     portCaveat: zhPortCaveat,
     scenario: {
       greenfield: 'greenfield(全新项目)',
@@ -559,6 +583,7 @@ const zh = {
 const enPortCaveat = 'Port probing only avoids ports that are being listened on right now — it cannot see ports another project wrote into its config but has not started. Multi-project machines need manual port allocation (design §5).'
 
 const en = {
+  generatedReadDenied: (paths) => `Do not read generated board files in full: ${paths.join(', ')}. Read manifest or docs sources; query fields with the DDD CLI, run audit for checks or gen to verify rendering, or use rg for a targeted string search. Do not read them through cat/head/sed.`,
   genFail: (err) =>
     `Kanban guard: gen.mjs re-run failed (most likely a manifest JSON syntax error). Please fix it before wrapping up:\n${err}`,
   stampNewer: (stamp, mine) =>
@@ -929,6 +954,29 @@ kanban.config.json). This command never commits — git add the card files yours
     exportWrote: (file) => `ddd export: written to ${file}`,
   },
   init: {
+    failRuntime: (runtime) => `--runtime supports claude|codex|both only: ${runtime}`,
+    failCodexHooks: (mode) => `--codex-hooks supports project|plugin only: ${mode}`,
+    runtime: (stage, runtime) => `[${stage}] runtime: ${runtime}`,
+    failCodexInlineHooks: '.codex/config.toml already defines inline hooks; no files were written. Use --codex-hooks plugin for native plugin wiring, or manually consolidate inline hooks into .codex/hooks.json before retrying.',
+    failCodexFeatures: 'Cannot safely add a hooks switch to this .codex/config.toml features syntax; no files were written. Manually set [features] hooks = true, preserve existing settings, and retry.',
+    failCodexHookShape: '.codex/hooks.json and its hooks key must be objects; hook events must be arrays. Refusing to overwrite existing configuration.',
+    planAgentsAdd: '[plan] AGENTS.md: append DDD source/generated-file guidance and preserve existing text',
+    planAgentsOk: '[plan] AGENTS.md: DDD section already present, unchanged',
+    planCodexPlugin: (removed) => `[plan] Codex hooks: use the installed plugin hooks; remove ${removed} init-generated project handler(s), add no project hooks/config`,
+    planCodexHooks: (n, replaced) => `[plan] .codex/hooks.json: add ${n} DDD handler(s), replace ${replaced} old-install handler(s), preserve user hooks`,
+    planCodexFeature: '[plan] .codex/config.toml: add only the missing [features] hooks = true switch, preserve existing text',
+    planCodexFeatureOk: '[plan] .codex/config.toml: hooks switch already present, text unchanged',
+    codexDisabled: '[init] ⚠ Preserved hooks = false; Codex hooks remain disabled. Enable them manually to run the guard.',
+    codexTrust: '[init] The project .codex layer must be trusted. Open Codex /hooks to review and trust new or changed hooks. init does not bypass trust.',
+    applyAgents: '[apply] ± AGENTS.md (appended DDD guidance)',
+    applyCodexHooks: (n, replaced, removed) => `[apply] ± .codex/hooks.json (added ${n} DDD handler(s), replaced ${replaced} old-install handler(s), removed ${removed} project handler(s))`,
+    applyCodexFeature: '[apply] ± .codex/config.toml (added hooks switch)',
+    moveNoStage: 'mv (index preserved, manual commit)',
+    planNoCommit: '[plan] git: keep changes in the worktree without staging or committing (--no-commit or Codex runtime default)',
+    planDirtyNoCommit: '[plan] git: target already has changes; skip automatic commit to preserve user edits and the index',
+    applyNoCommit: '[apply] ✓ Changes remain in the worktree, unstaged and uncommitted',
+    applyDirtyNoCommit: '[apply] ⚠ Target already had changes; no automatic staging/commit. Review and commit manually.',
+
     portCaveat: enPortCaveat,
     scenario: {
       greenfield: 'greenfield (brand-new project)',

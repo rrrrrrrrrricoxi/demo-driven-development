@@ -1,0 +1,12 @@
+{
+  "name": "demo-driven-development",
+  "interface": { "displayName": "Demo-driven development" },
+  "plugins": [
+    {
+      "name": "demo-driven-development",
+      "source": { "source": "local", "path": "./" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer tools"
+    }
+  ]
+}

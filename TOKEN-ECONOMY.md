@@ -1,39 +1,39 @@
 # TOKEN-ECONOMY —— 降本增效指南
 
-给人看的版本(讲道理,方便日后调整)。硬约束落在两个 skill 里(`skills/kanban-init/SKILL.md` 的 init 段、`skills/ddd-workflow/SKILL.md` 的日常段),执行层由 init 注入目标项目的 deny 规则 + CLAUDE.md 段兜底。
+这份指南解释两个 skill 中的低 token 规则。init 按所选宿主安装读保护与项目说明。Claude Code 和 Codex 的拦截能力不同;这些规则首先是 agent 的工作纪律,不是对任意 shell 命令或项目代码的完整隔离承诺。
 
 ## 第一原则
 
-**成本大头不在"写的文件多",在 Claude 亲手读写了本可由脚本确定性完成的东西。**
+**成本大头不在写了多少文件,而在 agent 亲手读取了本可由脚本确定性处理的数据。**
 
-实测尺度:一个成熟看板的 `index.html` 可达 ~50 万字符,Claude 读一次 ≈ 烧十几万 token。
+一个成熟看板的 `index.html` 可达约 50 万字符。读取一次可能消耗十几万 token。这个估算随内容和模型而变。
 
-推论:**确定性的活儿下沉到脚本,Claude 只花 token 做判断。脚本读正文不算违规,Claude 读才算。**
+推论:**确定性工作交给脚本,agent 只读完成判断所需的摘要和源文件。**脚本读取正文不会把正文加入 agent 上下文。
 
 ## 规则表
 
-| 规则 | 段 | 省在哪 |
+| 规则 | 阶段 | 目的 |
 |---|---|---|
-| 盘点走 `init.mjs --scan` 摘要,禁读 demo 正文 | init | 71 个 demo:摘要 ~70 行 vs 正文几十万 token |
-| **永不读生成物**(`index.html` / `shots.html` / `refs/**` / `parts/**`)—— deny 规则硬拦 + CLAUDE.md 注入段拦 `cat` 绕读 | 日常 | 单次省 10 万+ |
-| 查证走源头:卡状态 → `jq` 点查 manifest;文档 → 读 md 源;渲染对错 → gen 报错已由守卫喂回 | 日常 | manifest 是地基,`index.html` 是像素 |
-| manifest 不整读(可达数百 KB):`jq` / `Grep` 点查、聚合 | 日常 | 几百 token 替代几万 |
-| 归拢 / `mv` / 写存根由 `--apply` 一次批量完成 | init | N 次工具调用 → 1 次 |
-| 机械段派便宜模型 sub agent(现行策略:默认 opus,关键判断才上更贵档) | 两者 | 单价降档 |
-| 补卡内容不在 init 会话做,后续按需补 | init | 认知开销挪出一次性动作 |
-| 孤儿报警先 `grep` 核实再动手(并行会话有"落 demo → 补链接"竞态窗口,报警可能已过时) | 日常 | 避免重复补卡返工 |
+| 盘点使用 `init.mjs scan` 摘要,不读 demo 正文 | init | 用几十行摘要代替数十万字符正文 |
+| 不读生成物(`index.html` / `shots.html` / `refs/**` / `parts/**`) | 日常 | 单页可能有几十万字符;回到 manifest、Markdown 源和生成器报错查证 |
+| manifest 用 `jq`、CLI 或精确搜索点查,不整读 | 日常 | 避免把大型机器数据装进上下文 |
+| 归拢文件和创建存根由 `init.mjs apply` 批量完成 | init | 减少重复工具调用并维持一致性 |
+| 新卡正文留给后续任务按需补充 | init | 将一次性迁移与内容判断分开 |
+| 孤儿 demo 报警先查 manifest 再处理 | 日常 | 并行会话可能已补好链接,避免重复工作 |
+| 按任务选择工具、模型与并行方式 | 两者 | 尊重当前宿主能力、授权和任务复杂度 |
 
-## 查证走源头:对照表(别碰像素)
+## 查证走源头
 
-| 想查 | 走这里(源头) | 别做 |
+| 要查 | 使用 | 避免 |
 |---|---|---|
-| 卡片状态 / 某字段 | `jq` 点查对应 manifest,或 `ddd.mjs card show <id>` | Read 整个 manifest |
-| 这张卡的前置清了没 | `ddd.mjs card show <id>` 的「前置」行(逐项当前状态) | 自己去 release-manifest 里对号 |
-| 文档正文 | 读 `docs/` 下 markdown 源 | Read 渲染后的 `refs/*.html` |
-| 渲染对不对 | 跑 `node gen.mjs`,看报错 | Read `index.html` 肉眼找 |
-| 某字符串在不在生成物里 | `Grep` 精确匹配 | Read 全文 |
-| `gen.mjs` 某段逻辑 | `Grep` 定位 / `offset`+`limit` 分片读 | 整读第二遍 |
+| 卡片状态或字段 | `ddd.mjs card show|list` 或 `jq` 点查 manifest | 整读 manifest |
+| 文档正文 | 读取 `docs/` 中的 Markdown 源 | 读取渲染后的 `refs/*.html` |
+| 渲染结果是否有效 | 运行 `gen.mjs`,检查输出与退出码 | 通读 `index.html` 搜问题 |
+| 字符串是否出现在产物 | 对目标字符串做精确搜索 | 读取整份产物 |
+| `gen.mjs` 中的逻辑 | 搜索定位并分段阅读 | 每次整读大文件 |
 
-## 一句话
+## 宿主拦截范围
 
-**地基(manifest / md 源 / gen 报错)是真源,像素(index.html / refs.html / shots.html)是产物;查证永远回真源,产物交给脚本生成、交给 deny 规则挡在门外。**
+Claude Code 的 deny 规则与 Codex 的 hook 能检查各自支持的工具入口。它们可以拒绝直接的全文读取请求,但不保证检查任意 shell、脚本或项目代码对同一文件的读取。不要用机器 precheck 代替 agent 遵守源头查证规则,也不要把 precheck 结果当成人的验收结论。
+
+**一句话**:**manifest、Markdown 源和生成器输出是真源;生成 HTML 是产物。查证回到源头,让脚本生成产物,按当前宿主能力保护直接读取入口。**

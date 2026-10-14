@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "demo-driven-development",
+  "version": "0.18.0",
+  "description": "Demo-driven decisions, a source-based kanban, deterministic tools, and lifecycle guards for coding agents.",
+  "author": { "name": "rrrrrrrrrricoxi" },
+  "repository": "https://github.com/rrrrrrrrrricoxi/demo-driven-development",
+  "license": "MIT",
+  "keywords": ["demo", "kanban", "development", "codex", "claude"],
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/codex-hooks.json",
+      "interface": {
+        "displayName": "Demo-driven development",
+        "shortDescription": "Review visual choices and track decisions with a guarded kanban."
+      }
+    }
+  }
+}

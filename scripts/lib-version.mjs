@@ -2,21 +2,28 @@
 // 背景(盖板事故):长寿旧版 session 的 Stop hook 会拿旧 gen 反复盖板;mtime 新鲜度分不出「谁写的」——
 // 旧 gen 盖完板产物反而最新。版本戳补上这一维:index.html 第二行 <!-- ddd-gen vX.Y.Z --> 由
 // gen 烙下,守卫据此判「产物比我新还是比我旧」,自愈旧 gen 覆盖、拒绝降级覆盖。
-import { closeSync, openSync, readFileSync, readSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * 本 plugin 版本(../.claude-plugin/plugin.json 为真源)。读不到或**非纯数字点分**返回 null——
+ * 本 plugin 版本(根 plugin.json 为真源,旧安装退到 .claude-plugin/plugin.json)。两个 manifest
+ * 同在时必须同版,不能让不同宿主烙不同的戳。读不到或**非纯数字点分**返回 null——
  * 版本文法必须闭环:readStamp 只认 [0-9.],若放行 0.7.0-rc1 这类版本,烙出的戳读回是 null →
  * 「戳缺失→重跑」变永动;cmpVer 也会全程 NaN 让拒降级/退役静默失效。调用方自行决定降级或硬失败。
  */
-export function readPluginVersion() {
+export function readPluginVersion(root = join(dirname(fileURLToPath(import.meta.url)), '..')) {
   try {
-    const p = join(dirname(fileURLToPath(import.meta.url)), '..', '.claude-plugin', 'plugin.json')
+    const portable = join(root, 'plugin.json')
+    const legacy = join(root, '.claude-plugin', 'plugin.json')
+    const p = existsSync(portable) ? portable : legacy
     const v = JSON.parse(readFileSync(p, 'utf8')).version
     if (typeof v !== 'string' || !/^\d+(\.\d+)*$/.test(v)) {
       if (v) console.error(`[lib-version] ⚠ plugin.json version「${v}」非纯数字点分(勿用 -rc/-beta 后缀),视同读不到——戳体系要求版本文法闭环`)
+      return null
+    }
+    if (p === portable && existsSync(legacy) && JSON.parse(readFileSync(legacy, 'utf8')).version !== v) {
+      console.error('[lib-version] plugin.json 与 Claude manifest 版本不一致 / Plugin manifest versions disagree')
       return null
     }
     return v
