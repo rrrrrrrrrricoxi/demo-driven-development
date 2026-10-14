@@ -4,21 +4,24 @@
 // 目录探测会误伤 Next.js app-router 的 app/kanban/ 路由,见 §6-1)。
 // 路径 v0.1 写死 app/kanban/(YAGNI,monorepo 自定义路径将来再议)。
 //
-// 两级查找(§6-2,防「子目录起会话守卫无声下岗」):
-//   1. P = $CLAUDE_PROJECT_DIR,缺失回落 process.cwd() → 试 P/app/kanban
-//   2. 不中 → 从 P 跑 git rev-parse --show-toplevel 得 root → 试 root/app/kanban
-// 两级都不中 → 返回 null(调用方静默 exit 0)。
-import { existsSync } from 'node:fs'
+// P = DDD_PROJECT_DIR > 事件 cwd > CLAUDE_PROJECT_DIR > 进程 cwd。
+// 先认看板目录本身,再试 P/app/kanban,最后经 Git 根查找(含 worktree)。
+// 全不中 → 返回 null(调用方静默 exit 0)。
+import { statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const CONFIG = 'kanban.config.json'
 
 /** @returns {string|null} 看板目录绝对路径(含 kanban.config.json),非 DDD 项目返回 null */
-export function detect() {
-  const P = process.env.CLAUDE_PROJECT_DIR || process.cwd()
+export function detect({ cwd } = {}) {
+  // DDD 显式上下文优先;事件 cwd 防止从别的目录启动 hook 时误判项目。
+  const eventCwd = typeof cwd === 'string' && cwd ? cwd : null
+  const P = resolve(process.env.DDD_PROJECT_DIR || eventCwd || process.env.CLAUDE_PROJECT_DIR || process.cwd())
+  const configured = (dir) => { try { return statSync(join(dir, CONFIG)).isFile() } catch { return false } }
+  if (configured(P)) return P // 保留直接从看板目录运行 CLI 的入口。
   const direct = join(P, 'app', 'kanban')
-  if (existsSync(join(direct, CONFIG))) return direct
+  if (configured(direct)) return direct
   try {
     const root = execSync('git rev-parse --show-toplevel', {
       cwd: P,
@@ -26,7 +29,7 @@ export function detect() {
     }).toString().trim()
     if (root) {
       const viaRoot = join(root, 'app', 'kanban')
-      if (existsSync(join(viaRoot, CONFIG))) return viaRoot
+      if (configured(viaRoot)) return viaRoot
     }
   } catch {}
   return null

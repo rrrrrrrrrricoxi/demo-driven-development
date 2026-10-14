@@ -1,11 +1,11 @@
 ---
 name: ddd-workflow
-description: Demo-driven development workflow for a project that has the demo-driven kanban installed (an app/kanban/kanban.config.json exists). Use when building or changing any UI/UX or feature so it follows the house rhythm — one HTML demo per decision, a kanban card, human review, then code, verify, PR — and to enforce the token-economy hard rules for day-to-day work on the kanban (never read generated files, verify from source-of-truth). Step 0 (inside the skill) gates only the demo ritual to SEE-IT taste forks — load the skill even for correctness/derivable (KNOW-IT) work; it routes those to spec-and-verify and the token rules still apply. Not for initial setup; see kanban-init for that.
+description: Guide feature work in a project with the demo-driven kanban. Distinguishes SEE-IT design choices from KNOW-IT correctness work, then covers cards, demos, review, verification, PRs, and source-only kanban work. For setup, use kanban-init.
 ---
 
 # ddd-workflow —— demo 驱动开发工作流
 
-固化首宿主项目长出来的节奏:**机制归 plugin、数据归项目**。仅当项目已装看板(存在 `app/kanban/kanban.config.json`)时适用。
+固化 demo 驱动工作节奏:**机制归 plugin、数据归项目**。仅当项目已装看板(存在 `app/kanban/kanban.config.json`)时适用。plugin 脚本使用 `node <plugin>/scripts/...`;从当前 skill 路径 `<plugin>/skills/ddd-workflow/SKILL.md` 可解析 plugin 根目录,不要依赖某个宿主提供的 plugin-root 环境变量。
 
 ## 第 0 步:场景自检(动手前先答,两问)
 
@@ -18,7 +18,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 ## 写卡走 CLI(v0.14.0)
 
-建卡、改状态、记进展、挂链接一律走 `node <plugin>/scripts/ddd.mjs`(零依赖,`--dir` 与 gen 同口径),不再手搓 JSON:
+建卡、改状态、记进展、挂链接一律走 `node <plugin>/scripts/ddd.mjs`(零依赖)。CLI 从项目根目录、子目录或看板目录定位看板;`DDD_PROJECT_DIR` 可指定项目根目录,`--dir` 可显式指定看板目录。不再手搓 JSON:
 
 | 要做的事 | 命令 |
 |---|---|
@@ -80,7 +80,7 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 | 要做的事 | 命令 |
 |---|---|
-| 记一条代验 | `ddd.mjs acc precheck 293 AC3 --result ok\|bad\|blocked --note "看到了什么" --env 5177+8003 --shot shots/pre-293/AC3-1.png --caption "这一步看到什么"`(`--shot` 可给几组) |
+| 记一条代验 | `ddd.mjs acc precheck 293 AC3 --result ok\|bad\|blocked --note "看到了什么" --env <project-approved-endpoints> --shot shots/pre-293/AC3-1.png --caption "这一步看到什么"`(`--shot` 可给几组) |
 | 同一条重跑一轮 | 同上再加 `--new-round`:上一轮的图与代验先搬进旧轮(`shotsHistory`),板上最外层只剩新一轮,旧轮折叠在下面 |
 | 只搬轮不写 | `ddd.mjs acc shots rotate 293 AC3 [--round r2]` |
 | 撤掉代验 / 看全表 | `ddd.mjs acc precheck 293 AC3 --clear` / `ddd.mjs acc precheck 293 --list` |
@@ -89,37 +89,35 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 **八条规矩,每条后面跟自查判据**(派活的需求书里原样带上):
 
-1. **不碰人的口**:命令与 URL 里出现 5175 / 8002(或 config 里标为常驻测试口的端口)即违规。临时口只许 5177–5179 / 8003–8004。自查:跑完 `grep -c "5175\|8002" <自己的命令记录>` 必须为 0。
-2. **自起浏览器**:用 node playwright 自己起 chromium,不用 playwright MCP 的共享浏览器。自查:进程列表里自己起的浏览器带自己的 user-data-dir。
-3. **自造数据、用完即删**:产品名/批号带统一前缀(如 `代验-<PR>-`),跑完用界面的删除路径删掉;删不掉的写进 precheck note。自查:结束时按前缀搜列表为 0 条。
+1. **遵守项目服务所有权**:先读项目明确的运行规则与服务配置,再选端口和环境。不要 probe、占用、重启或改动标为共享、常驻或他人拥有的服务。只有项目规则明确允许时才启动临时服务;记录自己启动的进程与端点。
+2. **遵守项目浏览器规则**:使用项目指定的浏览器与 profile。若规则要求隔离浏览器,为本次验证启动独立 profile;若项目允许共享浏览器,仍须遵守其中的会话和数据边界。
+3. **遵守数据所有权与授权**:需要测试数据时使用项目允许的合成数据和隔离账号。清理前确认数据由本次验证创建、项目规则允许删除,且没有其他会话在用;保留无法安全清理的项目并在 precheck note 说明。
 4. **一条一图起步**:每条至少一张截图,截到 exp 说的那个东西或者不一致的那个东西;多步的每步一张,caption 写这一步看到什么。自查:`acc precheck <PR> --list` 里每条都带「N 张图」,N ≥ 1。
 5. **只记事实,不改期望**:exp / bad / why 一个字不改;与预期不符写 `bad` + 看到了什么。自查:`git diff` 里 acceptance-manifest.json 的改动只落在 `precheck` / `shots` / `shotsHistory` 三个键上。
 6. **不替人判**:不写 acceptance-feedback.jsonl,不点 ✓ / ✕。自查:`git status` 里 acceptance-feedback.jsonl 不在改动列表。
-7. **收尾**:停掉自己起的前后端进程(只杀自己记下的 pid),不动别人的;不在主树跑裸 `vite build`。自查:自己记下的 pid 全部不在进程表里(`ps -p <pid>` 逐个查空);不为「确认别人的口还在」去探 5175 / 8002 —— 探一下就已经违反第 1 条。
+7. **收尾**:按项目规则停止本次验证启动的进程,只操作自己拥有的 PID。不要在主工作树运行会覆盖共享构建产物的命令。自查:逐个确认自己记录的 PID 已退出;不要 probe 或停止他人服务来确认状态。
 8. **写回走 CLI**:`acc precheck …`,不手改 manifest;截图落 `shots/pre-<pr>/`(不用 `acc-` 前缀,那是 gitignore 的人工签字截图)。自查:截图全在 `shots/pre-<PR>/` 下,没有一张以 `acc-` 打头。
 
 **需求书样板**(给 agent 的 prompt,填掉尖括号直接用):
 
 ```text
 你是代验 agent。PR #<PR> 的验收清单在 app/kanban/acceptance-manifest.json(只读;写回只许用下面的 CLI)。
-临时口:前端 <5177>,后端 <8003>。分支 <分支名>,在自己的 worktree <路径> 里起服务,记下每个 pid。
+项目允许的验证环境与端点:<按项目明确规则填写>。分支 <分支名>,在项目指定的 checkout/worktree 中运行,记录自己启动的进程。
 
 对清单里每一条(先跑 `node <plugin>/scripts/ddd.mjs acc precheck <PR> --list` 拿全表):
 1. 照 do 做一遍,看 exp 说的那个东西;多步的每步截一张,存 app/kanban/shots/pre-<PR>/<条目>-<步>.png。
 2. 写回:node <plugin>/scripts/ddd.mjs acc precheck <PR> <条目> --result ok|bad|blocked \
-     --note "<看到了什么,事实不写判断>" --env <5177>+<8003> --shot shots/pre-<PR>/<条目>-1.png --caption "<这一步看到什么>" …
+     --note "<看到了什么,事实不写判断>" --env <project-approved-endpoints> --shot shots/pre-<PR>/<条目>-1.png --caption "<这一步看到什么>" …
    同一条已经有上一轮的代验时加 --new-round。
 
 硬规矩(每条都要自查,违反任何一条就停下来报告,不要自己绕):
-- 命令与 URL 里出现 5175 或 8002 即违规。自查:结束时 grep -c "5175\|8002" <你的命令记录> 必须为 0。
-- 浏览器用 node playwright 自己起 chromium(带自己的 user-data-dir),不用 playwright MCP 的共享浏览器。自查:命令记录里没有一次 playwright MCP 的工具调用;ps 里你起的 chromium 带你自己的 user-data-dir。
-- 自造的数据一律带前缀「代验-<PR>-」,跑完从界面删掉;删不掉的写进那一条的 note。自查:按前缀搜列表为 0 条。
+- 先核对项目明确的服务、浏览器与数据所有权规则;不触碰未授权的共享资源。自查:环境与端点符合这些规则,新增数据有来源说明,清理动作只涉及本次创建且允许删除的数据。
 - exp / bad / why 一个字不改;与预期不符就写 bad,把看到的写进 note。自查:git diff app/kanban/acceptance-manifest.json 的改动只落在 precheck / shots / shotsHistory 三个键上。
 - 不写 acceptance-feedback.jsonl,不点 ✓ / ✕ —— 判定是人的。自查:git status 里 acceptance-feedback.jsonl 不在你新增的改动里。
-- 收尾只杀自己记下的 pid;不在主树跑裸 vite build。自查:你记下的 pid 用 ps -p 逐个查都已不在;不要去探 5175 / 8002 还在不在(一探就违反第一条)。
+- 收尾只停止自己启动且仍由自己拥有的进程;不要在主树覆盖共享构建产物。自查:记录的 PID 均已退出,没有为确认他人服务而 probe 或停止服务。
 - 不手改 acceptance-manifest.json;截图不用 acc- 前缀。自查:截图全在 shots/pre-<PR>/ 下,没有一张以 acc- 打头;acc precheck <PR> --list 里每条都至少 1 张图。
 
-交付:每条一行「条目 · ok/bad/blocked · 一句看到了什么」,外加自查结果(grep 计数、前缀搜索条数、pid 是否全停)。
+交付:每条一行「条目 · ok/bad/blocked · 一句看到了什么」,外加自查结果(项目要求的端点/数据检查、pid 是否全停)。
 ```
 
 ## 看板只在主线上改(v0.15.14)
@@ -134,9 +132,9 @@ description: Demo-driven development workflow for a project that has the demo-dr
 
 ## 日常段 token 硬规则(命令式,不是建议)
 
-成本大头是"Claude 亲手读了本可由脚本确定性产出的东西"。脚本读正文不算,Claude 读才算。
+成本大头是 agent 亲手读了本可由脚本确定性产出的东西。脚本读正文不算这类上下文成本;agent 只读取完成判断所需的输出。
 
-- **永不读生成物**:`app/kanban/index.html`、`shots.html`、`refs/**`、`parts/**` 是 `gen.mjs` 的产物(单文件可达几十万字符)。禁止 Read,禁止 `cat`/`head`/`sed` 绕读。deny 规则会硬拦。
+- **永不读生成物**:`app/kanban/index.html`、`shots.html`、`refs/**`、`parts/**` 是 `gen.mjs` 的产物(单文件可达几十万字符)。直接全文读取这些文件违反 token 规则。宿主拦截机制只覆盖其明确支持的读取入口,不能保证拦截任意 shell 命令或代码读取;不要把机器 precheck 当作完整隔离。
 - **manifest 不整读**:查卡状态 / 某字段一律 `ddd.mjs card show|list`、`jq` 点查或 `Grep`,不整读(可达数百 KB)。
 - **查证走源头,不碰像素**:卡状态 → `ddd.mjs card show <id>`(或 `jq` 点查 manifest);文档正文 → 读 `docs/` 的 md 源;渲染对不对 → 跑 `gen.mjs` 看报错(守卫已把失败喂回),不 Read `index.html` 肉眼找。
 - **`gen.mjs` 大文件**:`Grep` 定位或 `offset`+`limit` 分片读,不整读第二遍。

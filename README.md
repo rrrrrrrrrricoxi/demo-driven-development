@@ -1,6 +1,6 @@
 # demo-driven-development
 
-A Claude Code plugin that turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a single-file kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
+A Claude Code and Codex plugin that turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
 
 ## The idea
 
@@ -17,7 +17,7 @@ This plugin packages the SEE-IT half as a workflow:
 ## What's in the box
 
 - Two skills. `ddd-workflow` is the day-to-day rhythm: scene-fit check, demo, human review, then code, verify, PR. `kanban-init` scaffolds a new board, merges scattered demos into one, or takes over a legacy hand-rolled board.
-- Two hooks. A Stop guard regenerates the board when inputs change and blocks demos that aren't linked to any card. A second hook nudges card status after `gh pr` actions. Both check whether the project actually uses this plugin before doing anything, so they stay silent everywhere else.
+- Host adapters run the Stop guard and `gh pr` reminder. The Codex adapter handles Stop, PreToolUse, and PostToolUse events; its hook definitions use Codex's current tool names. Both adapters check whether the project actually uses this plugin before doing anything.
 - `gen.mjs` builds the kanban (`index.html`) from four fixed manifest JSONs (iterations, backlog, decisions, decision path), plus the acceptance and release manifests when those tabs are switched on. It also renders project markdown into board-local pages and injects a back-navigation bar into each demo.
 - `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
 - `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
@@ -30,29 +30,40 @@ The rest is optional and gets a section each below: `docSegments`, `themeColors`
 
 ## Install
 
-Inside the target project's Claude Code session:
+### Claude Code
 
 ```
 /plugin marketplace add rrrrrrrrrricoxi/demo-driven-development --scope project
 /plugin install demo-driven-development@demo-driven-development --scope project
 ```
 
-`--scope project` writes both entries into the repo's `.claude/settings.json`, so teammates get the workflow with no per-machine setup. Outside a session, the same two steps are `claude plugin marketplace add …` and `claude plugin install …`.
+`--scope project` writes both entries into the repo's `.claude/settings.json`, so teammates get the workflow with no per-machine setup. Outside a session, use `claude plugin marketplace add …` and `claude plugin install …`.
+
+### Codex
+
+Add the Git marketplace and install the plugin with the Codex CLI:
+
+```
+codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git
+codex plugin add demo-driven-development@demo-driven-development
+```
+
+Codex asks you to review and trust bundled hooks before they run. Open `/hooks` to review them. Plugin installation does not auto-trust hooks. See [host integration notes](docs/hosts.md#codex) before initializing a project.
 
 ## Quick start (new project)
 
 ```
 node <plugin>/scripts/init.mjs scan  --dir <projectRoot>
-node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand MyApp
-node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand MyApp --yes
+node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand MyApp --runtime codex --codex-hooks plugin
+node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand MyApp --runtime codex --codex-hooks plugin --yes --no-commit
 python3 app/kanban/serve.py        # then open the printed port
 ```
 
-`apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), adds deny rules so Claude never wastes tokens reading generated files, and appends a short section to the project's CLAUDE.md. Re-running it is a no-op. For projects that already have scattered demos or an older hand-rolled board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. Details live in `skills/kanban-init/SKILL.md`.
+`apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), adds the selected host's read guard, and appends host-specific project instructions. The default runtime is `claude`; use `--runtime codex` or `--runtime both` to select Codex or both hosts. This quick start uses bundled hooks from the native Codex plugin, avoiding duplicate project hooks. For project-local hooks, use `--codex-hooks project`; the absolute hook path is machine-specific, so rerun init with `--runtime codex --codex-hooks project` after cloning to another machine, switching hosts, or changing the plugin path. `--no-commit` leaves the changes uncommitted. Re-running it is a no-op. For projects that already have scattered demos or an older hand-rolled board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. Details live in `skills/kanban-init/SKILL.md` and [host integration notes](docs/hosts.md).
 
 ## How the guard works
 
-On every Stop, the guard compares mtimes: if any manifest, demo, theme file, or the generator itself is newer than `index.html`, it regenerates the board, so nobody has to remember to ask for an update. `gen` also writes a version stamp (`<!-- ddd-gen vX.Y.Z -->`) on line 2 of `index.html`. A session running an older plugin refuses to overwrite newer output and warns instead; a newer plugin heals older output automatically. Separately, every `demos/*.html` must be referenced by a manifest or listed in `demos/.no-card-ok`, otherwise the session is blocked until the demo gets a card.
+When the configured Stop guard runs, it compares mtimes: if any manifest, demo, theme file, or the generator itself is newer than `index.html`, it regenerates the board. `gen` also writes a version stamp (`<!-- ddd-gen vX.Y.Z -->`) on line 2 of `index.html`. A session running an older plugin refuses to overwrite newer output and warns instead; a newer plugin heals older output automatically. Separately, every `demos/*.html` must be referenced by a manifest or listed in `demos/.no-card-ok`, otherwise the session is blocked until the demo gets a card.
 
 What the guard says is sorted into three levels, by what happens if you ignore it rather than by how stern it sounds. **Blocking** — an orphan demo, a freshly created card whose prose runs past 800 characters with no `detail` — prints in full and stops the session; a second Stop in the same round downgrades it to a warning so nothing can loop. **Broken** — a missing card directory, a card filename that disagrees with the id inside, a card or acceptance list that is not valid JSON, a duplicated pull request or item id, a list pointing at a card that does not exist, generated board files sitting on a branch or stuck in a conflict, a `merge=ours` attribute with no driver defined, board changes on a non-mainline branch — also prints in full, one paragraph each. That level is normally empty, so squeezing it into a number would just hide it. **Chores** — long prose on older cards, uncommitted acceptance feedback, prunable feedback screenshots, cards waiting to be settled, cards settled early, settle holds past their 14 days, prerequisites just cleared, the backlog's count of what can be started now against its WIP limit — are eight categories that are normally non-empty and mostly belong to someone else's line, so since 0.17.5 they collapse — since 0.17.8 into one single unbroken line:
 
@@ -60,9 +71,11 @@ What the guard says is sorted into three levels, by what happens if you ignore i
 看板守卫 5 条提醒(详情 ddd audit):正文过长没拆 detail 9 张(最长 BL-28)· 已收但 PR 还开着 BL-C74 · 暂不收账满 14 天 BL-C25 · 前置已清可开工 BL-C73、BL-C134 · 可立即做 22/20 超上限
 ```
 
-Categories at zero do not appear, and if all eight are zero the line is gone — with one exception, the last item. Since 0.17.11 a board that sets `config.wip` reports its backlog count on every Stop, under the limit (`可立即做 12/20`) as well as over it (`可立即做 22/20 超上限`): that is the number the backlog is steered by, and it is least useful once it is already too late to act on. It is always last, so the line ends in the same place every time, and when the other seven are empty the line is the header plus that one item. A board that does not set `config.wip` says nothing about it at all. The order is fixed, and each item names up to three cards — the rest becomes "and N in all" — because a count alone cannot tell you whether any of it is yours. One line rather than one per category, because Claude Code renders every newline in a hook's `systemMessage` as its own "Stop says" bubble: six lines are six bubbles, which on a phone takes more room than the single line the phone would have wrapped itself. For the same reason the blocking and broken levels each print as one unbroken line too, their internal breaks swapped for ` · `. What the line never carries is a command, a path, or an explanation of how to deal with it: that is what `node <plugin>/scripts/ddd.mjs audit` is for, which prints all three levels in full, and `--session <session tag>` narrows the card-scoped ones to one line of work (`--line` is accepted too, as a synonym). Where `ddd.mjs` actually lives is said once, below and in the board section of your `CLAUDE.md` — the line prints on every Stop, and an absolute install path costs four lines on a phone. Guard and `audit` share one implementation (`scripts/audits.mjs`), so the two can never disagree.
+Categories at zero do not appear, and if all eight are zero the line is gone — with one exception, the last item. Since 0.17.11 a board that sets `config.wip` reports its backlog count on each Stop, under the limit (`可立即做 12/20`) as well as over it (`可立即做 22/20 超上限`). A board that does not set `config.wip` says nothing about it. Each item names up to three cards; remaining cards are counted. The guard keeps each severity level on one line. It leaves commands and explanations to `node <plugin>/scripts/ddd.mjs audit`, which prints all three levels in full; `--session <session tag>` narrows card-scoped findings to one line of work (`--line` is a synonym). Guard and `audit` share one implementation (`scripts/audits.mjs`).
 
-A hook process is bound to the plugin version its session started with, so upgrading the plugin mid-session used to leave that session's guard permanently old — and an old `gen` may not overwrite newer output, which froze the board until someone restarted. Since 0.16.2 the hook checks first: if the board's stamp is newer than itself, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and, when that install is at least as new as the board's output and is not itself, hands the whole hook over — same stdin, environment and working directory — returning that version's stdout, stderr and exit code unchanged. Since 0.17.8 a successful forward says nothing at all: the point of forwarding is to make the version gap invisible, and a note repeated on every Stop of that session is the opposite of invisible. `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read, holds no newer install, or holds one that is still older than the board's output, the old behaviour stands: skip regeneration and say why. Running `gen.mjs` by hand from an old path is still refused — the forwarding is the guard's, not the generator's.
+### Claude Code hook version handling
+
+A Claude Code hook process is bound to the plugin version its session started with. Since 0.16.2, if the board's stamp is newer than the running hook, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and forwards the whole hook when that install is at least as new as the board and is not itself. Since 0.17.8 a successful forward says nothing; `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read or has no sufficiently new install, the old hook skips regeneration and says why. Running `gen.mjs` by hand from an old path is still refused.
 
 ## Upgrading
 
@@ -80,11 +93,11 @@ Release history is in [CHANGELOG.md](CHANGELOG.md); the process for cutting a re
 - The PR reminder hook watches the `gh` CLI.
 - `serve.py` needs Python 3; the helper scripts assume macOS or Linux.
 - The board lives at `app/kanban/` (fixed path, on purpose).
-- Skills, docs, and code comments are written in Chinese; runtime guard messages follow the board's `config.lang` (`zh` or `en`). Claude executes either language equally well. Chinese-first docs are a maintainer choice, not a runtime limitation.
+- Skills, docs, and code comments are written in Chinese; runtime guard messages follow the board's `config.lang` (`zh` or `en`). Chinese-first docs are a maintainer choice, not a runtime limitation.
 
 ## Token economy
 
-A mature board's `index.html` can reach hundreds of thousands of characters. `TOKEN-ECONOMY.md` is the cost discipline that keeps Claude from ever reading generated files: verify from the source of truth (manifests, markdown sources, generator exit codes) instead. `kanban-init` wires deny rules into the target project, so the discipline is enforced rather than advisory.
+A mature board's `index.html` can reach hundreds of thousands of characters. `TOKEN-ECONOMY.md` explains how both host adapters support source-only verification. Read manifests and Markdown sources, and use generator results instead of reading generated files. Host guards cover only the tool entry points they can inspect; they do not block arbitrary shell or code reads.
 
 ## Document library sections (optional)
 

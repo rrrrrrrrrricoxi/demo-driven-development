@@ -58,11 +58,12 @@ let raw = ''
 if (!process.stdin.isTTY) { try { raw = readFileSync(0, 'utf8') } catch {} }
 let hook = {}
 try { hook = JSON.parse(raw) } catch {}
+if (!hook || typeof hook !== 'object' || Array.isArray(hook)) hook = {}
 if (hook.tool_name && hook.tool_name !== 'Bash') process.exit(0)
 const cmd = String((hook.tool_input || {}).command || '').trim()
 if (!MERGE_RE.test(cmd)) process.exit(0) // 其它命令:零输出、零延迟
 
-const KANBAN = detect()
+const KANBAN = detect({ cwd: hook.cwd })
 if (!KANBAN) process.exit(0) // 非 DDD 项目:一个字都不说
 const S = loadStrings(KANBAN)
 const GEN = join(dirname(fileURLToPath(import.meta.url)), 'gen.mjs')

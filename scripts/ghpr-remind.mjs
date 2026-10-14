@@ -17,10 +17,11 @@ let hook = {}
 if (!process.stdin.isTTY) {
   try { hook = JSON.parse(readFileSync(0, 'utf8')) } catch {}
 }
+if (!hook || typeof hook !== 'object' || Array.isArray(hook)) hook = {}
 const cmd = hook?.tool_input?.command ?? ''
 if (!cmd.startsWith('gh pr ')) process.exit(0) // 先验命令,免得每条 Bash 都起 git 子进程
 
-const KANBAN = detect()
+const KANBAN = detect({ cwd: hook.cwd })
 if (!KANBAN) process.exit(0)
 
 // 合 PR 是「阶段完成」最硬的信号:那一刻的提醒换成收账动作(v0.13.0 定稿 §2.4),

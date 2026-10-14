@@ -5,7 +5,10 @@
 //   node scripts/init.mjs plan  [--dir <targetRoot>] [选项]     输出将执行的动作(只读)
 //   node scripts/init.mjs apply [--dir <targetRoot>] [选项]     动手(全程持 .init-lock)
 //
-// 选项:--brand X  --lang zh|en  --port N
+// 选项:--runtime claude|codex|both(缺省 claude)
+//       --codex-hooks project|plugin(缺省 project;原生 plugin 装法选 plugin 防重复)
+//       --no-commit(Claude 清洁仓库缺省自动提交;Codex/both/已有修改不自动暂存提交)
+//       --brand X  --lang zh|en  --port N
 //       --with-narrative(铺 path-manifest 叙事模块,缺省不铺——D45 拍板③)
 //       --take-assets(scan 列出的同层非 HTML 资源随归拢一起迁,缺省只列名不动)
 //       --only <p,..> | --exclude <p,..>(归拢挑选,互斥;逗号分隔 repo 相对路径或
@@ -20,7 +23,8 @@
 //   2. settings 注入:templates/settings-inject.json 的 permissions.deny 深合并进
 //      <targetRoot>/.claude/settings.json(去重合并,绝不覆盖其他键)
 //   3. CLAUDE.md 注入:追加 templates/claude-md-section.md(已含标记节则跳过)
-//   4. apply 末尾自跑 gen 冒烟 + 守卫冒烟(首次失败不留给守卫);git 仓库只 add 触碰路径并提交
+//   Codex 改为 AGENTS.md + .codex/hooks.json,只追加缺失的 hooks 开关且保留宿主关闭选择。
+//   4. apply 末尾自跑 gen 冒烟 + 已选运行时守卫冒烟;Claude 清洁仓库只 add 触碰路径并提交
 //
 // brownfield 散落归拢(设计 §7 merge 表,先报告后动手):
 //   scan  盘点散落 demo(脚本读正文提 <title>/资产引用,报告只含摘要不含正文)、
@@ -62,7 +66,7 @@ const MANIFEST_FILES = ['manifest.json', 'decisions-manifest.json', 'backlog-man
 // v0.12.0 的两份 opt-in manifest:只在全新看板铺空模板(存量看板升级时不动 —— 铺进去就成了
 // 「板上多了两个没人填的文件」;两个 tab 缺省关,文件不在也毫无影响)。
 const OPTIN_MANIFEST_FILES = ['acceptance-manifest.json', 'release-manifest.json']
-const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--brand X] [--lang zh|en] [--port N] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
+const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--runtime claude|codex|both] [--codex-hooks project|plugin] [--no-commit] [--brand X] [--lang zh|en] [--port N] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
 
 let S = pickStrings('zh') // main() 里按 --lang / config.lang 重选
 
@@ -70,9 +74,9 @@ const fail = (msg) => { console.error(`[init] ✗ ${msg}`); process.exit(1) }
 
 // ---- CLI 解析 ----
 function parseArgs(argv) {
-  const opt = { cmd: null, dir: null, brand: null, lang: null, port: null, stubStatus: null, only: null, exclude: null, remember: false, withNarrative: false, takeAssets: false, yes: false }
-  const valued = { '--dir': 'dir', '--brand': 'brand', '--lang': 'lang', '--port': 'port', '--stub-status': 'stubStatus', '--only': 'only', '--exclude': 'exclude' }
-  const flags = { '--yes': 'yes', '--with-narrative': 'withNarrative', '--take-assets': 'takeAssets', '--remember': 'remember' }
+  const opt = { cmd: null, dir: null, runtime: 'claude', codexHooks: 'project', noCommit: false, brand: null, lang: null, port: null, stubStatus: null, only: null, exclude: null, remember: false, withNarrative: false, takeAssets: false, yes: false }
+  const valued = { '--dir': 'dir', '--runtime': 'runtime', '--codex-hooks': 'codexHooks', '--brand': 'brand', '--lang': 'lang', '--port': 'port', '--stub-status': 'stubStatus', '--only': 'only', '--exclude': 'exclude' }
+  const flags = { '--no-commit': 'noCommit', '--yes': 'yes', '--with-narrative': 'withNarrative', '--take-assets': 'takeAssets', '--remember': 'remember' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a in valued) {
@@ -84,6 +88,8 @@ function parseArgs(argv) {
     else fail(`多余参数 ${a}\n${USAGE}`)
   }
   if (!['scan', 'plan', 'apply'].includes(opt.cmd)) fail(USAGE)
+  if (!['claude', 'codex', 'both'].includes(opt.runtime)) fail(S.init.failRuntime(opt.runtime))
+  if (!['project', 'plugin'].includes(opt.codexHooks)) fail(S.init.failCodexHooks(opt.codexHooks))
   if (opt.lang !== null && !['zh', 'en'].includes(opt.lang)) fail(`--lang 只支持 zh|en,给了 ${opt.lang}`)
   if (opt.port !== null) {
     opt.port = Number(opt.port)
@@ -117,11 +123,11 @@ function gitInfo(root) {
   const branch = git(root, ['symbolic-ref', '--short', 'HEAD']) ?? git(root, ['rev-parse', '--abbrev-ref', 'HEAD']) ?? ''
   const url = git(root, ['remote', 'get-url', 'origin']) ?? ''
   const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/)
-  return { isRepo: true, branch, ghRepo: m ? `${m[1]}/${m[2]}` : '' }
+  return { isRepo: true, branch, dirty: !!git(root, ['status', '--porcelain']), ghRepo: m ? `${m[1]}/${m[2]}` : '' }
 }
 
 // ---- 场景识别(设计 §7 三种进场景) ----
-const EXCLUDE_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', '.next', 'coverage', 'vendor', '__pycache__', '.claude'])
+const EXCLUDE_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', '.next', 'coverage', 'vendor', '__pycache__', '.claude', '.codex', '.agents'])
 function findScatteredHtml(root) {
   // 只收路径/不读正文(token 纪律);标题/资产引用等完整盘点随 brownfield 落地
   const found = []
@@ -143,7 +149,7 @@ function findScatteredHtml(root) {
   walk(root, 0)
   return found
 }
-function classify(root) {
+function classify(root, opt) {
   const kanban = join(root, 'app', 'kanban')
   const hasConfig = existsSync(join(kanban, 'kanban.config.json'))
   const legacyTraces = MANIFEST_FILES.filter((f) => existsSync(join(kanban, f)))
@@ -158,7 +164,7 @@ function classify(root) {
     : (legacyTraces.length || legacyMech.length || kanbanDemos.length) ? 'legacy'
     : scattered.length ? 'scattered'
     : 'greenfield'
-  return { kanban, hasConfig, legacyTraces, legacyMech, legacyHooks: findLegacyHooks(root), kanbanDemos, scattered, scenario }
+  return { kanban, hasConfig, legacyTraces, legacyMech, legacyHooks: opt.runtime === 'codex' ? { path: join(root, '.claude', 'settings.json'), found: [] } : findLegacyHooks(root), kanbanDemos, scattered, scenario }
 }
 
 // ---- 旧装接管:settings.json 旧 hook 注册识别与摘除(设计 §7「机制接管」) ----
@@ -382,6 +388,172 @@ function deepMerge(dst, src) {
   return changed
 }
 
+// ---- Codex 项目接入:JSON 只追加 handler;TOML 只插入缺失开关,不重排宿主文本 ----
+// hooks.json 与 config.toml 位于同一个 .codex 层,由 Codex 自动发现。原生 plugin 已自带
+// hooks 时用 --codex-hooks plugin,避免相同守卫并发执行两次。信任仍由 /hooks 审阅。
+const shellQuote = (s) => `'${String(s).replaceAll("'", "'\\''")}'`
+const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+// 多行 TOML 字符串可能含伪造的 [features]/[hooks] 标题;保持字符偏移,只遮住其正文。
+function tomlStructure(text) {
+  let out = '', quote = null, multiline = false, comment = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (comment) { out += c; if (c === '\n') comment = false; continue }
+    if (multiline) {
+      if (c === '\\' && quote === '"') {
+        out += ' '
+        if (i + 1 < text.length) { const next = text[++i]; out += next === '\n' ? '\n' : ' ' }
+      } else if (text.slice(i, i + 3) === quote.repeat(3)) {
+        out += '   '; i += 2; multiline = false; quote = null
+      } else out += c === '\n' || c === '\r' ? c : ' '
+      continue
+    }
+    if (quote) {
+      out += c
+      if (c === '\\' && quote === '"' && i + 1 < text.length) out += text[++i]
+      else if (c === quote) quote = null
+      continue
+    }
+    if (c === '#') comment = true
+    if (c === '"' || c === "'") {
+      quote = c
+      if (text.slice(i, i + 3) === c.repeat(3)) { multiline = true; out += '   '; i += 2; continue }
+    }
+    out += c
+  }
+  return out
+}
+function codexConfigPlan(text) {
+  // 不尝试完整解析/序列化任意 TOML。复杂的 features 写法须人工配置,原文保持不变。
+  const structure = tomlStructure(text)
+  const key = (name) => `(?:${name}|"${name}"|'${name}')`
+  const hooksTable = new RegExp(`^\\s*\\[\\[?\\s*${key('hooks')}(?:\\s*\\]|\\s*\\.)`, 'm')
+  const firstTable = structure.search(/^\s*\[/m)
+  const top = firstTable < 0 ? structure : structure.slice(0, firstTable)
+  const hooksKey = new RegExp(`^\\s*${key('hooks')}\\s*(?:=|\\.)`, 'm')
+  if (hooksTable.test(structure) || hooksKey.test(top)) fail(S.init.failCodexInlineHooks)
+  const conflictingFeatures = new RegExp(`^\\s*\\[\\[\\s*${key('features')}\\s*\\]|^\\s*\\[\\[?\\s*${key('features')}\\s*\\.\\s*(?:${key('hooks')}|${key('codex_hooks')})(?:\\s*\\]|\\s*\\.)`, 'm')
+  if (conflictingFeatures.test(structure)) fail(S.init.failCodexFeatures)
+  const featureTable = new RegExp(`^([ \\t]*\\[\\s*${key('features')}\\s*\\][^\\r\\n]*)(?:\\r?\\n|$)`, 'm')
+  const table = featureTable.exec(structure)
+  // 正式 hooks 键优先于 deprecated codex_hooks 别名,与运行时解析一致。
+  const switchIn = (body, prefix = '') => {
+    const match = (name) => new RegExp(`^\\s*${prefix}${key(name)}\\s*=\\s*(true|false)\\s*(?:#.*)?$`, 'm').exec(body)
+    return match('hooks') ?? match('codex_hooks')
+  }
+  const rootSwitch = switchIn(top, `${key('features')}\\s*\\.\\s*`)
+  if (rootSwitch) return { text, changed: false, disabled: rootSwitch[1] === 'false' }
+  if (table) {
+    const start = table.index + table[0].length
+    const rest = structure.slice(start)
+    const next = rest.search(/^\s*\[/m)
+    const body = next < 0 ? rest : rest.slice(0, next)
+    const toggle = switchIn(body)
+    if (toggle) return { text, changed: false, disabled: toggle[1] === 'false' }
+    if (new RegExp(`^\\s*(?:${key('hooks')}|${key('codex_hooks')})\\s*=`, 'm').test(body)) fail(S.init.failCodexFeatures)
+    const gap = table[0].endsWith('\n') ? '' : '\n'
+    return { text: text.slice(0, start) + gap + 'hooks = true\n' + text.slice(start), changed: true, disabled: false }
+  }
+  // features = {...} / 非布尔 dotted 写法:追加 [features] 会产生重复键,拒绝猜测。
+  if (new RegExp(`^\\s*${key('features')}\\s*(?:=|\\.)`, 'm').test(top)) fail(S.init.failCodexFeatures)
+  const gap = text === '' ? '' : text.endsWith('\n') ? '\n' : '\n\n'
+  return { text: text + gap + '[features]\nhooks = true\n', changed: true, disabled: false }
+}
+// 仅认 init 自己生成的完整组形状;宿主加过字段/混入其他 handler 的组不动。
+function ownedCodexGroup(group, mode, matcher) {
+  if (!isRecord(group) || Object.keys(group).some((k) => !['hooks', 'matcher'].includes(k))) return false
+  if ((group.matcher ?? null) !== matcher || !Array.isArray(group.hooks) || group.hooks.length !== 1) return false
+  const h = group.hooks[0]
+  if (!isRecord(h) || Object.keys(h).some((k) => !['type', 'command', 'timeout'].includes(k))) return false
+  if (h.type !== 'command' || h.timeout !== 60 || typeof h.command !== 'string') return false
+  const m = /^('(?:[^']|'\\'')*') ('(?:[^']|'\\'')*') (stop|pre-tool|post-tool)$/.exec(h.command)
+  if (!m || m[3] !== mode) return false
+  const executable = m[1].slice(1, -1).replaceAll("'\\''", "'")
+  const path = m[2].slice(1, -1).replaceAll("'\\''", "'")
+  return executable.startsWith('/') && path.startsWith('/') && path.endsWith('/scripts/codex-hook.mjs')
+}
+function buildCodexPlan(root, opt) {
+  const agentsPath = join(root, 'AGENTS.md')
+  const section = readFileSync(join(TPL, 'agents-md-section.md'), 'utf8')
+  const marker = section.split('\n').find((l) => l.trim()).trim()
+  const agents = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : ''
+  const result = { section, needsAgents: !agents.includes(marker), hooksAdd: 0, hooksReplace: 0, hooksRemove: 0, hookConfig: null, config: null }
+  const configPath = join(root, '.codex', 'config.toml')
+  if (opt.codexHooks !== 'plugin') result.config = codexConfigPlan(existsSync(configPath) ? readFileSync(configPath, 'utf8') : '')
+  const hooksPath = join(root, '.codex', 'hooks.json')
+  if (opt.codexHooks === 'plugin' && !existsSync(hooksPath)) return result
+  let cur = {}
+  if (existsSync(hooksPath)) {
+    try { cur = JSON.parse(readFileSync(hooksPath, 'utf8')) }
+    catch (e) { fail(S.init.failSettingsJson('.codex/hooks.json', e.message)) }
+  }
+  if (!isRecord(cur) || (cur.hooks !== undefined && !isRecord(cur.hooks))) fail(S.init.failCodexHookShape)
+  cur.hooks ??= {}
+  for (const [event, mode, matcher] of [['Stop', 'stop', null], ['PreToolUse', 'pre-tool', '^(Bash|Read)$'], ['PostToolUse', 'post-tool', '^Bash$']]) {
+    if (opt.codexHooks === 'plugin') {
+      const groups = cur.hooks[event]
+      if (groups === undefined) continue
+      if (!Array.isArray(groups)) fail(S.init.failCodexHookShape)
+      const kept = groups.filter((g) => !ownedCodexGroup(g, mode, matcher))
+      result.hooksRemove += groups.length - kept.length
+      cur.hooks[event] = kept
+      continue
+    }
+    const command = `${shellQuote(process.execPath)} ${shellQuote(join(HERE, 'codex-hook.mjs'))} ${mode}`
+    if (cur.hooks[event] !== undefined && !Array.isArray(cur.hooks[event])) fail(S.init.failCodexHookShape)
+    const groups = cur.hooks[event] ??= []
+    const group = { hooks: [{ type: 'command', command, timeout: 60 }] }
+    if (matcher) group.matcher = matcher
+    const own = groups.map((g, i) => ownedCodexGroup(g, mode, matcher) ? i : -1).filter((i) => i >= 0)
+    if (own.length) {
+      if (own.length === 1 && groups[own[0]].hooks[0].command === command) continue
+      // 安装路径换了(更新 cache / 移动 portable clone):原位替换自己的组,移除自己的旧重复组。
+      groups[own[0]] = group
+      for (const index of own.slice(1).reverse()) groups.splice(index, 1)
+      result.hooksReplace += own.length
+    } else {
+      if (groups.some((g) => (g?.matcher ?? null) === matcher && Array.isArray(g?.hooks) && g.hooks.some((h) => h?.type === 'command' && h.command === command))) continue
+      groups.push(group)
+      result.hooksAdd++
+    }
+  }
+  result.hookConfig = cur
+  return result
+}
+function printCodexPlan(plan, opt) {
+  console.log(plan.needsAgents ? S.init.planAgentsAdd : S.init.planAgentsOk)
+  if (opt.codexHooks === 'plugin') console.log(S.init.planCodexPlugin(plan.hooksRemove))
+  else {
+    console.log(S.init.planCodexHooks(plan.hooksAdd, plan.hooksReplace, plan.hooksRemove))
+    console.log(plan.config.changed ? S.init.planCodexFeature : S.init.planCodexFeatureOk)
+    if (plan.config.disabled) console.log(S.init.codexDisabled)
+    console.log(S.init.codexTrust)
+  }
+}
+function applyCodexPlan(root, plan, touched) {
+  if (plan.needsAgents) {
+    const path = join(root, 'AGENTS.md')
+    const cur = existsSync(path) ? readFileSync(path, 'utf8') : ''
+    const gap = cur === '' ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
+    writeFileSync(path, cur + gap + plan.section)
+    touched.push('AGENTS.md')
+    console.log(S.init.applyAgents)
+  }
+  if (plan.hooksAdd || plan.hooksReplace || plan.hooksRemove || plan.config?.changed) mkdirSync(join(root, '.codex'), { recursive: true })
+  if (plan.hooksAdd || plan.hooksReplace || plan.hooksRemove) {
+    writeFileSync(join(root, '.codex', 'hooks.json'), JSON.stringify(plan.hookConfig, null, 2) + '\n')
+    touched.push('.codex/hooks.json')
+    console.log(S.init.applyCodexHooks(plan.hooksAdd, plan.hooksReplace, plan.hooksRemove))
+  }
+  if (plan.config?.changed) {
+    writeFileSync(join(root, '.codex', 'config.toml'), plan.config.text)
+    touched.push('.codex/config.toml')
+    console.log(S.init.applyCodexFeature)
+  }
+  if (plan.config?.disabled) console.log(S.init.codexDisabled)
+  if (plan.hookConfig) console.log(S.init.codexTrust)
+}
+
 // ---- gitignore 种子/合并(templates/gitignore;新装种入,已有则并入缺失条目) ----
 const gitignoreTplLines = () =>
   readFileSync(join(TPL, 'gitignore'), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean)
@@ -582,7 +754,7 @@ function buildMergePlan(root, st, det, gi, opt) {
 }
 
 // ---- 旧装接管计划(设计 §7 merge 表后半:机制接管,数据只允许 backlog 追加) ----
-function buildLegacyPlan(root, st) {
+function buildLegacyPlan(root, st, opt) {
   const blPath = join(st.kanban, 'backlog-manifest.json')
   const lg = { hooks: st.legacyHooks, mech: st.legacyMech, cards: [], blPath, blMtime: null, docs: null }
   let items = []
@@ -597,7 +769,7 @@ function buildLegacyPlan(root, st) {
       title: '割接清理:退役旧机制件(plugin 已接管)',
       tier: 0, area: '看板', priority: 'med', status: 'ready', date: today(),
       source: 'kanban-init apply(旧装接管)',
-      problem: `init 接管只摘 hook 注册、不删文件:${lg.mech.map((f) => `app/kanban/${f}`).join(' / ')} 仍在 repo。守卫/gen 已由 plugin(hooks.json + \${CLAUDE_PLUGIN_ROOT}/scripts)接管,旧件留着只会漂移。`,
+      problem: `init 接管只摘 hook 注册、不删文件:${lg.mech.map((f) => `app/kanban/${f}`).join(' / ')} 仍在 repo。守卫/gen 已由 ${opt.runtime === 'claude' ? 'plugin(hooks.json + ${CLAUDE_PLUGIN_ROOT}/scripts)' : 'DDD 的运行时 hook'}接管,旧件留着只会漂移。`,
       approach: 'plugin 稳定运行一段时间后单独 PR 删除旧机制件;serve 起停切到 serve-kanban.sh。避开上线冲刺窗口(设计:割接晚切)。',
       links: lg.mech.map((f) => ({ title: `app/kanban/${f}`, href: f })),
     })
@@ -673,39 +845,42 @@ async function buildPlan(root, st, gi, opt, det) {
     if (wantVer && haveVer !== wantVer) plan.serveStale = { have: haveVer, want: wantVer }
   }
 
-  // settings:模拟合并,列出将新增的 deny 条目
-  const inject = JSON.parse(readFileSync(join(TPL, 'settings-inject.json'), 'utf8'))
-  const settingsPath = join(root, '.claude', 'settings.json')
-  let cur = {}
-  if (existsSync(settingsPath)) {
-    try { cur = JSON.parse(readFileSync(settingsPath, 'utf8')) }
-    catch (e) { fail(S.init.failSettingsJson(rel(settingsPath), e.message)) }
-  }
-  const have = Array.isArray(cur?.permissions?.deny) ? cur.permissions.deny : []
-  plan.settingsAdd = inject.permissions.deny.filter((d) => !have.includes(d))
+  if (opt.runtime !== 'codex') {
+    // settings:模拟合并,列出将新增的 deny 条目
+    const inject = JSON.parse(readFileSync(join(TPL, 'settings-inject.json'), 'utf8'))
+    const settingsPath = join(root, '.claude', 'settings.json')
+    let cur = {}
+    if (existsSync(settingsPath)) {
+      try { cur = JSON.parse(readFileSync(settingsPath, 'utf8')) }
+      catch (e) { fail(S.init.failSettingsJson(rel(settingsPath), e.message)) }
+    }
+    const have = Array.isArray(cur?.permissions?.deny) ? cur.permissions.deny : []
+    plan.settingsAdd = inject.permissions.deny.filter((d) => !have.includes(d))
 
-  // CLAUDE.md:以模板首个非空行为标记节,已含则跳过
-  const section = readFileSync(join(TPL, 'claude-md-section.md'), 'utf8')
-  plan.claudeMarker = section.split('\n').find((l) => l.trim()).trim()
-  plan.claudeSection = section
-  const cmPath = join(root, 'CLAUDE.md')
-  const cm = existsSync(cmPath) ? readFileSync(cmPath, 'utf8') : ''
-  plan.needsClaudeMd = !cm.includes(plan.claudeMarker)
-  // v0.17.4 §4:标记只认首行,而既有安装的首行早就在 —— 光靠 needsClaudeMd,这一版新加的那句
-  // 「生成物只在主线上生成」对每一块已经装过的板都永远落不了地(而 §6 正是让人升级后跑一次 init)。
-  // 段落是人的文件、多半被改过,不替人重写:只说缺哪一句、原话给全,贴不贴由人。
-  plan.claudeStale = null
-  if (!plan.needsClaudeMd) {
-    const last = section.split('\n').map((l) => l.trim()).filter(Boolean).pop()
-    if (last && !cm.includes(CLAUDE_SECTION_MARK)) plan.claudeStale = last
+    // CLAUDE.md:以模板首个非空行为标记节,已含则跳过
+    const section = readFileSync(join(TPL, 'claude-md-section.md'), 'utf8')
+    plan.claudeMarker = section.split('\n').find((l) => l.trim()).trim()
+    plan.claudeSection = section
+    const cmPath = join(root, 'CLAUDE.md')
+    const cm = existsSync(cmPath) ? readFileSync(cmPath, 'utf8') : ''
+    plan.needsClaudeMd = !cm.includes(plan.claudeMarker)
+    // v0.17.4 §4:标记只认首行,而既有安装的首行早就在 —— 光靠 needsClaudeMd,这一版新加的那句
+    // 「生成物只在主线上生成」对每一块已经装过的板都永远落不了地(而 §6 正是让人升级后跑一次 init)。
+    // 段落是人的文件、多半被改过,不替人重写:只说缺哪一句、原话给全,贴不贴由人。
+    plan.claudeStale = null
+    if (!plan.needsClaudeMd) {
+      const last = section.split('\n').map((l) => l.trim()).filter(Boolean).pop()
+      if (last && !cm.includes(CLAUDE_SECTION_MARK)) plan.claudeStale = last
+    }
   }
+  if (opt.runtime !== 'claude') plan.codex = buildCodexPlan(root, opt)
 
   // .gitattributes + merge.ours 驱动(v0.17.4 §2):非 git 场景为 null,整段跳过
   plan.gitattr = gitattrPlan(root, st.kanban)
 
   // 旧装接管:摘旧 hook 注册 + 遗留卡;config 缺失时 docs 从旧 gen.mjs 提取
   if (st.legacyMech.length || st.legacyHooks.found.length) {
-    plan.legacy = buildLegacyPlan(root, st)
+    plan.legacy = buildLegacyPlan(root, st, opt)
     if (!st.hasConfig) plan.legacy.docs = extractLegacyDocs(st.kanban)
   }
 
@@ -722,6 +897,7 @@ async function buildPlan(root, st, gi, opt, det) {
 
 function printPlan(root, st, gi, plan, opt) {
   console.log(S.init.planTarget(root))
+  console.log(S.init.runtime('plan', opt.runtime))
   console.log(S.init.planScenario(S.init.scenario[st.scenario]))
   console.log(S.init.planVars(plan.brand, gi.branch, gi.ghRepo))
   console.log(S.init.planPort(plan.port, plan.portNote))
@@ -733,9 +909,12 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore)
   if (plan.accFbPin) console.log(S.init.planAccFbPin)
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
-  console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
-  console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
-  if (plan.claudeStale) console.log(S.init.planClaudeStale(plan.claudeStale))
+  if (opt.runtime !== 'codex') {
+    console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
+    console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
+    if (plan.claudeStale) console.log(S.init.planClaudeStale(plan.claudeStale))
+  }
+  if (plan.codex) printCodexPlan(plan.codex, opt)
   if (plan.gitattr) {
     console.log(plan.gitattr.add.length ? S.init.planGitattr(plan.gitattr.rel, plan.gitattr.add) : S.init.planGitattrOk(plan.gitattr.rel))
     console.log(plan.gitattr.driver ? S.init.planMergeDriver : S.init.planMergeDriverOk)
@@ -743,7 +922,7 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.mergeDeferred) console.log(S.init.planMergeDeferred)
   if (plan.legacy) printLegacyPlan(plan.legacy, st.hasConfig)
   if (plan.merge) printMergePlan(plan.merge, opt)
-  console.log(gi.isRepo ? S.init.planGitRepo : S.init.planGitNone)
+  console.log(gi.isRepo ? (opt.noCommit || opt.runtime !== 'claude' ? S.init.planNoCommit : gi.dirty ? S.init.planDirtyNoCommit : S.init.planGitRepo) : S.init.planGitNone)
   console.log(S.init.planSmoke)
 }
 
@@ -792,7 +971,7 @@ function updateManifest(path, expectMtime, label, mutate) {
   if (n) writeFileSync(path, JSON.stringify(json, null, 2) + '\n')
   return n
 }
-function doMerge(root, gi, mg, touched) {
+function doMerge(root, gi, mg, touched, opt) {
   // ① 存根卡 → decisions-manifest(已有卡跳过;code=id)
   const nStubs = updateManifest(mg.dmPath, mg.dmMtime, 'decisions-manifest.json', (dm) => {
     dm.entries ||= []
@@ -826,15 +1005,17 @@ function doMerge(root, gi, mg, touched) {
     const toAbs = join(root, toRel)
     if (!existsSync(fromAbs)) { console.log(S.init.applyGone(fromRel)); return }
     mkdirSync(dirname(toAbs), { recursive: true })
-    if (gitSt === 'tracked') {
+    const keepIndex = opt.noCommit || opt.runtime !== 'claude' || gi.dirty
+    if (gitSt === 'tracked' && !keepIndex) {
       execFileSync('git', ['mv', '--', fromAbs, toAbs], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] })
       touched.push(fromRel) // rename 的删除侧也要进 commit pathspec
     } else {
       renameSync(fromAbs, toAbs) // ponytail: 跨文件系统 rename 会 EXDEV;目标与源同 repo,现实中同盘
-      if (gitSt === 'untracked' && gi.isRepo) execFileSync('git', ['add', '--', toAbs], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] })
+      if (gitSt === 'tracked') touched.push(fromRel)
+      if (gitSt === 'untracked' && gi.isRepo && !keepIndex) execFileSync('git', ['add', '--', toAbs], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] })
     }
     touched.push(toRel)
-    console.log(S.init.applyMove(fromRel, toRel, S.init.gitAction[gitSt]))
+    console.log(S.init.applyMove(fromRel, toRel, keepIndex && gi.isRepo ? S.init.moveNoStage : S.init.gitAction[gitSt]))
   }
   for (const m of mg.moves) mvOne(m.abs, m.from, m.to, m.git)
   for (const c of mg.conflicts) mvOne(c.abs, c.from, c.to, c.git)
@@ -899,6 +1080,7 @@ function doLegacy(root, lg, touched) {
 
 // ---- apply ----
 async function doApply(root, st, gi, opt, plan) {
+  console.log(S.init.runtime('apply', opt.runtime))
   if (plan.merge?.abort) fail(plan.merge.abort)
   if (!st.hasConfig && !plan.brand) fail(S.init.failNeedBrand)
 
@@ -910,6 +1092,9 @@ async function doApply(root, st, gi, opt, plan) {
     if (ans !== 'y' && ans !== 'yes') fail(S.init.cancelled)
   }
 
+  // 确认期间宿主可能改了配置:写入前重新读取,绝不把 plan 的旧快照盖回去。
+  if (plan.codex) plan.codex = buildCodexPlan(root, opt)
+  if (gi.isRepo) gi.dirty ||= !!git(root, ['status', '--porcelain'])
   const touched = [] // repo 相对路径;git 只 add 这些(多会话脏工作树,绝不 add -A)
   const createdKanban = !st.hasConfig // greenfield:整个 app/kanban 树都是本次产物(含 gen 生成物)
   const vars = { BRAND: plan.brand, BRANCH: gi.branch, GH_REPO: gi.ghRepo, APP_BASE: '', DEMO_BASE: '' }
@@ -985,6 +1170,8 @@ async function doApply(root, st, gi, opt, plan) {
       console.log(S.init.applyClaudeMd)
     }
 
+    if (plan.codex) applyCodexPlan(root, plan.codex, touched)
+
     // -- 3.2 .gitattributes + merge.ours 驱动(v0.17.4 §2;幂等:同名路径的行已在就一行不加) --
     if (plan.gitattr) {
       const ga = plan.gitattr
@@ -1003,7 +1190,7 @@ async function doApply(root, st, gi, opt, plan) {
     }
 
     // -- 3.5 散落归拢(先写卡后 mv;守卫见 .init-lock 放行本轮) --
-    if (plan.merge) doMerge(root, gi, plan.merge, touched)
+    if (plan.merge) doMerge(root, gi, plan.merge, touched, opt)
 
     // -- 3.6 旧装接管(遗留卡 + 摘旧 hook 注册;旧机制件不删) --
     if (plan.legacy) doLegacy(root, plan.legacy, touched)
@@ -1018,21 +1205,26 @@ async function doApply(root, st, gi, opt, plan) {
   } finally { unlock() }
 
   // -- 4b. 守卫冒烟(锁已释放,让审计真跑;期望 exit 0 且无 block 决定) --
-  let hookOut = ''
-  try {
-    hookOut = execFileSync(process.execPath, [join(HERE, 'stop-hook.mjs')], {
-      input: '{}',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: root },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).toString()
-  } catch (e) {
-    fail(S.init.failGuard(e.status, (e.stderr || '').toString().slice(0, 800)))
+  const runtimes = opt.runtime === 'both' ? ['claude', 'codex'] : [opt.runtime]
+  for (const runtime of runtimes) {
+    let hookOut = ''
+    try {
+      hookOut = execFileSync(process.execPath, runtime === 'codex' ? [join(HERE, 'codex-hook.mjs'), 'stop'] : [join(HERE, 'stop-hook.mjs')], {
+        input: JSON.stringify({ cwd: root, hook_event_name: 'Stop' }),
+        env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).toString()
+    } catch (e) {
+      fail(S.init.failGuard(e.status, (e.stderr || '').toString().slice(0, 800)))
+    }
+    if (/"decision"\s*:\s*"block"/.test(hookOut)) fail(S.init.failGuardOrphan(hookOut.slice(0, 800)))
+    console.log(S.init.applyGuardOk)
   }
-  if (hookOut.includes('"decision":"block"')) fail(S.init.failGuardOrphan(hookOut.slice(0, 800)))
-  console.log(S.init.applyGuardOk)
 
   // -- 5. git:只 add 触碰路径,commit 也限定 pathspec(不卷别的会话的暂存区) --
-  if (gi.isRepo) {
+  if (gi.isRepo && (opt.noCommit || opt.runtime !== 'claude' || gi.dirty)) {
+    console.log(gi.dirty && !opt.noCommit && opt.runtime === 'claude' ? S.init.applyDirtyNoCommit : S.init.applyNoCommit)
+  } else if (gi.isRepo) {
     // 归拢时 gen 生成物/卡/demo 全在 app/kanban 下,整目录纳入 pathspec(同 greenfield)
     const wholeKanban = createdKanban || !!plan.merge
     const paths = [...new Set(wholeKanban ? ['app/kanban', ...touched.filter((p) => !p.startsWith('app/kanban'))] : touched)]
@@ -1069,6 +1261,7 @@ async function doApply(root, st, gi, opt, plan) {
 // ---- scan ----
 function doScan(root, st, gi, det, opt) {
   console.log(S.init.scanTarget(root, gi.isRepo, gi.branch))
+  console.log(S.init.runtime('scan', opt.runtime))
   console.log(S.init.scanScenario(S.init.scenario[st.scenario]))
   console.log(S.init.scanConfig(st.hasConfig))
   for (const d of det.demos) console.log(S.init.scanDemo(d.rel, d.size, d.git, d.title, d.assets))
@@ -1093,6 +1286,8 @@ function doScan(root, st, gi, det, opt) {
   if (st.scenario === 'legacy') console.log(S.init.scanHintLegacy)
   // 摘要 JSON(文件名/title/git 状态/资产/大小;绝不含正文)
   const summary = {
+    runtime: opt.runtime,
+    codexHooks: opt.runtime === 'claude' ? null : opt.codexHooks,
     scenario: st.scenario,
     demos: det.demos.map((d) => ({ file: d.rel, title: d.title, size: d.size, git: d.git, assets: d.assets.map((a) => ({ ref: a.ref, exists: a.exists, inDemoDir: a.inDemoDir })) })),
     configSkipped: det.configSkipped,
@@ -1111,7 +1306,7 @@ async function main() {
   const root = resolve(opt.dir || process.cwd())
   if (!existsSync(root)) fail(`目标目录不存在:${root}`)
   S = pickStrings(resolveLang(root, opt))
-  const st = classify(root)
+  const st = classify(root, opt)
   const gi = gitInfo(root)
   const det = st.scattered.length ? collectScan(root, st, gi) : { demos: [], siblings: [], brokenLinks: [], claimed: [], configSkipped: [], cfgSkipAssets: [] }
   if (opt.cmd === 'scan') return doScan(root, st, gi, det, opt)

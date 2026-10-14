@@ -61,14 +61,6 @@ import { loadStrings } from './strings.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 import { CARD_FILE_KEYS, auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
 
-const KANBAN = detect()
-if (!KANBAN) process.exit(0)
-if (existsSync(join(KANBAN, '.init-lock'))) process.exit(0)
-
-const S = loadStrings(KANBAN)
-const SELF_DIR = dirname(fileURLToPath(import.meta.url))
-const GEN = join(SELF_DIR, 'gen.mjs')
-
 // stdin 原文留着:转发时要把同一份字节交给新版 hook(重新序列化会丢掉本版不认识的字段)
 let hookRaw = ''
 if (!process.stdin.isTTY) {
@@ -76,6 +68,15 @@ if (!process.stdin.isTTY) {
 }
 let hook = {}
 try { hook = JSON.parse(hookRaw) } catch {}
+if (!hook || typeof hook !== 'object' || Array.isArray(hook)) hook = {}
+
+const KANBAN = detect({ cwd: hook.cwd })
+if (!KANBAN) process.exit(0)
+if (existsSync(join(KANBAN, '.init-lock'))) process.exit(0)
+
+const S = loadStrings(KANBAN)
+const SELF_DIR = dirname(fileURLToPath(import.meta.url))
+const GEN = join(SELF_DIR, 'gen.mjs')
 
 // 版本三件套一处取(下面的转发与①的戳判定共读同一份;readStamp 只读 index 头 1KB,读两遍也是浪费)
 const INDEX = join(KANBAN, 'index.html')
@@ -115,7 +116,8 @@ function newerInstall(minVer, selfVer) {
 
 // ---- 版本转发(v0.16.2):产物比我新,而本机已装不比产物旧的版本 → 整个 hook 交给它跑 ----
 {
-  const stale = !process.env.DDD_HOOK_FORWARDED && MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0
+  // Codex 不借用 Claude 的安装表转发:两个运行时的安装生命周期不同。
+  const stale = process.env.DDD_RUNTIME !== 'codex' && !process.env.DDD_HOOK_FORWARDED && MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0
   const to = stale ? newerInstall(STAMP, MY_VER) : null
   if (to) {
     const r = spawnSync(process.execPath, [join(to.path, 'scripts', 'stop-hook.mjs')], {
