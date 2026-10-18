@@ -29,6 +29,11 @@ const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} i
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
 const zh = {
+  piReadOnly: 'Pi 收工检查只读,不自动生成看板;生成需另行授权,并遵守项目分支规则。',
+  piRemind: '[看板提醒] gh pr 命令已成功。若功能或阶段完成,请检查对应卡状态,用 `node <plugin>/scripts/ddd.mjs card link` 关联 PR;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs`。Pi 收工检查只读,不自动生成看板。',
+  piRemindMerge: '[看板提醒] PR 合并命令已成功。请核对对应卡与 PR 状态;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs --settle`(默认只打印,不自动写入)。Pi 收工检查只读,不自动生成看板。',
+  piSettlementText: (text) => text.replaceAll('不必手动跑 gen.mjs,守卫会自动重生成。', ''),
+  piFailure: (error) => `Pi 看板检查失败;请检查诊断与项目配置,不要反复重试或绕过安全守卫:${error}`,
   generatedReadDenied: (paths) => `看板生成物不读全文:${paths.join('、')}。请读 manifest、docs 等源文件;用 DDD CLI 点查字段、audit 查审计、gen 验证渲染,或用 rg 精确检索生成物中的字符串。不要用 cat/head/sed 绕读。`,
   genFail: (err) =>
     `看板守卫:gen.mjs 重跑失败(多半是 manifest JSON 语法错),请修好再收工:\n${err}`,
@@ -583,6 +588,11 @@ const zh = {
 const enPortCaveat = 'Port probing only avoids ports that are being listened on right now — it cannot see ports another project wrote into its config but has not started. Multi-project machines need manual port allocation (design §5).'
 
 const en = {
+  piReadOnly: 'Pi settlement is read-only, with no automatic generation; generation requires separate authorization and the project branch rules still apply.',
+  piRemind: '[Kanban reminder] A gh pr command succeeded. If a feature or phase is complete, check its card status and link the PR with `node <plugin>/scripts/ddd.mjs card link`; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs`. Pi settlement is read-only, with no automatic generation.',
+  piRemindMerge: '[Kanban reminder] A PR merge command succeeded. Check the corresponding card and PR status; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs --settle` (prints only by default, no automatic writes). Pi settlement is read-only, with no automatic generation.',
+  piSettlementText: (text) => text.replaceAll('No need to run gen.mjs manually — the guard regenerates automatically. ', ''),
+  piFailure: (error) => `Pi board check failed; inspect the diagnostic and project configuration rather than retrying repeatedly or bypassing safety guards: ${error}`,
   generatedReadDenied: (paths) => `Do not read generated board files in full: ${paths.join(', ')}. Read manifest or docs sources; query fields with the DDD CLI, run audit for checks or gen to verify rendering, or use rg for a targeted string search. Do not read them through cat/head/sed.`,
   genFail: (err) =>
     `Kanban guard: gen.mjs re-run failed (most likely a manifest JSON syntax error). Please fix it before wrapping up:\n${err}`,

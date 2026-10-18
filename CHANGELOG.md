@@ -11,6 +11,18 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+### Added
+
+- An explicit Pi extension using the shared rules for native tool guards, final
+  successful PR reminders, and read-only actionable settlement. It preserves
+  other guards and result errors, checks nested calls, isolates session/worktree
+  state, and bounds corrective continuation to one per input.
+- Optional child inheritance through a companion's existing required-extension
+  collector, with runtime-local duplicate-load protection and acknowledgement.
+  No installed configuration, Pi initialization mode, or Claude forwarding.
+- Disposable Pi event fixtures and opt-in installed loader/runner/SDK tests,
+  including deterministic in-process model and tool-operation boundaries.
+
 ### Changed
 
 - Extracted shared hook rules behind a request/result API. Claude and Codex

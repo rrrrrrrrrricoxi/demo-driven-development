@@ -2,7 +2,7 @@
 
 The plugin shares skills, scripts, and project data across supported hosts. Host adapters provide lifecycle hooks and project instructions. Resolve `<plugin>` from the installed plugin root; when working from a skill, its file is at `<plugin>/skills/<skill-name>/SKILL.md`. Do not make shared skill commands depend on a host-specific plugin-root environment variable.
 
-The [shared hook API](hook-core.md) defines the boundary between rule evaluation and host integration. It is available for future adapters; the supported init runtimes remain `claude`, `codex`, and `both`.
+The [shared hook API](hook-core.md) defines the boundary between rule evaluation and host integration. The opt-in [Pi adapter](pi.md) also calls it directly, without Claude cache forwarding or automatic generation. The supported init runtimes remain `claude`, `codex`, and `both`.
 
 ## Claude Code
 
@@ -47,6 +47,13 @@ Project mode writes project-local hook entries with absolute plugin paths. These
 Plugin mode uses the installed plugin's bundled hooks and removes canonical DDD-owned project entries to avoid duplicates. Project mode adds or updates those entries. Both modes preserve unrelated hooks and settings. Customized or mixed handler groups remain user-owned: review them through `/hooks` to avoid duplicate DDD guards. When switching from project to plugin mode, rerun `init` with `--codex-hooks plugin`; when switching back, rerun it with `--codex-hooks project` to write paths for the current installation. If project mode encounters existing inline hooks in `config.toml`, review the plan's refusal and resolve the configuration explicitly; plugin mode preserves inline hooks. Both Codex modes default to no commit. The `init` command defaults to `--runtime claude`; specify `--runtime codex` or `--runtime both` to select another adapter. `--no-commit` explicitly disables init's commit behavior.
 
 To refresh the native Git marketplace, run `codex plugin marketplace upgrade demo-driven-development`. For plugin code updates, use the Codex plugin manager's supported update flow. If you use a repository clone, update that clone and rerun `init` with `--runtime codex` and the selected hook mode when its path changes. The Claude-only cache retirement script does not apply to Codex. Codex has no Claude cache-forwarding behavior; the generator's version stamp still prevents an older plugin from overwriting newer board output.
+
+## Pi
+
+Load `pi/index.ts` explicitly in a new Pi invocation; keep other guards enabled.
+See [Pi integration](pi.md) for activation/rollback, exact event mapping,
+read-only settlement, and optional child inheritance. No `--runtime pi` init
+mode or automatic installed-configuration changes are provided.
 
 ## Shared workflow rules
 

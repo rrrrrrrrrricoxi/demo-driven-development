@@ -1,10 +1,10 @@
 {
   "name": "demo-driven-development",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "engines": { "node": ">=18" },
   "scripts": {
-    "test": "node tests/run.mjs && node tests/hook-core.mjs && node tests/codex-hooks.mjs && node tests/codex-init.mjs && node tests/codex-package.mjs",
+    "test": "node tests/run.mjs && node tests/hook-core.mjs && node tests/codex-hooks.mjs && node tests/codex-init.mjs && node tests/codex-package.mjs && node tests/pi-hooks.mjs",
     "release:check": "node scripts/release.mjs --check"
   }
 }

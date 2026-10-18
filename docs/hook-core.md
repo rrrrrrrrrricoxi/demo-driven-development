@@ -1,8 +1,9 @@
 # Shared hook API
 
-DDD supports Claude Code and Codex through adapters. The shared API in
-`scripts/hook-core.mjs` lets another adapter call the same rules. This API does
-not install or enable a new host. Pi integration is not included yet.
+DDD supports Claude Code and Codex through adapters, and Pi through an
+[explicit opt-in extension](pi.md). The shared API in `scripts/hook-core.mjs`
+lets adapters call the same rules. This API does not install or enable a host.
+The Pi adapter always passes `regenerate: false`.
 
 ## Responsibilities
 

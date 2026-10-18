@@ -1,6 +1,6 @@
 # demo-driven-development
 
-A Claude Code and Codex plugin that turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
+A Claude Code and Codex plugin, with an opt-in Pi extension, that turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
 
 ## The idea
 
@@ -17,7 +17,7 @@ This plugin packages the SEE-IT half as a workflow:
 ## What's in the box
 
 - Two skills. `ddd-workflow` is the day-to-day rhythm: scene-fit check, demo, human review, then code, verify, PR. `kanban-init` scaffolds a new board, merges scattered demos into one, or takes over a legacy hand-rolled board.
-- Host adapters run the Stop guard and `gh pr` reminder. The Codex adapter handles Stop, PreToolUse, and PostToolUse events; its hook definitions use Codex's current tool names. Both adapters check whether the project actually uses this plugin before doing anything.
+- Host adapters run the Stop guard and `gh pr` reminder. The Codex adapter handles Stop, PreToolUse, and PostToolUse events; its hook definitions use Codex's current tool names. Both adapters check whether the project actually uses this plugin before doing anything. The opt-in Pi extension uses native tool events and read-only settlement; it never automatically generates a board.
 - `gen.mjs` builds the kanban (`index.html`) from four fixed manifest JSONs (iterations, backlog, decisions, decision path), plus the acceptance and release manifests when those tabs are switched on. It also renders project markdown into board-local pages and injects a back-navigation bar into each demo.
 - `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
 - `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
@@ -52,6 +52,17 @@ codex plugin add demo-driven-development@demo-driven-development
 
 Codex asks you to review and trust bundled hooks before they run. Open `/hooks` to review them. Plugin installation does not auto-trust hooks. See [host integration notes](docs/hosts.md#codex) before initializing a project.
 
+### Pi (explicit extension, existing boards)
+
+With Pi 1.3.0 and its Node.js requirement (22.19+), load the adapter for a **new invocation**:
+
+```sh
+cd /path/to/project
+pi --extension /absolute/path/to/demo-driven-development/pi/index.ts
+```
+
+Keep existing safety extensions enabled. This command does not install configuration. Remove `--extension` on the next invocation to stop loading DDD. Pi settlement is read-only and can request at most one corrective continuation per input; it never generates the board. Native Pi initialization and managed installation are not included. See [Pi integration](docs/pi.md) for working-directory, child inheritance, retry, and compatibility limits.
+
 ## Quick start (new project)
 
 ```
@@ -64,6 +75,8 @@ python3 app/kanban/serve.py        # then open the printed port
 `apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), adds the selected host's read guard, and appends host-specific project instructions. The default runtime is `claude`; use `--runtime codex` or `--runtime both` to select Codex or both hosts. This quick start uses bundled hooks from the native Codex plugin, avoiding duplicate project hooks. For project-local hooks, use `--codex-hooks project`; the absolute hook path is machine-specific, so rerun init with `--runtime codex --codex-hooks project` after cloning to another machine, switching hosts, or changing the plugin path. `--no-commit` leaves the changes uncommitted. Re-running it is a no-op. For projects that already have scattered demos or an older hand-rolled board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. Details live in `skills/kanban-init/SKILL.md` and [host integration notes](docs/hosts.md).
 
 ## How the guard works
+
+Claude Code and Codex use the configured Stop guard described below. Pi uses [read-only settlement](docs/pi.md#settlement-and-retries), not automatic generation.
 
 When the configured Stop guard runs, it compares mtimes: if any manifest, demo, theme file, or the generator itself is newer than `index.html`, it regenerates the board. `gen` also writes a version stamp (`<!-- ddd-gen vX.Y.Z -->`) on line 2 of `index.html`. A session running an older plugin refuses to overwrite newer output and warns instead; a newer plugin heals older output automatically. Separately, every `demos/*.html` must be referenced by a manifest or listed in `demos/.no-card-ok`, otherwise the session is blocked until the demo gets a card.
 

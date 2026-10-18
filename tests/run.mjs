@@ -9547,6 +9547,28 @@ console.log('T88 决策卡归档 decisionArchive')
   }
 }
 
+// ---- Pi 入口的最小守卫回归;完整宿主事件/SDK 覆盖在 pi-hooks.mjs ----
+{
+  console.log('\n===== Pi:显式入口的只读工具守卫 =====')
+  const { default: install } = await import('../pi/hooks.mjs')
+  const fx = mkFixture('pi-guard-smoke', {})
+  const handlers = new Map(), bus = new Map()
+  install({
+    events: {
+      emit(name, request) { for (const fn of bus.get(name) || []) fn(request) },
+      on(name, fn) { const list = bus.get(name) || []; list.push(fn); bus.set(name, list) },
+    },
+    on(name, fn) { handlers.set(name, fn) },
+    sendMessage() { throw new Error('读守卫不应发送消息') },
+  })
+  const ctx = { cwd: fx.root, sessionManager: { getSessionId: () => 'pi-smoke' } }
+  const guard = handlers.get('tool_call')
+  const denied = guard({ toolName: 'read', input: { path: 'app/kanban/index.html' } }, ctx)
+  ok(denied?.block === true && /index.html/.test(denied.reason), 'Pi 读生成物返回否决而非 allow')
+  ok(guard({ toolName: 'read', input: { path: 'app/kanban/manifest.json' } }, ctx) === undefined, 'Pi 读源文件不抢安全守卫的裁决')
+  ok(!existsSync(join(fx.kb, 'index.html')), 'Pi 工具守卫不生成看板')
+}
+
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })
