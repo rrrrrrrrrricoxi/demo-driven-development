@@ -2,6 +2,8 @@
 
 The plugin shares skills, scripts, and project data across supported hosts. Host adapters provide lifecycle hooks and project instructions. Resolve `<plugin>` from the installed plugin root; when working from a skill, its file is at `<plugin>/skills/<skill-name>/SKILL.md`. Do not make shared skill commands depend on a host-specific plugin-root environment variable.
 
+The [shared hook API](hook-core.md) defines the boundary between rule evaluation and host integration. It is available for future adapters; the supported init runtimes remain `claude`, `codex`, and `both`.
+
 ## Claude Code
 
 Install the marketplace and plugin from a Claude Code session:

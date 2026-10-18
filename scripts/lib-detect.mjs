@@ -14,10 +14,10 @@ import { join, resolve } from 'node:path'
 const CONFIG = 'kanban.config.json'
 
 /** @returns {string|null} 看板目录绝对路径(含 kanban.config.json),非 DDD 项目返回 null */
-export function detect({ cwd } = {}) {
+export function detect({ cwd, env = process.env } = {}) {
   // DDD 显式上下文优先;事件 cwd 防止从别的目录启动 hook 时误判项目。
   const eventCwd = typeof cwd === 'string' && cwd ? cwd : null
-  const P = resolve(process.env.DDD_PROJECT_DIR || eventCwd || process.env.CLAUDE_PROJECT_DIR || process.cwd())
+  const P = resolve(env.DDD_PROJECT_DIR || eventCwd || env.CLAUDE_PROJECT_DIR || process.cwd())
   const configured = (dir) => { try { return statSync(join(dir, CONFIG)).isFile() } catch { return false } }
   if (configured(P)) return P // 保留直接从看板目录运行 CLI 的入口。
   const direct = join(P, 'app', 'kanban')

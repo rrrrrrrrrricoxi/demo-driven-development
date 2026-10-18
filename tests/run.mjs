@@ -6734,8 +6734,8 @@ console.log('T76 生成物只在主线上生成 / 合并前硬闸')
   }
 
   { // ---- ⑥ 口径复用:主线名与「什么算生成物」都不许有第二份实现 ----
-    const hookSrc = readFileSync(join(NEW_SCRIPTS, 'stop-hook.mjs'), 'utf8')
-    const gateSrc = readFileSync(join(NEW_SCRIPTS, 'merge-gate.mjs'), 'utf8')
+    const hookSrc = readFileSync(join(NEW_SCRIPTS, 'hook-settle.mjs'), 'utf8')
+    const gateSrc = readFileSync(join(NEW_SCRIPTS, 'hook-tool-rules.mjs'), 'utf8')
     const auditSrc = readFileSync(join(NEW_SCRIPTS, 'audits.mjs'), 'utf8')
     ok(count(hookSrc, 'boardBranchCheck(KANBAN, S)') === 1 && !/instance[^\n]*\.branch/.test(hookSrc) && !hookSrc.includes('--abbrev-ref'),
       '守卫只调一次 boardBranchCheck,不另写一份主线解析 / HEAD 解析')

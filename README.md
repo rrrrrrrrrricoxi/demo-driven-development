@@ -26,6 +26,8 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
+The adapters call a [shared hook API](docs/hook-core.md). New hosts can reuse its rules, but each host still needs its own event, permission, and lifecycle integration.
+
 The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `decisionArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
 ## Install

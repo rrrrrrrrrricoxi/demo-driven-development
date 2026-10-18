@@ -9,6 +9,17 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Changed
+
+- Extracted shared hook rules behind a request/result API. Claude and Codex
+  adapters retain their installed script paths and protocol behavior.
+- Made shared settlement read-only by default. Existing host Stop hooks
+  explicitly enable generation and retain the existing branch and version guards.
+- Isolated Claude stale-cache forwarding from shared rules. Explicit non-Claude
+  runtimes cannot forward through the Claude installation table.
+
 ## [0.18.0] - 2026-10-15
 
 ### Added
