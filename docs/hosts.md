@@ -55,6 +55,9 @@ See [Pi integration](pi.md) for activation/rollback, exact event mapping,
 read-only settlement, and optional child inheritance. No `--runtime pi` init
 mode or automatic installed-configuration changes are provided.
 
+See [Pi integration](pi.md#workflow-skill-and-project-context) for opt-in guard,
+workflow-skill, and project-context loading, including child inheritance limits.
+
 ## Shared workflow rules
 
 The SEE-IT versus KNOW-IT distinction, source-only token discipline, orphan-demo guard, mainline-only board changes, and human review remain shared workflow rules. Apply each project's explicit runtime, data, service, and browser ownership rules. A precheck can report observations; it cannot make a human acceptance decision.

@@ -11,6 +11,13 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
+### Documentation
+
+- Clarified workflow-skill generation and delegation guidance for Pi. Loading a
+  skill does not enable guards or establish child inheritance; Pi settlement
+  remains read-only.
+
+
 ### Added
 
 - An explicit Pi extension using the shared rules for native tool guards, final
