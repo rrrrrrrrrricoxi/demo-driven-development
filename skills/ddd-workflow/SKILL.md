@@ -80,6 +80,14 @@ description: Guide feature work in a project with the demo-driven kanban. Distin
 
 **发版时**(不是每个功能都发版,所以不占流程的一环):打完 tag 再跑一次 `pr-sync` —— 新版本被追加进 `releases[]`,区间内合并的 PR 自动归版;版本说明写进那条 `releases[]` 的 `note`,脚本不覆盖人写的 `note` 与 `prs`。**归版切在「打 tag 那一刻」**(v0.15.14):`releases[].at` 取 tag 自己的时间(annotated 取 `tagger.date`,lightweight 退到它指的 commit),不是 release 的 `publishedAt`。tag 是「这一版包含什么」的那一刀,`publishedAt` 只是「什么时候按下发布键」—— 两者之间合并的 PR 不算进这一版。已落盘的 `at` 不回填。
 
+## 临时截图保留(v0.20.0)
+
+- 新的临时测试截图用 `ddd.mjs evidence add <卡号> <原图路径>` 登记。命令复制到看板 `.ddd-evidence/tmp/`,不删除或接管原图。后续报告引用命令返回的受管路径。不要批量登记旧证据,也不要因此删除未登记文件。
+- 默认保留关闭:卡收到终态时,DDD 的写命令清掉未挂账的受管截图。需要缓冲期时用 `ddd.mjs evidence config --enabled true --grace-days 14`;加 `--card <卡号>` 可覆盖单卡。重开卡取消倒计时,再次收卡重新计时。
+- 需要长期进入卡或看板的截图,在收卡前运行 `ddd.mjs evidence promote <证据ID>`;它复制到 `shots/` 并追加到所属卡的 `shots`。验收条目也可引用这份持久路径。不要把临时路径当作跨机器交付;不要将提升证据说成人工验收通过。
+- 已挂在卡、验收(含历史轮次)或看板源数据里的图受保护。保留期届满后,下一次成功的 DDD 写操作才清理,不保证准点。只读命令和 Pi 收工检查不清理。
+- `ddd.mjs evidence prune` 只预览;加 `--apply` 才执行。清理是永久删除,报告和其他非截图数据不在范围内。操作前遵守项目分支及证据所有权规则。命令、边界和存储约定见 plugin 根 `docs/evidence-retention.md`。
+
 ## 代验(agent 先测一遍)(v0.17.16)
 
 验收清单的每一条,可以先派一个 agent 在临时口上跑一遍,把看到的截下来绑到那一条上,并记一句「代验 ok / 不对 / 没跑成 · 看到了什么」。人再看清单时,先看图和这一句,再决定自己要不要亲手复跑。**判定(✓ / ✕)仍然只有人能点**,代验不替人判,不进「已判 N/M」,也不改清单的 `revision`。

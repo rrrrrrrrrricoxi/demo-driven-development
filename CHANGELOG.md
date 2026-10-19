@@ -11,14 +11,21 @@ downgrade would freeze every already-stamped board. See
 
 ## [Unreleased]
 
-### Documentation
-
-- Clarified workflow-skill generation and delegation guidance for Pi. Loading a
-  skill does not enable guards or establish child inheritance; Pi settlement
-  remains read-only.
-
+## [0.20.0] - 2026-10-19
 
 ### Added
+
+- Registered screenshot storage with project defaults and per-card retention
+  overrides. Retention is off by default; enabling it gives closed cards a
+  configurable 14-day grace period.
+- Evidence CLI commands to register, list, promote, configure, and preview or
+  apply cleanup. Promotion copies evidence into the board's `shots/` directory
+  and links it to its card.
+- Cleanup after successful card and acceptance writes and applied PR settlement.
+  Linked evidence stays protected, reopening resets the countdown, and legacy
+  unregistered files stay outside cleanup. Read-only operations remain read-only.
+- Disposable core and CLI regression tests for retention, references, recovery,
+  and filesystem boundaries.
 
 - An explicit Pi extension using the shared rules for native tool guards, final
   successful PR reminders, and read-only actionable settlement. It preserves
@@ -29,6 +36,12 @@ downgrade would freeze every already-stamped board. See
   No installed configuration, Pi initialization mode, or Claude forwarding.
 - Disposable Pi event fixtures and opt-in installed loader/runner/SDK tests,
   including deterministic in-process model and tool-operation boundaries.
+
+### Documentation
+
+- Clarified workflow-skill generation and delegation guidance for Pi. Loading a
+  skill does not enable guards or establish child inheritance; Pi settlement
+  remains read-only.
 
 ### Changed
 

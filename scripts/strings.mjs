@@ -247,10 +247,42 @@ const zh = {
     cardsDirUnsafe: (v) => `卡目录名 ${JSON.stringify(v)} 不能用:它得是看板目录下的一个纯目录名(不含 / 或 \\,也不是 . / ..)。带路径的值会把整批卡写到看板目录外面 —— gen 与 CLI 都跟着走,看着一切正常,而提交进 git 的看板里一张卡都没有。`,
     writeFailed: (err) => `落盘中途出错,已回滚(看板与动手前一模一样),一张卡都没搬:\n${err}`,
   },
+  evidence: {
+    usage: () => `ddd evidence <命令> [--dir 看板目录] [--json]
+  add <卡号> <图片>                 登记临时截图副本，原图保留
+  promote <证据 ID>                复制到 shots/ 并追加到所属卡 shots
+  list                            只读登记表
+  prune [--dry-run | --apply]      默认只预览；--apply 才清理
+  config [--enabled true|false] [--grace-days N] [--card 卡号]
+  config --card <卡号> --inherit   删除卡级覆盖，恢复继承
+未指定配置字段时只读。默认关闭；关闭时卡到终态即清理未引用临时图；开启时宽限期默认 14 天。`,
+    done: (command) => `ddd evidence ${command}:完成。`,
+    cleaned: (n) => `证据维护：已清理 ${n} 张登记的临时截图。`,
+    warning: (error) => `⚠ 主要写操作已成功，但证据维护未完成：${error}。请检查后运行 evidence prune。`,
+    errors: {
+      EVIDENCE_POLICY: '截图保留配置必须是 {enabled:布尔值, graceDays:0–36500 的整数}；字段可省略以继承。',
+      EVIDENCE_ARGS: '证据命令或参数无效；请运行 ddd evidence --help。',
+      EVIDENCE_BOARD: '看板数据无效或无法安全读取；未执行证据清理。',
+      EVIDENCE_REGISTRY: '证据登记表无效；请检查登记表，未执行清理。',
+      EVIDENCE_LOCK: '证据登记表正被其它操作锁定；稍后重试。',
+      EVIDENCE_PATH: '证据路径不安全或无法访问。',
+      EVIDENCE_SOURCE: '截图来源必须是普通的 PNG/JPEG/WebP/GIF 文件。',
+      EVIDENCE_CARD: '所属卡不存在或卡号无效。',
+      EVIDENCE_NOT_FOUND: '证据 ID 不存在或已删除。',
+      EVIDENCE_CHANGED: '临时截图已变化；已保留，请检查文件。',
+      EVIDENCE_TIME: '证据时间无效。',
+      EVIDENCE_CLEANUP: '部分临时截图无法安全清理，已保留。',
+      EVIDENCE_IO: '证据文件读写失败；请检查权限与磁盘状态。',
+    },
+    error: (code, message) => `ddd evidence [${code}]:${message}`,
+  },
   cli: {
     usage: () => `ddd —— 看板写操作 CLI(v0.14.0,零依赖)
 
   node <plugin>/scripts/ddd.mjs <命令> [参数] [--dir <看板目录>] [--json]
+
+证据:
+  evidence --help                 临时截图登记、提升、配置与清理
 
 卡:
   card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev] [--from f.json]
@@ -311,7 +343,7 @@ const zh = {
     },
     unknownFlag: (flag) => `ddd:不认识的旗子 ${flag}。看 --help;要把它当普通参数传就先写一个 -- 隔开。`,
     flagNeedsValue: (name) => `ddd:--${name} 后面要跟一个值。`,
-    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / acc … / audit / export / pr-sync;看 --help。`,
+    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / acc … / evidence … / audit / export / pr-sync;看 --help。`,
     // v0.17.16:验收代验。每条拒写都说清「一个字节都没写」—— agent 跑在循环里,半截写进去的清单比报错难收拾得多。
     acc: {
       unknownCmd: (cmd) => `ddd acc:不认识的子命令「${cmd}」。可用:precheck / shots rotate;看 --help。`,
@@ -782,10 +814,42 @@ const en = {
     cardsDirUnsafe: (v) => `The card directory name ${JSON.stringify(v)} cannot be used: it must be a plain directory name inside the kanban directory (no / or \\, and not . or ..). A value with a path in it writes the whole card store outside the kanban directory — gen and the CLI follow it and everything looks fine, while the board committed to git contains no cards at all.`,
     writeFailed: (err) => `Something failed part-way through writing; rolled back (the board is exactly as it was) and no card was moved:\n${err}`,
   },
+  evidence: {
+    usage: () => `ddd evidence <command> [--dir board-directory] [--json]
+  add <card> <image>               Register a temporary copy; preserve the source
+  promote <evidence-id>           Copy to shots/ and append to the owner's shots
+  list                            Read the registry
+  prune [--dry-run | --apply]      Preview by default; --apply performs cleanup
+  config [--enabled true|false] [--grace-days N] [--card card-id]
+  config --card <card-id> --inherit Remove the card override and inherit defaults
+Config without update flags is read-only. Default: off; unlinked temporary images are deleted when the card closes. When enabled, the default grace period is 14 days.`,
+    done: (command) => `ddd evidence ${command}: complete.`,
+    cleaned: (n) => `Evidence maintenance: removed ${n} registered temporary screenshot(s).`,
+    warning: (error) => `⚠ The main write succeeded, but evidence maintenance did not complete: ${error}. Check the issue, then run evidence prune.`,
+    errors: {
+      EVIDENCE_POLICY: 'Screenshot retention must be {enabled:boolean, graceDays:integer from 0 to 36500}; omitted fields inherit.',
+      EVIDENCE_ARGS: 'Invalid evidence command or arguments; run ddd evidence --help.',
+      EVIDENCE_BOARD: 'Board data is invalid or cannot be read safely; evidence cleanup was not performed.',
+      EVIDENCE_REGISTRY: 'The evidence registry is invalid; inspect it before cleanup.',
+      EVIDENCE_LOCK: 'The evidence registry is locked by another operation; retry later.',
+      EVIDENCE_PATH: 'An evidence path is unsafe or inaccessible.',
+      EVIDENCE_SOURCE: 'The screenshot source must be a regular PNG/JPEG/WebP/GIF file.',
+      EVIDENCE_CARD: 'The owner card does not exist or its id is invalid.',
+      EVIDENCE_NOT_FOUND: 'The evidence id does not exist or was deleted.',
+      EVIDENCE_CHANGED: 'The temporary screenshot changed; it was preserved for inspection.',
+      EVIDENCE_TIME: 'The evidence timestamp is invalid.',
+      EVIDENCE_CLEANUP: 'Some temporary screenshots could not be removed safely and were preserved.',
+      EVIDENCE_IO: 'An evidence file operation failed; check file permissions and disk state.',
+    },
+    error: (code, message) => `ddd evidence [${code}]: ${message}`,
+  },
   cli: {
     usage: () => `ddd — the kanban write CLI (v0.14.0, no dependencies)
 
   node <plugin>/scripts/ddd.mjs <command> [args] [--dir <kanban dir>] [--json]
+
+Evidence:
+  evidence --help                 Temporary screenshot registration, promotion, policy and cleanup
 
 Cards:
   card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev] [--from f.json]
@@ -863,7 +927,7 @@ kanban.config.json). This command never commits — git add the card files yours
     },
     unknownFlag: (flag) => `ddd: unknown flag ${flag}. See --help; to pass it as a plain argument, put a -- in front of it.`,
     flagNeedsValue: (name) => `ddd: --${name} needs a value after it.`,
-    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / acc … / audit / export / pr-sync; see --help.`,
+    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / acc … / evidence … / audit / export / pr-sync; see --help.`,
     acc: {
       unknownCmd: (cmd) => `ddd acc: unknown subcommand "${cmd}". Available: precheck / shots rotate; see --help.`,
       noManifest: (err) => `ddd acc: cannot read acceptance-manifest.json (missing, or not valid JSON); nothing was written: ${err}`,

@@ -30,6 +30,7 @@
 // 人一核只有一张真该收 —— 另两张的 PR 只落了一半 / 只落了接口。全收或全不收都不是这里的正确答案。
 // 点名了清单外的 id 就整个拒绝(不写任何文件):那多半是卡号敲错,静默少收一张比报错难查得多。
 // 长期挂账的卡不必每次都写 --only,在卡上写一句 settleHold 理由,它就从清单里挪进「已 hold」一行。
+import { maintainAfterWrite } from './evidence-cli.mjs'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -251,6 +252,7 @@ const sayHeld = () => { if (held.length) console.log(S.settleHeld(held, held.len
 if (!all.length) {
   console.log(S.settleNone())
   sayHeld()
+  if (WROTE_ASKED && !DRY) maintainAfterWrite(KANBAN)
   process.exit(0)
 }
 // 清单永远整份打印(哪怕 --only 只挑一张):人得看得见自己没挑的那些还在那儿。
@@ -305,3 +307,5 @@ for (const f of [...new Set(rows.map((r) => r.f))]) {
   touched.push(f)
 }
 console.log(S.settleWrote(settled, touched.join(', ')))
+
+maintainAfterWrite(KANBAN)

@@ -74,6 +74,21 @@ python3 app/kanban/serve.py        # then open the printed port
 
 `apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), adds the selected host's read guard, and appends host-specific project instructions. The default runtime is `claude`; use `--runtime codex` or `--runtime both` to select Codex or both hosts. This quick start uses bundled hooks from the native Codex plugin, avoiding duplicate project hooks. For project-local hooks, use `--codex-hooks project`; the absolute hook path is machine-specific, so rerun init with `--runtime codex --codex-hooks project` after cloning to another machine, switching hosts, or changing the plugin path. `--no-commit` leaves the changes uncommitted. Re-running it is a no-op. For projects that already have scattered demos or an older hand-rolled board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. Details live in `skills/kanban-init/SKILL.md` and [host integration notes](docs/hosts.md).
 
+## Screenshot retention
+
+Use `node <plugin>/scripts/ddd.mjs evidence add <card-id> <image-path>` to
+register a temporary copy of a screenshot. DDD leaves the original file alone.
+By default, DDD deletes unlinked registered copies when their card closes.
+Enable `screenshotRetention.enabled` to keep them for 14 days after closure;
+`graceDays` changes that interval. Cards can override the project defaults.
+
+Use `evidence promote <evidence-id>` before closure to copy useful evidence into
+`shots/` and attach it to the card. Linked screenshots are protected in either
+mode. Cleanup runs after successful DDD writes, with no background scheduler.
+Read-only commands do not delete files. Existing unregistered screenshots are
+untouched. See [Screenshot retention](docs/evidence-retention.md) for commands,
+storage, cleanup previews, and recovery limits.
+
 ## How the guard works
 
 Claude Code and Codex use the configured Stop guard described below. Pi uses [read-only settlement](docs/pi.md#settlement-and-retries), not automatic generation.
