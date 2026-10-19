@@ -37,10 +37,15 @@ import { parsePr } from './prlink.mjs'
 import { afterKey, afterOf, afterStates, auditAfter, depCtxFrom, depItemText, parseAfterRef, resolveAfter } from './deps.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 import { auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
+import { runEvidenceCli, maintainAfterWrite, evidenceError } from './evidence-cli.mjs'
+import { validatePolicy } from './evidence-retention.mjs'
 import { PRE_RESULTS, isIso, isRemoteShot, rotateItem, shotHref, shotKey, spliceItem } from './accpre.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ARGV = process.argv.slice(2)
+
+// 证据有独立旗子表，先分派，避免污染既有卡命令。
+if (ARGV[0] === 'evidence') process.exit(runEvidenceCli(ARGV.slice(1)))
 
 // pr-sync 是别名:原样转调,连参数带退出码。别在这里复述它的旗子 —— 它加一个,这里就旧一个。
 if (ARGV[0] === 'pr-sync') {
@@ -157,7 +162,7 @@ const K_TAIL = ['links', 'shots', 'pr']
 const K_FLAT = [
   ...K_FRONT,
   'status', 'tier', 'area', 'priority', 'line', 'session', 'date', 'blockedOn', 'after', 'source',
-  'demo', 'route', 'routeLive', 'designDoc', 'repro', 'settleHold', 'settleHoldAt', 'order',
+  'screenshotRetention', 'demo', 'route', 'routeLive', 'designDoc', 'repro', 'settleHold', 'settleHoldAt', 'order',
   ...K_LONG, ...K_TAIL,
 ]
 const bandOf = (k) => (K_FRONT.includes(k) ? 0 : K_TAIL.includes(k) ? 3 : K_LONG.includes(k) ? 2 : 1)
@@ -234,7 +239,7 @@ function checkPr(value) {
   for (const v of Array.isArray(value) ? value : [value]) if (!parsePr(v, repo)) die(S.prBad(JSON.stringify(v)))
 }
 
-const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order']
+const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order', 'screenshotRetention']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
   entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
@@ -264,6 +269,9 @@ function checkAfter(id, value) {
 
 /** 一处校验,set / status / new 共用 —— 三条路写同一批字段,校验分三份迟早对不上 */
 function checkField(store, field, value, id = '') {
+  if (field === 'screenshotRetention') {
+    try { validatePolicy(value) } catch (e) { die(evidenceError(TABLE.evidence, e)) }
+  }
   if (field === 'order') die(S.orderLocked())
   // id 是文件名(拆分模式)/ 全板唯一键(未拆),改它就是把卡的身份改掉:gen 下一跑就硬失败,
   // 而 loadKind 见到坏卡即 die,连用来改回来的这条命令也一起锁死。所以这里一个字节都不写。
@@ -856,11 +864,13 @@ if (pos[0] === 'card') {
   const run = CARD_CMDS[pos[1]]
   if (!run) die(S.unknownCardCmd(String(pos[1] ?? ''), Object.keys(CARD_CMDS)))
   run()
+  if (['new', 'set', 'status', 'note', 'link', 'after'].includes(pos[1])) maintainAfterWrite(KANBAN)
 } else if (pos[0] === 'acc') {
   const ACC_CMDS = { precheck: cmdAccPrecheck, shots: cmdAccShots }
   const run = ACC_CMDS[pos[1]]
   if (!run) die(S.acc.unknownCmd(String(pos[1] ?? '')))
   run()
+  if (!(pos[1] === 'precheck' && flags.list)) maintainAfterWrite(KANBAN)
 } else if (pos[0] === 'export') {
   cmdExport()
 } else if (pos[0] === 'audit') {
