@@ -121,6 +121,66 @@ try {
       for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value }
     }
   })
+  check('shared read-only settlement and PR guidance make no host generation promise in either language', () => {
+    for (const lang of ['en', 'zh']) {
+      const f = fixture('guidance ' + lang), req = request(f.root)
+      const config = join(f.kb, 'kanban.config.json')
+      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, 'utf8')), lang }))
+      writeFileSync(join(f.kb, 'demos/orphan.html'), '<html><body>orphan</body></html>')
+      const before = snapshot(f.kb)
+      const blocked = core(req)
+      assert.equal(blocked.kind, 'block-stop')
+      assert.match(blocked.reason, /orphan\.html/)
+      const reminder = core(request(f.root, 'after-tool', { kind: 'shell', command: 'gh pr create' }))
+      assert.match(reminder.additionalContext, /card link/)
+      assert.doesNotMatch(blocked.reason + reminder.additionalContext, /regenerates automatically|自动重生成|Stop/)
+      assert.deepEqual(snapshot(f.kb), before)
+      const repeated = core({ ...req, repeatedStop: true })
+      assert.match(repeated.notice, /:\n\s*- app\/kanban\/demos\/orphan\.html/, 'core must preserve the audit list layout')
+      const wire = JSON.parse(encodeHookResult(repeated).stdout)
+      assert.match(wire.systemMessage, / · - app\/kanban\/demos\/orphan\.html/)
+      assert.equal(wire.systemMessage.includes('\n'), false, 'legacy output keeps one audit per line')
+    }
+  })
+  check('legacy encoding compacts independent notices and failures but preserves block reasons and diagnostics', () => {
+    const noticeParts = ['First notice:\n  - one\n\n  - two', 'Second notice:\n  detail']
+    const notice = noticeParts.join('\n\n')
+    const compact = 'First notice: · - one · - two\nSecond notice: · detail'
+    for (const kind of ['none', 'block-stop']) {
+      const reason = 'Fix these:\n  - one\n  - two'
+      const encoded = encodeHookResult({ kind, notice, noticeParts, reason, stderr: 'diagnostic\n' })
+      const payload = JSON.parse(encoded.stdout)
+      assert.equal(payload.systemMessage, compact)
+      if (kind === 'block-stop') assert.equal(payload.reason, reason)
+      assert.equal(encoded.stderr, 'diagnostic\n'); assert.equal(encoded.exitCode, 0)
+    }
+    assert.deepEqual(encodeHookResult({ kind: 'failure', reason: notice, reasonParts: noticeParts, stderr: 'diagnostic\n' }), {
+      stdout: '', stderr: 'diagnostic\n' + compact, exitCode: 2,
+    })
+    assert.equal(JSON.parse(encodeHookResult({ kind: 'none', notice }).stdout).systemMessage, notice,
+      'unstructured host results keep their existing line breaks')
+  })
+  check('read-only branch and newer-output notices make no automatic-rebuild promise in either language', () => {
+    for (const lang of ['en', 'zh']) {
+      const f = fixture('branch guidance ' + lang), req = request(f.root)
+      const config = join(f.kb, 'kanban.config.json'), index = join(f.kb, 'index.html')
+      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, 'utf8')), lang }))
+      assert.equal(core(req, { regenerate: true }).kind, 'none')
+      commit(f.root); git(f.root, 'checkout', '-qb', 'feature')
+      writeFileSync(index, readFileSync(index, 'utf8') + '\n<!-- dirty -->\n')
+      let before = snapshot(f.kb)
+      const branch = core(req)
+      assert.match(branch.notice, /git checkout main/)
+      assert.doesNotMatch(branch.notice, /guard rebuilds|自会重渲/)
+      assert.deepEqual(snapshot(f.kb), before)
+      writeFileSync(index, '<!doctype html>\n<!-- ddd-gen v999.99.99 -->\nKEEP')
+      before = snapshot(f.kb)
+      const newer = core(req)
+      assert.match(newer.notice, /999\.99\.99/)
+      assert.doesNotMatch(newer.notice, /recovers once|自动恢复/)
+      assert.deepEqual(snapshot(f.kb), before)
+    }
+  })
   check('generation requires opt-in and keeps existing off-main and detached guards', () => {
     const f = fixture('generation'), req = request(f.root)
     assert.equal(core(req, { regenerate: true }).kind, 'none')

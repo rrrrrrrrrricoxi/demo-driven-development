@@ -164,6 +164,7 @@ try {
       await h.emit('agent_start'); await h.emit('agent_end')
       const repeated = await h.emit('agent_before_settle', boundary())
       assert.notEqual(repeated?.continue, true); assert.match(repeated.entries[0].content, /orphan.html/)
+      assert.match(repeated.entries[0].content, /:\n\s*- app\/kanban\/demos\/orphan\.html/, 'Pi retains the shared multiline audit list')
       assert.match(repeated.entries[0].content, lang === 'en' ? /letting this stop through/ : /本次放行/, 'core receives repeatedStop on the corrective boundary')
       assert.equal(await h.emit('agent_before_settle', boundary()), undefined, 'identical notices must not repeat')
       assert.equal(existsSync(join(f.kb, 'index.html')), false)

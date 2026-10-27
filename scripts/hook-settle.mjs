@@ -19,20 +19,16 @@ export function checkSettlement(request, { regenerate = false } = {}) {
   const GEN = join(SELF_DIR, 'gen.mjs')
   const INDEX = join(KANBAN, 'index.html')
   let stderr = ''
-  const result = (value) => ({ ...value, ...(stderr ? { stderr } : {}) })
+  // 保留独立条目的边界,不靠正文里的换行猜分段;旧调用方仍可直接读取拼好的字符串。
+  const result = (value) => ({ ...value,
+    ...(value.noticeParts ? { notice: value.noticeParts.join('\n\n') } : {}),
+    ...(value.reasonParts ? { reason: value.reasonParts.join('\n\n') } : {}),
+    ...(stderr ? { stderr } : {}),
+  })
   const MY_VER = readPluginVersion(undefined, { onDiagnostic: (text) => { stderr += text + '\n' } })
   const STAMP = readStamp(INDEX)
 
   const mtime = (p) => { try { return statSync(p).mtimeMs } catch { return 0 } }
-
-  /**
-   * 一段话缩成一条(v0.17.8 §10)。Claude Code 把 `systemMessage` 里的每个换行渲染成一个独立的
-   * 「Stop says」气泡 —— 段内换一次行,手机上就多一个气泡,比一整段还占地方。所以段内的换行一律
-   * 换成「 · 」,一段 = 一条 = 一个气泡;段与段之间才留换行(那是不同性质的话,各占一个才对)。
-   * 只动标点不动内容:每行先去掉两头空白(全文里的缩进是给换行排版用的,拼成一条就成了多余空格),
-   * 空行丢掉,其余逐字节照旧。
-   */
-  const oneLine = (s) => String(s).split('\n').map((x) => x.trim()).filter(Boolean).join(' · ')
 
   // ---- 这棵树现在在哪条分支上(v0.17.4 §1)。一次算清,①(要不要重渲)与分支/生成物审计共读 ----
   // 口径全在 board-branch-check.mjs:主线名怎么解析、游离 HEAD 算不算一个位置,都不在这儿再写一遍。
@@ -49,10 +45,8 @@ export function checkSettlement(request, { regenerate = false } = {}) {
   const AUDIT = collect(CTX, S, { branch: BRANCH, gen: GEN })
   // 阻断项(孤儿 demo / 新卡长正文):每项两副面孔 —— block 是拦下来时说的,warn 是同一次收工已经
   // 拦过一次时(stop_hook_active)降级放行说的。多项合成一条 reason,免得一次只报得出一个。
-  // v0.17.9:两副面孔各按各的去处排版 —— block 落在 decision.reason(喂给 Claude 的正文,不渲染成
-  // 气泡),孤儿 demo 那种逐行清单压成「 · - a · - b」反而读不动,所以原样保留换行;只有进
-  // systemMessage 的 warn 才归 oneLine 管(那儿一个换行 = 一个气泡)。
-  const blocks = pickLevel(AUDIT, 'block').map((e) => ({ block: e.text, warn: oneLine(e.warn) }))
+  // 保留审计原文;各宿主适配器决定段内换行的显示方式。
+  const blocks = pickLevel(AUDIT, 'block').map((e) => ({ block: e.text, warn: e.warn }))
   const BROKEN = pickLevel(AUDIT, 'broken')
   // 非阻断通知。卡文件那几条先进去 —— gen 跑失败时要连它们一块喂回去,免得人一个一个试。
   const notices = BROKEN.filter((e) => CARD_FILE_KEYS.has(e.key)).map((e) => e.text)
@@ -97,11 +91,11 @@ export function checkSettlement(request, { regenerate = false } = {}) {
       const err = (r.stderr || r.error?.message || '').toString()
       if (r.status !== 0) {
         // gen 只报得出第一个坏卡,已攒下的 notice(坏卡清单等)一并喂回去,免得一个一个试
-        const why = [S.genFail(err.slice(0, 800)), ...notices].map(oneLine).join('\n')
+        const parts = [S.genFail(err.slice(0, 800)), ...notices]
         if (request.repeatedStop) { // 防死循环:同一次收工已拦过 → 降级警告放行
-          return result({ kind: 'none', notice: why })
+          return result({ kind: 'none', noticeParts: parts })
         }
-        return result({ kind: 'failure', reason: why }) // 阻断:stderr 喂回给 Claude 自修(manifest 语法错等可修项)
+        return result({ kind: 'failure', reasonParts: parts }) // 阻断:由适配器送回宿主自修(manifest 语法错等可修项)
       }
       // gen 成功但带警告(themeColors 未知色组/键、sessionTags 灰章、空 theme.css、指南过大、md 退化…)→ 原样透传,别吞
       if (err.trim()) stderr += err
@@ -121,18 +115,16 @@ export function checkSettlement(request, { regenerate = false } = {}) {
 
   // 阻断项合成一条(孤儿 demo 排最前 —— 它是最老、也最容易一步补掉的那条规矩;次序在 audits.mjs 定)
 
-  // v0.17.8:每一段都先缩成一条(上面 oneLine 的理由);段与段之间照旧换行 —— 那才是该各占一个气泡的。
-  const SAY = notices.map(oneLine)
-
+  // 不同审计条目分别返回,段内原有换行照旧,供适配器分别排版。
   if (blocks.length === 0) {
-    return result({ kind: 'none', ...(SAY.length ? { notice: SAY.join('\n') } : {}) })
+    return result({ kind: 'none', ...(notices.length ? { noticeParts: notices } : {}) })
   }
   if (request.repeatedStop) {
-    return result({ kind: 'none', notice: [...blocks.map((b) => b.warn), ...SAY].join('\n') })
+    return result({ kind: 'none', noticeParts: [...blocks.map((b) => b.warn), ...notices] })
   }
   return result({
     kind: 'block-stop',
     reason: blocks.map((b) => b.block).join('\n\n'),
-    ...(SAY.length ? { notice: SAY.join('\n') } : {}),
+    ...(notices.length ? { noticeParts: notices } : {}),
   })
 }

@@ -104,7 +104,7 @@ export default function ddd(pi) {
     }
     const text = [result.reason, result.notice, result.additionalContext, result.stderr].filter(Boolean).join('\n\n')
     if (!text) return
-    const content = S.piSettlementText(text) + '\n\n' + S.piReadOnly
+    const content = text + '\n\n' + S.piReadOnly
     if (!unseen(current, content)) return
     const entries = [...event.entries, { type: 'custom_message', customType: 'ddd', content, display: true }]
     // 插入 custom_message 后 Pi 会重建可运行 context;原 context.canContinue=false

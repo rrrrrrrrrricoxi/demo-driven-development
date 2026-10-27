@@ -29,6 +29,9 @@ downgrade would freeze every already-stamped board. See
   adapters retain their installed script paths and protocol behavior.
 - Made shared settlement read-only by default. Existing host Stop hooks
   explicitly enable generation and retain the existing branch and version guards.
+- Removed automatic-generation promises from shared guidance. Settlement keeps
+  audit text and entry boundaries intact; host adapters own display formatting.
+  Pi consumes this text directly without removing host-specific sentences.
 - Isolated Claude stale-cache forwarding from shared rules. Explicit non-Claude
   runtimes cannot forward through the Claude installation table.
 

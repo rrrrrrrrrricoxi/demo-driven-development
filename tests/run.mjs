@@ -5363,6 +5363,11 @@ const { localDate } = await import(join(NEW_SCRIPTS, 'cards.mjs'))
   ok(g9.decision === 'block' && /未挂任何看板卡/.test(g9.reason || '') && /BL-8 的 problem/.test(g9.reason || '') &&
      g9.reason.indexOf('未挂任何看板卡') < g9.reason.indexOf('BL-8'),
     '孤儿 demo 与新卡长正文同时命中 → 一条 reason 报全(孤儿在前),不再一次只报得出一个', (g9.reason || '').slice(0, 160))
+  const g10 = out(runStop(NEW_SCRIPTS, root, { input: '{"stop_hook_active":true}' }))
+  const lines = (g10.systemMessage || '').split('\n')
+  ok(!g10.decision && lines.length === 3 && /本次放行.* · - app\/kanban\/demos\//.test(lines[0]) &&
+     /BL-8 的 problem/.test(lines[1]) && /正文过长没拆 detail 2 张/.test(lines[2]),
+    '宿主编码保留旧格式:孤儿清单压成一行,长正文警告与审计摘要各占下一行', g10.systemMessage || '')
 }
 { // ---- 未拆卡的板:git 问不出「提交了没」,退卡上的 date == 今天 ----
   const fx71b = mkFixture('fx71b', { 'c1.html': demoHtml('c1') })
@@ -6951,6 +6956,10 @@ console.log('T77 收工提醒分级压成一行')
       systemMessage: o.systemMessage == null ? null : fold1(o.systemMessage),
     })
   }
+  // 共享规则不再承诺宿主自动生成。历史对照只扣掉这两处原句,其它文字与排版仍逐字节比较。
+  const neutralLegacy = (text) => text
+    .replaceAll('不必手动跑 gen.mjs,守卫会自动重生成。', '')
+    .replaceAll('丢掉,合回 main 后守卫自会重渲。', '丢掉。')
   const BASE = { tier: '1', priority: 'high', area: 'x', source: 's', problem: 'p', approach: 'a' }
   // 八个人话标签按 CHORE_KEYS 的次序摆 —— 下面「只出现该类」与「次序固定」两组断言共读这一张表
   const WORDS = ['正文过长没拆 detail', '验收反馈没提交', '可清的验收截图', 'PR 全合了还没收账',
@@ -7242,8 +7251,8 @@ console.log('T77 收工提醒分级压成一行')
       const la = loadedBoard('fx77y-old', oldScripts), lb = loadedBoard('fx77y-new')
       const oc = runOld(la.root), od = runStop(NEW_SCRIPTS, lb.root)
       // 0.17.8 把每段缩成一条,逐字节冻结相应放宽成「两边都去掉换行之后逐字节相同」(内容一个字没改)
-      ok(foldOut(oc.stdout) === foldOut(od.stdout) && (oc.status ?? 0) === (od.status ?? 0),
-        '阻断两类与坏了一级的措辞与 0.17.4 逐字节相同(同一副盘面,两版去掉换行后同一份 stdout)',
+      ok(foldOut(neutralLegacy(oc.stdout)) === foldOut(od.stdout) && (oc.status ?? 0) === (od.status ?? 0),
+        '扣除旧版自动生成承诺后,阻断与坏了措辞与 0.17.4 逐字节相同(两版同去换行)',
         JSON.stringify([foldOut(oc.stdout).slice(0, 200), foldOut(od.stdout).slice(0, 200)]))
       // ④ 坏了一级里要 git 才谈得起的那几条(分支 / 脏产物 / merge 驱动):次序也不许变。
       //    0.17.4 里它们分散在三处(①b 在验收之前、⑦ 在前置已清之后),0.17.5 全从 audits.mjs
@@ -7256,8 +7265,8 @@ console.log('T77 收工提醒分级压成一行')
         '摆盘先确认:分支 / 脏产物 / merge 驱动 / 验收清单四种「坏了」这一轮真的都出声了', msgNew.slice(0, 160))
       ok(!/条提醒\(详情/.test(msgNew), '这副盘面家务仍全零 —— 那一条整条不出,才比得出「坏了」的字节')
       const bare = (r, root, scripts) => foldOut((r.stdout || '').split(root).join('<ROOT>').split(scripts).join('<SCRIPTS>'))
-      ok(bare(oe, ba.root, oldScripts) === bare(of, bb.root, NEW_SCRIPTS) && (oe.status ?? 0) === (of.status ?? 0),
-        '分支与生成物那几条「坏了」的次序与措辞也与 0.17.4 逐字节相同(归一化两块板各自的路径,再两边同去换行)',
+      ok(neutralLegacy(bare(oe, ba.root, oldScripts)) === bare(of, bb.root, NEW_SCRIPTS) && (oe.status ?? 0) === (of.status ?? 0),
+        '扣除旧版自动生成承诺后,分支与生成物审计与 0.17.4 逐字节相同(归一化路径,同去换行)',
         JSON.stringify([bare(oe, ba.root, oldScripts).slice(0, 200), bare(of, bb.root, NEW_SCRIPTS).slice(0, 200)]))
     }
   }
@@ -7310,8 +7319,8 @@ console.log('T77 收工提醒分级压成一行')
       ok(reasonOld.includes('\n') && reasonOld.split('\n').length > 2,
         '摆盘先确认:0.17.7 这副盘面的阻断那两段本来就是多行的(不然下面那条等式是空跑)',
         `${reasonOld.split('\n').length} 行`)
-      ok(reasonNew === reasonOld && ja.decision === jb.decision && (oa.status ?? 0) === (ob.status ?? 0),
-        '阻断的 reason 与 0.17.7 逐字节相同 —— 连换行都一样(0.17.8 曾把它压成一条,读的是 Claude 不是气泡)',
+      ok(reasonNew === neutralLegacy(reasonOld) && ja.decision === jb.decision && (oa.status ?? 0) === (ob.status ?? 0),
+        '扣除旧版自动生成承诺后,阻断的 reason 与 0.17.7 逐字节相同,含换行',
         JSON.stringify([reasonOld.slice(0, 220), reasonNew.slice(0, 220)]))
       const msgOld2 = ja.systemMessage || '', msgNew2 = jb.systemMessage || ''
       ok(fold1(msgOld2) === fold1(msgNew2),
@@ -7355,8 +7364,8 @@ console.log('T77 收工提醒分级压成一行')
          /看板守卫 · 家务 1 类/.test(JSON.parse(oc.stdout || '{}').systemMessage || ''),
         '摆盘先确认:这副盘面三级同时命中,两版各自说了家务(旧一段两行 / 新一条)',
         JSON.stringify([choreOf(od), (JSON.parse(oc.stdout || '{}').systemMessage || '').slice(-80)]))
-      ok(cut(oc.stdout) === cut(od.stdout) && (oc.status ?? 0) === (od.status ?? 0),
-        '家务也命中时:阻断的 reason 与 0.17.7 逐字节相同,坏了那几段去掉换行后也相同',
+      ok(neutralLegacy(cut(oc.stdout)) === cut(od.stdout) && (oc.status ?? 0) === (od.status ?? 0),
+        '家务也命中时:扣除旧版自动生成承诺后,reason 与 0.17.7 逐字节相同,坏了段同去换行后相同',
         JSON.stringify([cut(oc.stdout).slice(0, 220), cut(od.stdout).slice(0, 220)]))
       ok(!(JSON.parse(od.stdout || '{}').systemMessage || '').includes('家务'),
         '三级同时命中那一份 systemMessage 里也不出现「家务」', (JSON.parse(od.stdout || '{}').systemMessage || '').slice(-120))

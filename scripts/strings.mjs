@@ -32,13 +32,12 @@ const zh = {
   piReadOnly: 'Pi 收工检查只读,不自动生成看板;生成需另行授权,并遵守项目分支规则。',
   piRemind: '[看板提醒] gh pr 命令已成功。若功能或阶段完成,请检查对应卡状态,用 `node <plugin>/scripts/ddd.mjs card link` 关联 PR;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs`。Pi 收工检查只读,不自动生成看板。',
   piRemindMerge: '[看板提醒] PR 合并命令已成功。请核对对应卡与 PR 状态;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs --settle`(默认只打印,不自动写入)。Pi 收工检查只读,不自动生成看板。',
-  piSettlementText: (text) => text.replaceAll('不必手动跑 gen.mjs,守卫会自动重生成。', ''),
   piFailure: (error) => `Pi 看板检查失败;请检查诊断与项目配置,不要反复重试或绕过安全守卫:${error}`,
   generatedReadDenied: (paths) => `看板生成物不读全文:${paths.join('、')}。请读 manifest、docs 等源文件;用 DDD CLI 点查字段、audit 查审计、gen 验证渲染,或用 rg 精确检索生成物中的字符串。不要用 cat/head/sed 绕读。`,
   genFail: (err) =>
     `看板守卫:gen.mjs 重跑失败(多半是 manifest JSON 语法错),请修好再收工:\n${err}`,
   stampNewer: (stamp, mine) =>
-    `⚠ 看板守卫:index.html 由更新的 ddd-gen v${stamp} 生成,本 session 的 plugin 是 v${mine}(更旧)——已跳过重生成以免旧版盖板;看板将保持现状,升级 plugin(若已升级,重启 session)后自动恢复。`,
+    `⚠ 看板守卫:index.html 由更新的 ddd-gen v${stamp} 生成,本 session 的 plugin 是 v${mine}(更旧)——已跳过重生成以免旧版盖板;看板将保持现状,请升级 plugin(若已升级,重启 session)后再生成。`,
   // v0.16.2 起,本机已经装了更新的版本时守卫直接把这一轮交给它跑,不再要求人重启 session。
   // v0.17.8:转发成功不再出声 —— 转发的意义就是让版本差异隐形,每次收工重复报一遍等于没隐形;
   // 上面那条(找不到可转发的新版)照旧,那是真要人动手。
@@ -49,7 +48,7 @@ const zh = {
   orphanWarn: (n, list) =>
     `⚠ 看板守卫:仍有 ${n} 个 demo 未挂看板卡(本次放行):\n${list}`,
   orphanBlock: (n, list) =>
-    `看板守卫:发现 ${n} 个 demo 未挂任何看板卡(违反「demo 必挂卡」审计规则):\n${list}\n请立即在 app/kanban/decisions-manifest.json 或 backlog-manifest.json 为其补卡(字段风格照现有卡);若确属无需挂卡,把文件名加入 app/kanban/demos/.no-card-ok(一行一个)。不必手动跑 gen.mjs,守卫会自动重生成。处理前先 grep 核实文件名是否已在 manifest——多会话并行存在补链竞态,报警可能已过时。`,
+    `看板守卫:发现 ${n} 个 demo 未挂任何看板卡(违反「demo 必挂卡」审计规则):\n${list}\n请立即在 app/kanban/decisions-manifest.json 或 backlog-manifest.json 为其补卡(字段风格照现有卡);若确属无需挂卡,把文件名加入 app/kanban/demos/.no-card-ok(一行一个)。处理前先 grep 核实文件名是否已在 manifest——多会话并行存在补链竞态,报警可能已过时。`,
   accParseFail: (err) =>
     `⚠ 看板守卫:acceptance-manifest.json 无法解析,验收审计跳过(「验收」tab 也会跟着报错):${err}`,
   accCurrentNoList: (cur) =>
@@ -92,7 +91,7 @@ const zh = {
   // v0.17.4 §1:分支上已经有生成物改动(旧版守卫留下的)。一行点名 + 一行解法。
   genOffMainDirty: (files, main) =>
     `⚠ 看板守卫:分支的工作区里有 ${files.length} 处看板生成物改动(多半是旧版守卫在分支上重渲留下的):${files.slice(0, 3).join(' ')}${files.length > 3 ? ` …等 ${files.length} 个` : ''}\n` +
-    `  生成物是派生状态,分支上不该带:\`git checkout ${main} -- ${files.join(' ')}\` 丢掉,合回 ${main} 后守卫自会重渲。`,
+    `  生成物是派生状态,分支上不该带:\`git checkout ${main} -- ${files.join(' ')}\` 丢掉。`,
   // v0.17.4 §4:生成物冲突的机械解法 —— 取主线那份,重新生成,零阅读。路径与主线名都填实。
   genConflict: (files, main, gen, dir) =>
     `⚠ 看板守卫:${files.length} 个看板生成物处在冲突状态 —— 不要手解、也不要读它们(它们是派生状态):\n` +
@@ -194,7 +193,7 @@ const zh = {
   ghprRemindMerge:
     '[看板提醒] 刚合了一个 PR。合之前若还没看过,顺手跑一次 `node <plugin>/scripts/board-branch-check.mjs`(看板只在主线上改;分支带着看板改动合回来会让 gen 硬报错、或拿旧快照静默盖掉主线的卡)。然后跑 `node <plugin>/scripts/pr-sync.mjs --settle`:它先把 gh 上的 PR 与版本同步进 release-manifest.json,再列出「PR 都合了、卡还没收」的卡与建议 status(默认只打印;确认无误后加 --write 收账)。顺手核一遍卡的 links 标题:状态词(开而不合 / 待合 / 已合)不必手写,看板会按实际状态渲染。与看板无关则忽略。',
   ghprRemind:
-    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进(改完 manifest 不必手动跑 gen,Stop 守卫会自动重生成);顺手把 PR 挂上卡 —— `node <plugin>/scripts/ddd.mjs card link <卡号> "<这个 PR 干了什么>" <PR 链接>`(它顺手写 pr 字段),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
+    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进;顺手把 PR 挂上卡 —— `node <plugin>/scripts/ddd.mjs card link <卡号> "<这个 PR 干了什么>" <PR 链接>`(它顺手写 pr 字段),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
   prSync: {
     noRepo: () => 'pr-sync:三份 manifest 的 instance.ghRepo 都是空的,不知道该同步哪个仓 —— 先在 manifest.json 的 instance.ghRepo 填 "owner/repo"。',
     ghMissing: () => 'pr-sync:找不到 gh 命令。装 GitHub CLI(https://cli.github.com)并 `gh auth login` 之后重跑;本次一个字节都没写。',
@@ -591,13 +590,12 @@ const en = {
   piReadOnly: 'Pi settlement is read-only, with no automatic generation; generation requires separate authorization and the project branch rules still apply.',
   piRemind: '[Kanban reminder] A gh pr command succeeded. If a feature or phase is complete, check its card status and link the PR with `node <plugin>/scripts/ddd.mjs card link`; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs`. Pi settlement is read-only, with no automatic generation.',
   piRemindMerge: '[Kanban reminder] A PR merge command succeeded. Check the corresponding card and PR status; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs --settle` (prints only by default, no automatic writes). Pi settlement is read-only, with no automatic generation.',
-  piSettlementText: (text) => text.replaceAll('No need to run gen.mjs manually — the guard regenerates automatically. ', ''),
   piFailure: (error) => `Pi board check failed; inspect the diagnostic and project configuration rather than retrying repeatedly or bypassing safety guards: ${error}`,
   generatedReadDenied: (paths) => `Do not read generated board files in full: ${paths.join(', ')}. Read manifest or docs sources; query fields with the DDD CLI, run audit for checks or gen to verify rendering, or use rg for a targeted string search. Do not read them through cat/head/sed.`,
   genFail: (err) =>
     `Kanban guard: gen.mjs re-run failed (most likely a manifest JSON syntax error). Please fix it before wrapping up:\n${err}`,
   stampNewer: (stamp, mine) =>
-    `⚠ Kanban guard: index.html was generated by a newer ddd-gen v${stamp}, but this session's plugin is v${mine}. Regeneration is skipped so the older gen cannot overwrite newer output; the board stays as-is and recovers once the plugin is upgraded (or, if already upgraded, once the session restarts).`,
+    `⚠ Kanban guard: index.html was generated by a newer ddd-gen v${stamp}, but this session's plugin is v${mine}. Regeneration is skipped so the older gen cannot overwrite newer output; the board stays as-is. Upgrade the plugin (or, if already upgraded, restart the session) before regenerating.`,
   noSelfVersion:
     () => '⚠ Kanban guard: broken plugin install (cannot read a plain-numeric version from its own plugin.json); board regeneration skipped — reinstall/upgrade the plugin.',
   healedUnstamped:
@@ -605,7 +603,7 @@ const en = {
   orphanWarn: (n, list) =>
     `⚠ Kanban guard: still ${n} demo(s) not linked to any board card (letting this stop through):\n${list}`,
   orphanBlock: (n, list) =>
-    `Kanban guard: found ${n} demo(s) not linked to any board card (violates the "every demo links to a card" audit rule):\n${list}\nAdd a card for each in app/kanban/decisions-manifest.json or backlog-manifest.json right away (follow the field style of existing cards); if a demo genuinely needs no card, add its filename to app/kanban/demos/.no-card-ok (one per line). No need to run gen.mjs manually — the guard regenerates automatically. Before acting, grep to verify the filename is not already in a manifest — with parallel sessions there is a card-linking race window, so this alert may already be stale.`,
+    `Kanban guard: found ${n} demo(s) not linked to any board card (violates the "every demo links to a card" audit rule):\n${list}\nAdd a card for each in app/kanban/decisions-manifest.json or backlog-manifest.json right away (follow the field style of existing cards); if a demo genuinely needs no card, add its filename to app/kanban/demos/.no-card-ok (one per line). Before acting, grep to verify the filename is not already in a manifest — with parallel sessions there is a card-linking race window, so this alert may already be stale.`,
   accParseFail: (err) =>
     `⚠ Kanban guard: acceptance-manifest.json could not be parsed, so the acceptance audit was skipped (the "acceptance" tab will fail on it too): ${err}`,
   accCurrentNoList: (cur) =>
@@ -642,7 +640,7 @@ const en = {
     `${detached ? `Detached HEAD ${cur}` : `Branch ${cur} is not the mainline`}: the board was not regenerated (generated files are only built on ${main}) — not a byte of them was touched, and the audits still ran.`,
   genOffMainDirty: (files, main) =>
     `⚠ Kanban guard: ${files.length} generated board file(s) are modified in this branch's working tree (usually left behind by an older guard regenerating on a branch): ${files.slice(0, 3).join(' ')}${files.length > 3 ? ` … ${files.length} in total` : ''}\n` +
-    `  Generated files are derived state and do not belong on a branch: \`git checkout ${main} -- ${files.join(' ')}\` drops them, and the guard rebuilds them once you are back on ${main}.`,
+    `  Generated files are derived state and do not belong on a branch: \`git checkout ${main} -- ${files.join(' ')}\` drops them.`,
   genConflict: (files, main, gen, dir) =>
     `⚠ Kanban guard: ${files.length} generated board file(s) are in a conflicted state — do not resolve them by hand, and do not read them (they are derived state):\n` +
     `  \`git checkout ${main} -- ${files.join(' ')} && node ${gen} --dir ${dir}\``,
@@ -729,7 +727,7 @@ const en = {
   ghprRemindMerge:
     '[Kanban reminder] A pull request was just merged. If you have not already, run `node <plugin>/scripts/board-branch-check.mjs` first (the board is only edited on the mainline; a branch that carries board changes back either makes gen fail hard or silently overwrites mainline cards with a fork-point snapshot). Then run `node <plugin>/scripts/pr-sync.mjs --settle`: it syncs pull requests and releases from gh into release-manifest.json, then lists the cards whose pull requests are all merged while the card is not settled, with a suggested status (printing only by default; add --write once the list looks right). While you are there, check the link titles on those cards — hand-written status words are no longer needed, the board renders the real state.',
   ghprRemind:
-    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing (after editing a manifest, no need to run gen manually — the Stop guard regenerates automatically), and attach the pull request to the card with `node <plugin>/scripts/ddd.mjs card link <id> "<what this pull request did>" <pr-url>` (it writes the pr field too); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
+    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing, and attach the pull request to the card with `node <plugin>/scripts/ddd.mjs card link <id> "<what this pull request did>" <pr-url>` (it writes the pr field too); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
   prSync: {
     noRepo: () => 'pr-sync: instance.ghRepo is empty in all three manifests, so there is no repository to sync — set it to "owner/repo" in manifest.json first.',
     ghMissing: () => 'pr-sync: the gh command was not found. Install the GitHub CLI (https://cli.github.com), run `gh auth login`, then try again; nothing was written.',

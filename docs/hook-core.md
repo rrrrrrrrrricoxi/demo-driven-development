@@ -56,10 +56,16 @@ does not need `tool`. Unknown events return `none`.
 | `failure` | Settlement could not complete; `reason` describes the failure. |
 
 Results can also contain `notice`, `additionalContext`, and diagnostic `stderr`
-strings. The adapter decides how its host displays these fields. The existing
+strings. Settlement preserves line breaks within each notice and separates
+independent notices with a blank line. It also returns optional `noticeParts`
+and `reasonParts` arrays for notice and failure entries. These arrays preserve
+entry boundaries when the text itself contains blank lines. Adapters can use
+the strings directly or format the entries for their host. The existing
 Claude/Codex encoder emits tool denial and stop blocking as JSON with exit code
 0. It emits `failure` on stderr with exit code 2. Do not infer permission from
-exit code 0 alone.
+exit code 0 alone. To preserve its existing display, this encoder compacts each
+notice and failure entry to one line using these arrays; block reasons and
+results without entry arrays keep their line breaks.
 
 ## Generation and retries
 
@@ -68,6 +74,10 @@ Settlement is read-only by default:
 ```js
 runHook({ event: 'settle', cwd: projectRoot })
 ```
+
+Shared audit and PR reminder text does not promise automatic generation. A
+read-only adapter can use this guidance without rewriting it. Pi adds its own
+read-only reminder after the shared settlement text.
 
 An adapter must explicitly enable automatic generation:
 

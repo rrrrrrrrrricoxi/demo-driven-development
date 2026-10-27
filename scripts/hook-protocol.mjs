@@ -9,6 +9,12 @@ const events = { Stop: 'settle', stop: 'settle', settle: 'settle',
   PostToolUse: 'after-tool', 'post-tool': 'after-tool', 'after-tool': 'after-tool' }
 const shellNames = new Set(['Bash', 'exec_command', 'functions.exec_command', 'shell', 'shell_command'])
 
+// Claude 的 systemMessage 每行显示一个气泡。条目内压成一行,条目之间保留换行;
+// 不靠正文的空行猜条目边界。Codex 与生成失败的 stderr 沿用旧入口的同一格式。
+const compactParts = (parts, text) => parts
+  ? parts.map((part) => String(part).split('\n').map((line) => line.trim()).filter(Boolean).join(' · ')).join('\n')
+  : text
+
 export function readHookInput() {
   let raw = '', hook = {}
   if (!process.stdin.isTTY) { try { raw = readFileSync(0, 'utf8') } catch {} }
@@ -44,16 +50,16 @@ export function encodeHookResult(result) {
   switch (result.kind) {
     case 'none':
       if (result.additionalContext) payload = { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: result.additionalContext } }
-      if (result.notice) payload = { ...payload, systemMessage: result.notice }
+      if (result.notice) payload = { ...payload, systemMessage: compactParts(result.noticeParts, result.notice) }
       break
     case 'deny-tool':
       payload = { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.reason } }
       break
     case 'block-stop':
-      payload = { decision: 'block', reason: result.reason, ...(result.notice ? { systemMessage: result.notice } : {}) }
+      payload = { decision: 'block', reason: result.reason, ...(result.notice ? { systemMessage: compactParts(result.noticeParts, result.notice) } : {}) }
       break
     case 'failure':
-      stderr += result.reason || ''
+      stderr += compactParts(result.reasonParts, result.reason) || ''
       exitCode = 2
       break
     default: throw new Error(`Unknown DDD hook result: ${result.kind}`)
