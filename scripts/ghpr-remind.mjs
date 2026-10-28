@@ -1,35 +1,14 @@
 #!/usr/bin/env node
-// gh-pr 看板提醒(PostToolUse / matcher: Bash,零依赖)。语义同首宿主接管前的 jq 版:
-// gh pr 命令跑完后,注入一条「若这标志阶段完成,检查看板卡状态是否需推进」的上下文。
-//
-// plugin 化改造(设计 §6-3):
-//   - matcher 只能匹配工具名(Bash),「只在 gh pr 命令后提醒」的收窄在本脚本内做:
-//     stdin JSON 的 tool_input.command 不以 "gh pr " 开头 → 静默 exit 0。
-//   - 反向探测同守卫(共用 lib-detect):非 DDD 项目跑 gh pr 零打扰(验收 A4-③)。
-//
-// 手测:echo '{"tool_input":{"command":"gh pr view 1"}}' | node scripts/ghpr-remind.mjs
-// 接线:hooks/hooks.json → PostToolUse
-import { readFileSync } from 'node:fs'
-import { detect } from './lib-detect.mjs'
-import { loadStrings } from './strings.mjs'
+// gh pr 运行后注入看板上下文;合并完成时使用收账提醒。
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { remindPullRequest } from './hook-tool-rules.mjs'
+import { normalizeHook, readHookInput, writeHookResult } from './hook-protocol.mjs'
 
-let hook = {}
-if (!process.stdin.isTTY) {
-  try { hook = JSON.parse(readFileSync(0, 'utf8')) } catch {}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { hook } = readHookInput()
+  const request = normalizeHook(hook, { event: 'after-tool', runtime: process.env.DDD_RUNTIME || 'claude' })
+  // 旧入口只检查命令,不限制工具名。
+  request.tool.command = hook.tool_input?.command ?? ''
+  writeHookResult(remindPullRequest(request))
 }
-if (!hook || typeof hook !== 'object' || Array.isArray(hook)) hook = {}
-const cmd = hook?.tool_input?.command ?? ''
-if (!cmd.startsWith('gh pr ')) process.exit(0) // 先验命令,免得每条 Bash 都起 git 子进程
-
-const KANBAN = detect({ cwd: hook.cwd })
-if (!KANBAN) process.exit(0)
-
-// 合 PR 是「阶段完成」最硬的信号:那一刻的提醒换成收账动作(v0.13.0 定稿 §2.4),
-// 别的 gh pr 子命令照旧走通用那条。
-const S = loadStrings(KANBAN)
-console.log(JSON.stringify({
-  hookSpecificOutput: {
-    hookEventName: 'PostToolUse',
-    additionalContext: /^gh pr merge\b/.test(cmd) ? S.ghprRemindMerge : S.ghprRemind,
-  },
-}))

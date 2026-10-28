@@ -9,6 +9,32 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+### Added
+
+- An explicit Pi extension using the shared rules for native tool guards, final
+  successful PR reminders, and read-only actionable settlement. It preserves
+  other guards and result errors, checks nested calls, isolates session/worktree
+  state, and bounds corrective continuation to one per input.
+- Optional child inheritance through a companion's existing required-extension
+  collector, with runtime-local duplicate-load protection and acknowledgement.
+  No installed configuration, Pi initialization mode, or Claude forwarding.
+- Disposable Pi event fixtures and opt-in installed loader/runner/SDK tests,
+  including deterministic in-process model and tool-operation boundaries.
+
+### Changed
+
+- Extracted shared hook rules behind a request/result API. Claude and Codex
+  adapters retain their installed script paths and protocol behavior.
+- Made shared settlement read-only by default. Existing host Stop hooks
+  explicitly enable generation and retain the existing branch and version guards.
+- Removed automatic-generation promises from shared guidance. Settlement keeps
+  audit text and entry boundaries intact; host adapters own display formatting.
+  Pi consumes this text directly without removing host-specific sentences.
+- Isolated Claude stale-cache forwarding from shared rules. Explicit non-Claude
+  runtimes cannot forward through the Claude installation table.
+
 ## [0.18.0] - 2026-10-15
 
 ### Added
