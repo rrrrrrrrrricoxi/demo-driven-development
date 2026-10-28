@@ -40,6 +40,43 @@ managed setup, review and apply any future resource declaration in that setup's
 authoritative source; do not patch a deployed release in place. No managed
 configuration change is included here.
 
+## Workflow skill and project context
+
+The extension supplies guards; load the workflow skill separately for its
+SEE-IT/KNOW-IT decision process and card, demo, verification, and acceptance
+rules. Pin one reviewed checkout and use that same checkout for both resources:
+
+```sh
+cd /path/to/development-worktree
+pi --extension /absolute/pinned/ddd/pi/index.ts \
+   --skill /absolute/pinned/ddd/skills/ddd-workflow/SKILL.md \
+   --append-system-prompt /absolute/project-session-context.md
+```
+
+The optional context file should point to the current project instructions and
+handoff, identify development/production boundaries, and state that Pi does not
+automatically generate the board. Keep changing facts such as PR status, ports,
+and active owners in their authoritative project records. Loading this profile
+is not permission to operate services, write board data, or accept work for a
+human. Start a new process when changing the profile or its pinned resources;
+do not update the checkout underneath a running session.
+
+Parent CLI flags do not establish child context or skill inheritance. In
+pi-subagents 0.79.0, a child with `inheritProjectContext: true` discovers project
+context from its own cwd; it does not copy the parent's appended system prompt.
+A role with `inheritSkills: false` does not receive the parent's skill catalog.
+For these roles, put the required project context and the absolute pinned
+`SKILL.md` path in the child task, and require the child to read that skill before
+DDD feature work. Preserve the role's tools and reporting contract. Do not pass
+an absolute path as `options.skill`: that option selects discovered skill names,
+not arbitrary files. Use the installed subagent documentation when configuring
+role-specific skill discovery instead.
+
+Verify fresh parent loading and actual child reads independently. The extension
+collector described below handles executable guard inheritance; it does not
+supply workflow instructions. A skill catalog entry is not proof its body was
+read, and a successful process exit is not a human acceptance decision.
+
 ## Tool event mapping
 
 | Pi event | DDD request / action |
