@@ -30,6 +30,16 @@ The adapters call a [shared hook API](docs/hook-core.md). New hosts can reuse it
 
 The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `decisionArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 
+## Concurrent sessions on a shared board
+
+Set `"concurrentSessions": true` in `kanban.config.json` when several sessions edit one board. This is opt-in; single-session behavior stays unchanged.
+
+Stop checks inspect the entire board and cannot attribute findings to a session. In this mode, orphan demos, new cards with long text, and generation failures remain visible as notices but do not block another session from finishing. Explicit `ddd.mjs audit` checks retain their severity. Generated-file read protection, merge checks, mainline generation rules, and version downgrade protection remain active. Card `session` tags identify work streams, not individual running sessions.
+
+Concurrent generators use a lock per canonical board directory. Generation stages output and checks source content again before publication. If input changed before publication, generation defers without replacing output. Publication replaces files atomically and publishes the index last; it is not a transaction across all files. A change during publication can leave some parts updated while the previous index remains. A stale marker requests another generation; rerun when writers finish. Concurrent mode does not inject or update demo back-navigation bars, because demos are source files another session may be editing. Include the navigation in a new demo's source when needed.
+
+Different demos and cards can be edited in parallel. Shared manifests, Git staging, and commits still require coordination; the generator lock does not lock editors or Git. Use one feature worktree per implementation task and separate test ports. A board server serves one directory: editing a board copy in another worktree does not update the shared server. Sessions must load the updated plugin; an older loaded hook does not acquire the new lock.
+
 ## Install
 
 ### Claude Code

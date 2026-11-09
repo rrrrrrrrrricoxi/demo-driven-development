@@ -121,6 +121,19 @@ try {
       for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value }
     }
   })
+  check('concurrent settlement requires the explicit boolean opt-in and leaves read denial active', () => {
+    const f = fixture('concurrent opt-in'), config = join(f.kb, 'kanban.config.json')
+    const cfg = JSON.parse(readFileSync(config, 'utf8'))
+    writeFileSync(join(f.kb, 'demos/other-session.html'), '<html><body>pending card</body></html>')
+    for (const concurrentSessions of [undefined, false, 'true', 1, true]) {
+      writeFileSync(config, JSON.stringify({ ...cfg, concurrentSessions }))
+      const before = snapshot(f.kb), out = core(request(f.root))
+      assert.equal(out.kind, concurrentSessions === true ? 'none' : 'block-stop')
+      assert.match(out.notice || out.reason, /other-session\.html/)
+      assert.equal(core(request(f.root, 'before-tool', { kind: 'read', path: 'app/kanban/index.html' })).kind, 'deny-tool')
+      assert.deepEqual(snapshot(f.kb), before)
+    }
+  })
   check('shared read-only settlement and PR guidance make no host generation promise in either language', () => {
     for (const lang of ['en', 'zh']) {
       const f = fixture('guidance ' + lang), req = request(f.root)
