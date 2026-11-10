@@ -56,9 +56,11 @@ Different demos and cards can be edited in parallel. Shared manifests, Git stagi
 Add the Git marketplace and install the plugin with the Codex CLI:
 
 ```
-codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git
+codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native
 codex plugin add demo-driven-development@demo-driven-development
 ```
+
+The `codex-native` branch is generated from tested `main` commits and records the exact source commit. It supplies the native manifest required for hook discovery; shared development stays on `main`.
 
 Codex asks you to review and trust bundled hooks before they run. Open `/hooks` to review them. Plugin installation does not auto-trust hooks. See [host integration notes](docs/hosts.md#codex) before initializing a project.
 

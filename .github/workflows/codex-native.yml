@@ -1,0 +1,48 @@
+name: codex-native
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GitHub 的并发组跨触发方式共用;排队顺序不作保证,脚本另查远程 main 与生成分支来源。
+concurrency:
+  group: codex-native-publication
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test
+      - run: node scripts/release.mjs --check
+
+  publish:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Publish the verified commit to codex-native
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: node scripts/publish-codex-native.mjs --source-commit "$SOURCE_COMMIT"
