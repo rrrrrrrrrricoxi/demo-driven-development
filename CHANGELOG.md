@@ -9,6 +9,12 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.1] - 2026-11-10
+
+- Add opt-in `concurrentSessions` for shared boards: board-wide Stop findings are advisory; explicit audits and merge/read protections retain their behavior.
+- Serialize concurrent generation per board, stage output, and defer publication when source content changes. Preserve demo source edits by skipping automatic back-navigation rewrites in concurrent mode.
+- Add concurrent-session and multi-process regression coverage. Existing boards retain single-session behavior unless configured.
+
 ## [Unreleased]
 
 ### Added

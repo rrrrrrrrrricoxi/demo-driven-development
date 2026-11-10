@@ -42,6 +42,9 @@ export function checkSettlement(request, { regenerate = false } = {}) {
   // ---- 审计一次跑完(v0.17.5:实现全在 audits.mjs,`ddd.mjs audit` 调的是同一份)----
   // 跑在重跑 gen 之前:审计全是只读的,而卡文件那几条正是会让那趟 gen 失败的东西,消息得先备好。
   const CTX = makeCtx(KANBAN)
+  // 收工审计没有可靠的会话归属。显式共享模式只改变本出口的阻断级别,不改审计事实或工具守卫。
+  const CONCURRENT = CTX.cfg.concurrentSessions === true
+  let genFailed = false
   const AUDIT = collect(CTX, S, { branch: BRANCH, gen: GEN })
   // 阻断项(孤儿 demo / 新卡长正文):每项两副面孔 —— block 是拦下来时说的,warn 是同一次收工已经
   // 拦过一次时(stop_hook_active)降级放行说的。多项合成一条 reason,免得一次只报得出一个。
@@ -75,7 +78,7 @@ export function checkSettlement(request, { regenerate = false } = {}) {
     // Compare the current generator version with the existing output stamp.
     const stampNewer = Boolean(MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0)
     const stampStale = Boolean(MY_VER && STAMP !== undefined && (STAMP === null || cmpVer(STAMP, MY_VER) < 0))
-    const wouldRegen = newest > indexAt || stampStale || lazyBroken // 「本来会重渲」:§1 那一行只在这时才出
+    const wouldRegen = newest > indexAt || stampStale || lazyBroken || (CONCURRENT && existsSync(join(KANBAN, '.ddd-gen-stale'))) // 「本来会重渲」:§1 那一行只在这时才出
     if (stampNewer) {
       notices.push(S.stampNewer(STAMP, MY_VER)) // 只否决重生成;审计(只读)在下面照做
     } else if (!MY_VER) {
@@ -90,17 +93,24 @@ export function checkSettlement(request, { regenerate = false } = {}) {
       const r = spawnSync(process.execPath, [GEN, '--dir', KANBAN], { cwd: KANBAN, stdio: ['ignore', 'ignore', 'pipe'] })
       const err = (r.stderr || r.error?.message || '').toString()
       if (r.status !== 0) {
-        // gen 只报得出第一个坏卡,已攒下的 notice(坏卡清单等)一并喂回去,免得一个一个试
-        const parts = [S.genFail(err.slice(0, 800)), ...notices]
-        if (request.repeatedStop) { // 防死循环:同一次收工已拦过 → 降级警告放行
-          return result({ kind: 'none', noticeParts: parts })
+        // 失败可能来自另一会话尚未写完的输入;共享模式不得把整板故障归给当前会话。
+        if (CONCURRENT) {
+          genFailed = true
+          notices.push(S.concurrentGenFail(err.slice(0, 800)))
+        } else {
+          // gen 只报得出第一个坏卡,已攒下的 notice(坏卡清单等)一并喂回去,免得一个一个试
+          const parts = [S.genFail(err.slice(0, 800)), ...notices]
+          if (request.repeatedStop) { // 防死循环:同一次收工已拦过 → 降级警告放行
+            return result({ kind: 'none', noticeParts: parts })
+          }
+          return result({ kind: 'failure', reasonParts: parts }) // 阻断:由适配器送回宿主自修(manifest 语法错等可修项)
         }
-        return result({ kind: 'failure', reasonParts: parts }) // 阻断:由适配器送回宿主自修(manifest 语法错等可修项)
+      } else {
+        // gen 成功但带警告(themeColors 未知色组/键、sessionTags 灰章、空 theme.css、指南过大、md 退化…)→ 原样透传,别吞
+        if (err.trim()) stderr += err
+        // 自愈自「无戳产物」= 刚被旧 gen 盖过板(或 0.6.0 前存量)的签名 → 现场指向断火源解药
+        if (stampStale && STAMP === null) notices.push(S.healedUnstamped())
       }
-      // gen 成功但带警告(themeColors 未知色组/键、sessionTags 灰章、空 theme.css、指南过大、md 退化…)→ 原样透传,别吞
-      if (err.trim()) stderr += err
-      // 自愈自「无戳产物」= 刚被旧 gen 盖过板(或 0.6.0 前存量)的签名 → 现场指向断火源解药
-      if (stampStale && STAMP === null) notices.push(S.healedUnstamped())
     }
   }
 
@@ -116,6 +126,9 @@ export function checkSettlement(request, { regenerate = false } = {}) {
   // 阻断项合成一条(孤儿 demo 排最前 —— 它是最老、也最容易一步补掉的那条规矩;次序在 audits.mjs 定)
 
   // 不同审计条目分别返回,段内原有换行照旧,供适配器分别排版。
+  if (CONCURRENT && (blocks.length || genFailed)) {
+    return result({ kind: 'none', noticeParts: [S.concurrentStopNotice, ...blocks.map((b) => b.warn), ...notices] })
+  }
   if (blocks.length === 0) {
     return result({ kind: 'none', ...(notices.length ? { noticeParts: notices } : {}) })
   }

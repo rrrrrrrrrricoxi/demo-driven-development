@@ -399,6 +399,14 @@ console.log('T15 veto 态孤儿审计照跑')
   ok(r.stdout.includes('"decision":"block"') && r.stdout.includes('orphan.html'), '孤儿审计照跑并阻断(不再被 veto 短路)')
   ok(r.stdout.includes('9.9.9') && r.stdout.trim().split('\n').length === 1, 'stampNewer 并入同一条 JSON(单行输出)')
   ok(sha(idxP) === h0, '重生成仍被 veto(index 字节不变)')
+  const configPath = join(fx15.kb, 'kanban.config.json')
+  const sharedConfig = JSON.parse(readFileSync(configPath, 'utf8'))
+  sharedConfig.concurrentSessions = true
+  writeFileSync(configPath, JSON.stringify(sharedConfig))
+  const shared = runStop(NEW_SCRIPTS, fx15.root)
+  ok(shared.status === 0 && !shared.stdout.includes('"decision":"block"'), '共享看板孤儿只提醒,不拦另一会话收工')
+  ok(shared.stdout.includes('orphan.html') && shared.stdout.includes('9.9.9'), '共享模式保留孤儿与版本诊断')
+  ok(sha(idxP) === h0, '共享模式也不能用旧版覆盖新产物')
 }
 
 // ============ T16 同版双块:手工件优先于默认块 ============

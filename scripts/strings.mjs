@@ -29,6 +29,8 @@ const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} i
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
 const zh = {
+  concurrentStopNotice: '共享看板模式:收工检查无法判定问题属于哪个会话,因此本轮仅提醒。显式 audit、合并检查和生成物保护仍然有效。',
+  concurrentGenFail: (err) => `共享看板生成失败或暂缓;本次收工放行。请检查诊断,待输入稳定后显式运行 gen:\n${err}`,
   piReadOnly: 'Pi 收工检查只读,不自动生成看板;生成需另行授权,并遵守项目分支规则。',
   piRemind: '[看板提醒] gh pr 命令已成功。若功能或阶段完成,请检查对应卡状态,用 `node <plugin>/scripts/ddd.mjs card link` 关联 PR;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs`。Pi 收工检查只读,不自动生成看板。',
   piRemindMerge: '[看板提醒] PR 合并命令已成功。请核对对应卡与 PR 状态;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs --settle`(默认只打印,不自动写入)。Pi 收工检查只读,不自动生成看板。',
@@ -587,6 +589,8 @@ const zh = {
 const enPortCaveat = 'Port probing only avoids ports that are being listened on right now — it cannot see ports another project wrote into its config but has not started. Multi-project machines need manual port allocation (design §5).'
 
 const en = {
+  concurrentStopNotice: 'Shared-board mode: Stop checks cannot identify which session owns a finding, so this stop is advisory. Explicit audit, merge checks, and generated-file protections remain active.',
+  concurrentGenFail: (err) => `Shared-board generation failed or was deferred; this stop is allowed. Inspect the diagnostic and run gen explicitly when inputs are stable:\n${err}`,
   piReadOnly: 'Pi settlement is read-only, with no automatic generation; generation requires separate authorization and the project branch rules still apply.',
   piRemind: '[Kanban reminder] A gh pr command succeeded. If a feature or phase is complete, check its card status and link the PR with `node <plugin>/scripts/ddd.mjs card link`; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs`. Pi settlement is read-only, with no automatic generation.',
   piRemindMerge: '[Kanban reminder] A PR merge command succeeded. Check the corresponding card and PR status; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs --settle` (prints only by default, no automatic writes). Pi settlement is read-only, with no automatic generation.',

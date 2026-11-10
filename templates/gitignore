@@ -1,3 +1,9 @@
 kanban.log
 __pycache__/
 .init-lock
+
+# Concurrent generation interrupted during publication; local retry marker.
+.ddd-gen-stale
+
+# Canonical board-local generator queue; shared across session TMPDIR settings.
+.ddd-gen-lock/

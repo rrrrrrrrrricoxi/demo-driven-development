@@ -73,6 +73,10 @@ v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片�
 - **校验**:path 须存在且含 `<html`(片段/模板报错);>2MB 警告(考虑瘦身或只留 liveUrl 链出);out 与其它条目同名报错(refs/ 下互相覆盖)。
 - 登记进 config.docs 的 html 被 scan 视为已覆盖,不再当散落 demo 候选;未启用 `type:"html"`/`liveUrl` 的存量安装,生成物逐字节不变。
 
+## 多会话共享看板(concurrentSessions)
+
+多个会话编辑同一主线看板时,可在现有 `kanban.config.json` 添加 `"concurrentSessions": true`。不改卡或 demo 数据,不另注册 hook。所有参与会话须加载支持此设置的插件版本。收工审计降为提醒,显式审计与合并/读保护不变;生成器加锁并在输入变化时暂缓发布。不同 demo、卡可并行编辑,共享 manifest 与 Git 提交仍需协调。并发模式不自动改写 demo 返回栏。未配置时保留单会话行为。
+
 ## session 权责标签(v0.5.0)
 
 一个项目多个 agent session 并行(如 dev 产品开发线 / release 发版线 / ops 上线线)时,给看板卡标权责归属。**机制归 plugin、数据归项目**,全部可选、不启用则**生成物逐字节不变**:
