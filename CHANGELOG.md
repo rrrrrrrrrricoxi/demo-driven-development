@@ -9,6 +9,12 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.3] - 2026-11-10
+
+- Fix journey card summaries with separate grid rows, readable labels, and direct access to current documents.
+- Show the current interactive demo inside the entry and expand local refinements inline. Preserve demo query options and original defaults.
+- Match the board's typography, colors, theme, buttons, and aligned navigation. Keep a compact header and separate views for phase history and development records.
+
 ## [0.19.2] - 2026-11-10
 
 - Add opt-in card journeys with concise current decision, development progress, and recent changes. Stable pages group current demos, phase history, development records, original evidence, and acceptance links.

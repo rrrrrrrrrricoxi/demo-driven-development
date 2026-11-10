@@ -878,7 +878,7 @@ CLI rewrites the manifest as a whole there.
 
 ### Multi-round card journeys
 
-A decision or backlog card can opt into a stable entry with `journey`. The board shows three concise summaries and opens `journeys/<card-id>.html`. Cards without `journey` keep their existing output. The entry groups the current design, phase history, and development records. History and original resources start collapsed. Original `demo`, `links`, `shots`, `detail`, and development notes remain in the card source and remain accessible from the entry. Do not write pending questions as accepted decisions.
+A decision or backlog card can opt into a stable entry with `journey`. The board shows three concise summaries in separate label/value rows and opens `journeys/<card-id>.html`. Current links remain directly accessible on the card. Cards without `journey` keep their existing output. The entry uses the board's typography, colors, theme, and navigation layout. It opens the current design first; phase history and development records have separate navigation tabs. The page summary, history, and original resources start collapsed. Original `demo`, `links`, `shots`, `detail`, and development notes remain in the card source and remain accessible from the entry. Do not write pending questions as accepted decisions.
 
 ```json
 {
@@ -899,5 +899,7 @@ A decision or backlog card can opt into a stable entry with `journey`. The board
 ```
 
 Write the object with `ddd.mjs card set <id> journey --json '<object>'`. The three summaries, `current.title`, and `current.href` are required nonempty strings. `history` and `development` are required arrays; their rows require `title`. Row `date`, `summary`, and `href` are optional. `current.links` is an optional array of titled URLs. Dates use `YYYY-MM-DD`. URLs are board-relative or HTTP(S); executable schemes, control characters, backslashes, and protocol-relative URLs are rejected. Document URLs follow the existing rendered-document mapping, and board hashes return to `index.html`. Acceptance links use the existing PR/card relationships. A journey does not change the acceptance revision or human judgments.
+
+Set `current.href` to the current interactive demo under `demos/` (`.html` or `.htm`). The entry embeds that local demo immediately and preserves its query and fragment. It also provides a link to open the demo separately. Local demos in `current.links` expand inline on demand; document and external links remain links. Other `current.href` destinations remain links because the entry does not embed documents or external sites. Keep `current.links` limited to the current specification and relevant refinements; older links belong in history or the preserved original resources. Demo options that select the current design must be explicit in the URL; generation does not change an old demo's default.
 
 The `journeys/` directory contains generated output. Preserve old demo URLs. Read the card source or run targeted searches instead of reading generated entries in full.
