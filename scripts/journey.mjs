@@ -90,6 +90,7 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
   .journey-nav a { flex: none; padding: 9px 16px; border-bottom: 2px solid transparent; color: var(--mut); font-weight: 600; text-decoration: none; }
   .journey-nav a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); }
   main.wrap { padding-bottom: 60px; }
+  main > section { scroll-margin-top: 64px; }
   section[hidden] { display: none; }
   .section-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line-strong); margin-bottom: 16px; }
   .current-design { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
