@@ -20,25 +20,49 @@ The Claude adapter uses the Claude plugin manifest and hook configuration. Claud
 Install from the Git marketplace with the Codex CLI:
 
 ```sh
-codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git
+codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native
 codex plugin add demo-driven-development@demo-driven-development
 ```
 
-For Codex versions that discover the root Agent Plugin manifest but do not load
-its hook extension, build a native package from a reviewed source commit:
+`codex-native` is a generated Git distribution branch in the same repository.
+The publication workflow tests a `main` commit, exports it with
+`scripts/package-codex.mjs`, verifies the package, and updates the branch.
+The package records its source commit in `codex-package-provenance.json`.
+Keep shared changes on `main`; do not edit the distribution branch.
+
+Codex 0.167.0 discovers the root Agent Plugin manifest on `main` but omits
+its hook extension. The native distribution omits that manifest so Codex
+loads `.codex-plugin/plugin.json`. Hooks, scripts, and skills retain their
+source bytes. Claude, Pi, and portable users continue to use the canonical
+source package on `main`.
+
+For an existing installation pinned to a different ref, first preserve active
+caches as described in [release guidance](../RELEASING.md#after-publishing).
+Codex 0.167.0 rejects adding the same marketplace name with a different source.
+Remove its old registration, then add the Git distribution branch:
+
+```sh
+codex plugin marketplace remove demo-driven-development
+codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native
+codex plugin add demo-driven-development@demo-driven-development
+```
+
+Check project and user configuration: an old project-level marketplace ref can
+override the user-level registration. Update or remove that old entry as part
+of the switch. Disable the old local plugin in every configuration layer that
+enabled it. Keep one active DDD source and review the Git-installed hooks
+through `/hooks`.
+
+For an explicit commit or offline package check, the exporter remains available:
 
 ```sh
 node scripts/package-codex.mjs --out <new-external-directory> --ref <commit>
 node scripts/package-codex.mjs --check <new-external-directory> --expect-commit <commit>
 ```
 
-The exporter validates the commit snapshot, omits the root `plugin.json` in the
-output so Codex reads `.codex-plugin/plugin.json`, and records provenance. It
-preserves the shared hooks, scripts, and skills. An optional `--marketplace`
-name is the only other adaptation. Select that generated directory as the
-marketplace source using the host's installation flow; keep one active DDD
-source. Do not delete manifests or patch code in installed caches. See
-[release packaging](../RELEASING.md#runtime-package-provenance).
+The exporter does not install plugins or grant hook trust. Its provenance
+records the source and adaptations; it does not by itself prove publication.
+See [release packaging](../RELEASING.md#runtime-package-provenance).
 
 The Codex plugin bundles hooks in the plugin root. Codex expands `${PLUGIN_ROOT}` in plugin hook commands; `${CLAUDE_PLUGIN_ROOT}` is a compatibility variable. Project hook mode instead records absolute paths to the selected plugin checkout in `.codex/hooks.json`. Rerun init after moving that checkout or cloning the project onto another host.
 

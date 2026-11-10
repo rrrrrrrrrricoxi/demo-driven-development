@@ -11,6 +11,8 @@ downgrade would freeze every already-stamped board. See
 
 ## [0.19.6] - 2026-11-11
 
+- Publish a generated `codex-native` Git branch from tested main commits so Codex can install native hooks directly from GitHub without a local marketplace.
+
 - Add `init --runtime portable` for shared boards and CLI workflows without host configuration or automatic hook installation.
 - Verify journey rules through the shared core and the existing Claude Code, Codex, and Pi adapters, while documenting the event contract and unverified host boundaries.
 - Export native Codex packages from explicit Git commits and check them against their recorded source with an optional external commit pin. Preserve canonical source manifests and keep compatibility changes in the exporter.

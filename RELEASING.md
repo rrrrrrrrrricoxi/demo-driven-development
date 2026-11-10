@@ -57,7 +57,21 @@ Claude Code projects pick up the release with:
 claude plugin update --scope project demo-driven-development@demo-driven-development
 ```
 
-Codex users refresh the Git marketplace and install the current package:
+The `codex-native` workflow publishes a native Codex Git package after testing
+its source commit on `main`. It preserves distribution history with normal
+fast-forward pushes and records source provenance. A failed or stale run does
+not replace the branch. Check that the branch provenance names the intended
+source commit before updating an installation. This branch follows tested
+`main` development; it does not create a release tag.
+
+New Codex installations select this branch once. Existing registrations on a
+different ref must follow the [migration steps](docs/hosts.md#codex) first:
+
+```sh
+codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native
+```
+
+Then refresh the Git marketplace and install the current package:
 
 ```
 codex plugin marketplace upgrade demo-driven-development
