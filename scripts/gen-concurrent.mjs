@@ -67,7 +67,9 @@ export async function acquireGenerationLock(board, { timeoutMs = 40000 } = {}) {
   } catch (e) { release(); throw e }
 }
 
-const OUTPUTS = new Set(['index.html', 'shots.html', 'refs', 'parts', 'journeys', '.ddd-gen-stale', '.ddd-gen-lock'])
+// 根 kanban.log 是 serve-kanban.sh 的默认访问日志;浏览器请求不会改变渲染输入。
+// 仅跳过根目录下这份运行输出,显式文档与验收证据仍按各自路径复核。
+const OUTPUTS = new Set(['index.html', 'shots.html', 'refs', 'parts', 'journeys', '.ddd-gen-stale', '.ddd-gen-lock', 'kanban.log'])
 // 内容 hash 检测保持 mtime 的编辑;mtime 另入 hash,因为卡/文档/截图日期会用它兜底。
 function fingerprint(board) {
   const hash = createHash('sha256')
