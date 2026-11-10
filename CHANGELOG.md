@@ -9,6 +9,29 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.5] - 2026-11-10
+
+- Define journey summaries around product decisions, implementation stage, and meaningful changes. Keep routine verification evidence in development records and preserve requirements specific to each card.
+- Add advisory checks for common verification reports in journey summaries at card writes and board audit. Keep valid product requirements, original evidence, and existing card writes intact.
+- Prompt writing sessions to organize active demo cards with long, dated iteration histories into journeys. Avoid duplicate long-text reminders after a valid journey preserves the original records; retain existing new-card protections.
+
+## [0.19.4] - 2026-11-10
+
+- Keep current demos at their original viewport width and height; reuse existing demo return bars and controls instead of a centered page shell.
+- Organize current designs, phase history, and development records without changing the embedded demo UI. Restore the original Open demo action.
+
+## [0.19.3] - 2026-11-10
+
+- Fix journey card summaries with separate grid rows, readable labels, and direct access to current documents.
+- Show the current interactive demo inside the entry and expand local refinements inline. Preserve demo query options and original defaults.
+- Match the board's typography, colors, theme, buttons, and aligned navigation. Keep a compact header and separate views for phase history and development records.
+
+## [0.19.2] - 2026-11-10
+
+- Add opt-in card journeys with concise current decision, development progress, and recent changes. Stable pages group current demos, phase history, development records, original evidence, and acceptance links.
+- Keep original demo URLs and card evidence intact; preserve existing output when journeys are absent.
+- Include journey output in concurrent publication and generated-file protections.
+
 ## [0.19.1] - 2026-11-10
 
 - Add opt-in `concurrentSessions` for shared boards: board-wide Stop findings are advisory; explicit audits and merge/read protections retain their behavior.

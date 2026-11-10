@@ -31,6 +31,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
+import { journeyError } from './journey.mjs'
+import { journeySummaryFields, journeySuggested } from './journey-summary.mjs'
 import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
@@ -185,6 +187,16 @@ function writeCard(store, row, card) {
   return next
 }
 
+function warnJourneySummary(card) {
+  const fields = journeySummaryFields(card)
+  if (fields.length) console.error(TABLE.journeySummary([{ id: card.id, fields }]))
+}
+
+function warnJourneySuggested(card) {
+  const hit = journeySuggested(card)
+  if (hit) console.error(TABLE.journeySuggested([{ id: card.id, ...hit }]))
+}
+
 // ---- 取值与校验 ----------------------------------------------------------
 const laneIds = () => (CFG.lanes && Array.isArray(CFG.lanes.ids) ? CFG.lanes.ids.map(String) : null)
 /**
@@ -234,7 +246,7 @@ function checkPr(value) {
   for (const v of Array.isArray(value) ? value : [value]) if (!parsePr(v, repo)) die(S.prBad(JSON.stringify(v)))
 }
 
-const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order']
+const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order', 'journey']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
   entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
@@ -275,6 +287,7 @@ function checkField(store, field, value, id = '') {
   if (field === 'session') checkTokens(value, sessionIds(), S.sessionBad)
   if (field === 'pr') checkPr(value)
   if (field === 'after') checkAfter(id, value)
+  if (field === 'journey') { const err = journeyError({ id, journey: value }, CFG.lang); if (err) die(err) }
 }
 
 // ---- 命令 ----------------------------------------------------------------
@@ -466,6 +479,8 @@ function cmdSet() {
   }
   const card = writeCard(store, row, patch)
   say({ ok: true, id, field, value, file: row.where, card }, S.setDone(id, field, typeof value === 'string' ? value : JSON.stringify(value), row.where))
+  if (field === 'journey') warnJourneySummary(card)
+  if (['note', 'notes', 'decision', 'demoNote', 'demo', 'links', 'status'].includes(field)) warnJourneySuggested(card)
 }
 
 function cmdStatus() {
@@ -481,6 +496,7 @@ function cmdStatus() {
   if (noted) card[nf] = appendTimeline(card[nf], `【${TODAY}】status → ${next}`)
   const written = writeCard(store, row, card)
   say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : '', !nf))
+  warnJourneySuggested(written)
 }
 
 function cmdNote() {
@@ -493,6 +509,7 @@ function cmdNote() {
   const line = `【${TODAY}】${rest.join(' ')}`
   const card = writeCard(store, row, { ...row.card, [nf]: appendTimeline(row.card[nf], line) })
   say({ ok: true, id, field: nf, line, file: row.where, card }, S.noteDone(id, nf, line))
+  warnJourneySuggested(card)
 }
 
 /** 只有这几个 scheme 能进 links —— gen 那边同一条白名单,坏值在这儿就该被拦下,别等渲染 */
@@ -524,6 +541,7 @@ function cmdLink() {
   }
   const written = writeCard(store, row, card)
   say({ ok: true, id, added: true, title, href, pr: prAdded, file: row.where, card: written }, S.linkDone(id, href, prAdded))
+  warnJourneySuggested(written)
 }
 
 /**

@@ -9,7 +9,8 @@ import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
-import { CARD_FILE_KEYS, auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
+import { journeyPath } from './journey.mjs'
+import { CARD_SOURCES, CARD_FILE_KEYS, auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
 
 export function checkSettlement(request, { regenerate = false } = {}) {
   const KANBAN = detect({ cwd: request.cwd, env: {} })
@@ -78,7 +79,9 @@ export function checkSettlement(request, { regenerate = false } = {}) {
     // Compare the current generator version with the existing output stamp.
     const stampNewer = Boolean(MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0)
     const stampStale = Boolean(MY_VER && STAMP !== undefined && (STAMP === null || cmpVer(STAMP, MY_VER) < 0))
-    const wouldRegen = newest > indexAt || stampStale || lazyBroken || (CONCURRENT && existsSync(join(KANBAN, '.ddd-gen-stale'))) // 「本来会重渲」:§1 那一行只在这时才出
+    const journeyBroken = CARD_SOURCES.filter((row) => row[2]).some(([f, k, sub]) =>
+      CTX.rawCardsOf(f, k, sub).some((card) => card.journey && !existsSync(join(KANBAN, journeyPath(card.id)))))
+    const wouldRegen = journeyBroken || newest > indexAt || stampStale || lazyBroken || (CONCURRENT && existsSync(join(KANBAN, '.ddd-gen-stale'))) // 「本来会重渲」:§1 那一行只在这时才出
     if (stampNewer) {
       notices.push(S.stampNewer(STAMP, MY_VER)) // 只否决重生成;审计(只读)在下面照做
     } else if (!MY_VER) {

@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync as directWrite, copyFileSync as directCopy,
 import { execFileSync } from 'node:child_process'
 import { join, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
-import { genStrings } from './strings.mjs'
+import { genStrings, journeyStrings } from './strings.mjs'
 import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { beginConcurrentGeneration } from './gen-concurrent.mjs'
@@ -30,6 +30,7 @@ import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, s
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { accFeedback } from './accfb.mjs'
 import { isIso, isRemoteShot, readPrecheck, shotHref } from './accpre.mjs'
+import { journeyError, journeyPath, journeySummary, JOURNEY_SUMMARY_CSS, renderJourney } from './journey.mjs'
 import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFrom, depItemText, openCount, reverseAfter } from './deps.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
@@ -120,6 +121,9 @@ if (CARDS_DIR) {
     }
     head[kind.key] = stripOrder(sortCards(list))
   }
+}
+for (const card of [...b.items, ...dm.entries]) {
+  const err = journeyError(card, cfg.lang); if (err) throw new Error(err)
 }
 // ———— 每卡更新日期(v0.14.0,仅 cardsDir 开)————
 // 口径在 cards.mjs(v0.15.14 起守卫的挂账到期提醒读同一份):一条 git log 批量取,
@@ -987,6 +991,7 @@ const rt = (text) => {
 }
 // detail:摘要与细节分家(定稿 §3.3)——渲染在卡内所有字段之后,默认折叠。无字段零差异。
 const detailBlock = (card) => {
+  if (card?.journey) return ''
   const s = String((card && card.detail) || '')
   return !RICH || !s ? '' : `
       <details class="detail"><summary>查证细节<span class="n"> · ${s.length} 字</span></summary><div class="dbody lite">${lite(s)}</div></details>`
@@ -1932,13 +1937,13 @@ const blCard = (it, i) => `
         <span class="bbadge src">${esc(it.source)}</span>
       </div>
       ${it.blockedOn ? `<p class="blockedon">⛔ 卡在:${esc(it.blockedOn)}</p>` : ''}
-      <dl>
-        <dt>背景</dt><dd class="x">${rt(it.problem)}</dd>${reproBlock(it.repro)}${shotsBlock(it.shots, '现场')}
-        <dt>解法</dt><dd class="x">${rt(it.approach)}</dd>
+      <dl${it.journey ? ' class="journey-summary"' : ''}>
+        ${it.journey ? journeySummary(it, cfg.lang) : `<dt>背景</dt><dd class="x">${rt(it.problem)}</dd>${reproBlock(it.repro)}${shotsBlock(it.shots, '现场')}
+        <dt>解法</dt><dd class="x">${rt(it.approach)}</dd>`}
       </dl>
-      ${it.note ? `<${NOTES_TAG} class="notes">${rt(it.note)}</${NOTES_TAG}>` : ''}
+      ${!it.journey && it.note ? `<${NOTES_TAG} class="notes">${rt(it.note)}</${NOTES_TAG}>` : ''}
       ${wtBlock(it.walkthroughs)}
-      ${it.links?.length ? `<div class="row links">${it.links.map(linkA).join('')}</div>` : ''}${detailBlock(it)}
+      ${it.journey ? `<div class="row links"><a class="demolink" href="${esc(journeyPath(it.id))}">▶ ${esc(journeyStrings(cfg.lang).open)}</a>${(it.journey.current.links || []).map(linkA).join('')}</div>` : it.links?.length ? `<div class="row links">${it.links.map(linkA).join('')}</div>` : ''}${detailBlock(it)}
     </div>
   </article>`
 
@@ -2077,10 +2082,10 @@ const decCard = (e) => {
       upd: cardUpd(e.id),
     })}
     <div class="rbody">
-      <dl>
-        ${decSrcRow(e)}<dt>问题</dt><dd class="x">${rt(e.question)}</dd>
-        ${e.decision ? `<dt>结论</dt><dd class="decided">${RICH ? rt('✓ ' + e.decision) : `✓ ${esc(e.decision)}`}</dd>` : `<dd class="pending">⏳ 待决——看 demo 后在此记结论,升 D 码</dd>`}
-        ${e.demoNote ? `<dt>demo</dt><dd class="demonote">${rt(e.demoNote)}</dd>` : ''}${shotsBlock(e.shots, '现场')}
+      <dl${e.journey ? ' class="journey-summary"' : ''}>
+        ${e.journey ? journeySummary(e, cfg.lang) : `${decSrcRow(e)}<dt>问题</dt><dd class="x">${rt(e.question)}</dd>`}
+        ${!e.journey && e.decision ? `<dt>结论</dt><dd class="decided">${RICH ? rt('✓ ' + e.decision) : `✓ ${esc(e.decision)}`}</dd>` : e.journey ? '' : `<dd class="pending">⏳ 待决——看 demo 后在此记结论,升 D 码</dd>`}
+        ${!e.journey && e.demoNote ? `<dt>demo</dt><dd class="demonote">${rt(e.demoNote)}</dd>` : ''}${e.journey ? '' : shotsBlock(e.shots, '现场')}
       </dl>
       ${hasMeta ? `<div class="pathmeta">
         ${secs ? `<span class="pm-lbl">设计</span>${secs}` : ''}
@@ -2089,10 +2094,10 @@ const decCard = (e) => {
       </div>` : ''}
       ${wtBlock(e.walkthroughs)}
       <div class="row links">
-        ${e.demo ? `<a class="demolink" href="${esc(safeHref(e.demo))}">▶ 打开 demo</a>` : ''}
+        ${e.journey ? `<a class="demolink" href="${esc(journeyPath(e.id))}">▶ ${esc(journeyStrings(cfg.lang).open)}</a>` : e.demo ? `<a class="demolink" href="${esc(safeHref(e.demo))}">▶ 打开 demo</a>` : ''}
         ${e.designDoc ? linkA({ title: '设计文档', href: e.designDoc }) : ''}
         ${e.route && e.routeLive ? `<a href="${esc(safeHref(liveUrl(e.route)))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
-        ${(e.links || []).map(linkA).join('')}
+        ${(e.journey ? e.journey.current.links || [] : e.links || []).map(linkA).join('')}
       </div>${detailBlock(e)}
     </div>
   </article>`
@@ -6404,7 +6409,7 @@ ${PATH_CSS_B}
   .pathpanel .rcard .rbody { display: block; }
   .pathpanel .rcard .rhead { cursor: default; }
   .pathpanel .rcard .rhead:hover { background: none; }
-  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${CHIP_BASE_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${DEP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}
+  .pathpanel .rcard .rtoggle { display: none; }${DK_SCHEME_CSS}${LAZY_CSS}${CHIP_BASE_CSS}${PRCHIP_CSS}${ACC_CSS}${REL_CSS}${RICH_CSS}${RESP_CSS}${DEP_CSS}${ARCH_CSS}${WIP_CSS}${CARDS_CSS}${TABRAIL_CSS}${OV_CSS}${STICKY_CSS}${[...b.items, ...dm.entries].some((c) => c.journey) ? JOURNEY_SUMMARY_CSS : ''}
 </style>${THEME_STYLE}
 <nav class="hubbar">
   <div class="hubbar-in">
@@ -6865,6 +6870,17 @@ if (LAZY) {
   // 只清己产的那几个文件;目录非空(有别人的东西)绝不整删
   for (const f of ['decisions.html', 'backlog.html', 'archive.html', 'acceptance.html', 'release.html']) { const fp = join(PARTS_DIR, f); if (existsSync(fp)) rmSync(fp) }
   try { if (readdirSync(PARTS_DIR).length === 0) rmSync(PARTS_DIR, { recursive: true }) } catch {}
+}
+for (const card of [...b.items, ...dm.entries].filter((c) => c.journey)) {
+  mkdirSync(join(HERE, 'journeys'), { recursive: true })
+  const prs = new Set(prsOfCard(card, m.instance.ghRepo).filter((p) => p.repo === m.instance.ghRepo).map((p) => p.num))
+  const acceptance = ACC_LISTS.filter((l) => l.nums.some((n) => prs.has(n)) || (l.cards || []).includes(card.id))
+    .map((l) => ({ title: l.title || l.nums.map((n) => '#' + n).join('/'), href: '#acc-' + l.nums[0] }))
+  writeFileSync(join(HERE, journeyPath(card.id)), darkenDoc(renderJourney(card, {
+    lang: cfg.lang, version: GEN_VER, resolveLink: (h) => cardLink(h).href,
+    shots: shotsBlock(card.shots, journeyStrings(cfg.lang).screenshots), acceptance,
+    appearance: { vars: MAIN_THEME_VARS, font: FONT_UI_TK, boot: DK_BOOT, css: DK_SCHEME_CSS, theme: THEME_STYLE, toggle: DK_TOGGLE_BTN, script: DK_TOGGLE_JS },
+  })))
 }
 GENERATION?.finish(assertGeneratorVersion)
 // v0.17.11:收尾这一行的「可立即做」与守卫同一把尺 —— ready 且前置已清才算,还等着前置的

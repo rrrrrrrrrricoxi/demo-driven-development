@@ -17,6 +17,8 @@
 // 「产物版本戳更新 / plugin 安装异常 / 非主线不重渲 / 无戳自愈 / gen 跑失败」那几条不在这份模块里:
 // 它们不是审计结论,是「要不要重生成」那一步的副产品(audit 只读、从不 gen,根本算不出它们),
 // 照旧留在 stop-hook.mjs 里,按坏了级全文照出。
+import { journeyError } from './journey.mjs'
+import { journeySummaryFields, journeySuggested, LONG_TEXT_LIMIT } from './journey-summary.mjs'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -36,7 +38,7 @@ export const CARD_SOURCES = [['manifest.json', 'tasks', null], ['backlog-manifes
  * 家务九类在那一条里的固定次序 —— 也正是 0.17.4 及以前守卫各段的出场次序。
  * 固定,是因为这一条每次收工都出:次序一变,人就得重新读一遍才知道哪个数是哪类。
  */
-export const CHORE_KEYS = ['longText', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'precheckBad', 'wip']
+export const CHORE_KEYS = ['longText', 'journeySuggested', 'journeySummary', 'accFbUncommitted', 'accFbPrunable', 'settle', 'reopen', 'hold', 'depsUnlocked', 'precheckBad', 'wip']
 
 /**
  * 家务那几条里点得到名的卡号上限(v0.17.7)。点名是为了「不必先跑一条命令才知道是哪张卡」,
@@ -308,7 +310,7 @@ export function auditPrecheck(ctx, S) {
 export function auditRichText(ctx, S) {
   const out = []
   if (ctx.cfg.richText !== true) return out // detail 字段本身受 richText 门控,没开的板催也白催
-  const LONG = 800
+  const LONG = LONG_TEXT_LIMIT
   let total = 0, worst = null // 老卡那一格只需要这两样:张数,与最长的那张(卡号 + 字段)
   const fresh = [] // 新卡逐张列:阻断消息要说清「改哪张的哪个字段、多长」
   for (const [f, k, sub, fields] of [
@@ -327,6 +329,8 @@ export function auditRichText(ctx, S) {
       if (!hit) continue
       if (ctx.isFreshCard(c, sub)) { fresh.push({ id: String(c.id ?? '?'), key: hit.key, n: hit.n }); continue }
       if (!ctx.inLine(c)) continue // 老卡那一格是按线分的家务,--line 到这儿才收窄
+      // 老卡已整理或应整理为 journey,只给一个行动;原始长记录保留,新卡阻断照旧。
+      if (sub && (journeySuggested(c) || (c.journey !== undefined && !journeyError(c, ctx.cfg.lang)))) continue
       total++
       if (!worst || hit.n > worst.n) worst = { id: String(c.id ?? '?'), key: hit.key, n: hit.n }
     }
@@ -563,10 +567,41 @@ export function auditOrphans(ctx, S) {
  * @param branch boardBranchCheck 的结果(问不出分支就传 null:三条生成物提醒与分支审计一起缺席)
  * @param gen gen.mjs 的绝对路径 —— 冲突那条要把命令填实
  */
+export function auditJourneys(ctx) {
+  const out = []
+  for (const [file, key, sub] of CARD_SOURCES.filter((row) => row[2])) for (const c of ctx.rawCardsOf(file, key, sub)) {
+    const err = journeyError(c, ctx.cfg.lang)
+    if (err) out.push({ key: 'journeyInvalid', level: 'broken', n: 1, text: err })
+  }
+  return out
+}
+
+/** Per-session writing reminder; structural journey validation remains separate. */
+export function auditJourneySummaries(ctx, S) {
+  const rows = []
+  for (const [file, key, sub] of CARD_SOURCES.filter((row) => row[2])) for (const card of ctx.cardsOf(file, key, sub)) {
+    const fields = journeySummaryFields(card)
+    if (fields.length) rows.push({ id: card.id, fields })
+  }
+  return rows.length ? [{ key: 'journeySummary', level: 'chore', n: rows.length, rows: rows.slice(0, CHORE_IDS), text: S.journeySummary(rows) }] : []
+}
+
+export function auditJourneySuggestions(ctx, S) {
+  const rows = []
+  for (const [file, key, sub] of CARD_SOURCES.filter((row) => row[2])) for (const card of ctx.cardsOf(file, key, sub)) {
+    const hit = journeySuggested(card)
+    if (hit) rows.push({ id: card.id, ...hit })
+  }
+  return rows.length ? [{ key: 'journeySuggested', level: 'chore', n: rows.length, rows: rows.slice(0, CHORE_IDS), text: S.journeySuggested(rows) }] : []
+}
+
 export function collect(ctx, S, { branch = null, gen = '' } = {}) {
   return [
     ...auditOrphans(ctx, S),
     ...auditCardFiles(ctx, S),
+    ...auditJourneys(ctx),
+    ...auditJourneySummaries(ctx, S),
+    ...auditJourneySuggestions(ctx, S),
     ...auditGenFiles(ctx, S, branch, gen),
     ...auditAcceptance(ctx, S),
     ...auditRichText(ctx, S),
