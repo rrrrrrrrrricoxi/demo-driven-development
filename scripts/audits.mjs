@@ -17,6 +17,7 @@
 // 「产物版本戳更新 / plugin 安装异常 / 非主线不重渲 / 无戳自愈 / gen 跑失败」那几条不在这份模块里:
 // 它们不是审计结论,是「要不要重生成」那一步的副产品(audit 只读、从不 gen,根本算不出它们),
 // 照旧留在 stop-hook.mjs 里,按坏了级全文照出。
+import { journeyError } from './journey.mjs'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -563,10 +564,20 @@ export function auditOrphans(ctx, S) {
  * @param branch boardBranchCheck 的结果(问不出分支就传 null:三条生成物提醒与分支审计一起缺席)
  * @param gen gen.mjs 的绝对路径 —— 冲突那条要把命令填实
  */
+export function auditJourneys(ctx) {
+  const out = []
+  for (const [file, key, sub] of CARD_SOURCES.filter((row) => row[2])) for (const c of ctx.rawCardsOf(file, key, sub)) {
+    const err = journeyError(c, ctx.cfg.lang)
+    if (err) out.push({ key: 'journeyInvalid', level: 'broken', n: 1, text: err })
+  }
+  return out
+}
+
 export function collect(ctx, S, { branch = null, gen = '' } = {}) {
   return [
     ...auditOrphans(ctx, S),
     ...auditCardFiles(ctx, S),
+    ...auditJourneys(ctx),
     ...auditGenFiles(ctx, S, branch, gen),
     ...auditAcceptance(ctx, S),
     ...auditRichText(ctx, S),

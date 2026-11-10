@@ -875,3 +875,29 @@ CLI rewrites the manifest as a whole there.
 ## License
 
 [MIT](LICENSE)
+
+### Multi-round card journeys
+
+A decision or backlog card can opt into a stable entry with `journey`. The board shows three concise summaries and opens `journeys/<card-id>.html`. Cards without `journey` keep their existing output. The entry groups the current design, phase history, and development records. History and original resources start collapsed. Original `demo`, `links`, `shots`, `detail`, and development notes remain in the card source and remain accessible from the entry. Do not write pending questions as accepted decisions.
+
+```json
+{
+  "journey": {
+    "decision": "Use option B with the left summary panel.",
+    "progress": "The panel is implemented; acceptance is pending.",
+    "recent": "Added the option D legend refinement.",
+    "current": {
+      "title": "Current design",
+      "href": "demos/current.html",
+      "summary": "The selected overall layout.",
+      "links": [{ "title": "Current legend", "href": "demos/legend.html" }]
+    },
+    "history": [{ "date": "2026-11-10", "title": "First review", "summary": "Compared layouts.", "href": "demos/round-1.html" }],
+    "development": [{ "date": "2026-11-10", "title": "Implementation", "summary": "Check the panel.", "href": "index.html#acc-12" }]
+  }
+}
+```
+
+Write the object with `ddd.mjs card set <id> journey --json '<object>'`. The three summaries, `current.title`, and `current.href` are required nonempty strings. `history` and `development` are required arrays; their rows require `title`. Row `date`, `summary`, and `href` are optional. `current.links` is an optional array of titled URLs. Dates use `YYYY-MM-DD`. URLs are board-relative or HTTP(S); executable schemes, control characters, backslashes, and protocol-relative URLs are rejected. Document URLs follow the existing rendered-document mapping, and board hashes return to `index.html`. Acceptance links use the existing PR/card relationships. A journey does not change the acceptance revision or human judgments.
+
+The `journeys/` directory contains generated output. Preserve old demo URLs. Read the card source or run targeted searches instead of reading generated entries in full.

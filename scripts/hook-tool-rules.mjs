@@ -50,7 +50,7 @@ export function generatedReads(request, kanban) {
   for (const path of candidates) {
     if (!path || /[$`]/.test(path)) continue
     const rel = relative(kanban, resolve(cwd, path)).split(sep).join('/')
-    if (rel === 'index.html' || rel === 'shots.html' || /^(?:refs|parts)\//.test(rel)) paths.push(path)
+    if (rel === 'index.html' || rel === 'shots.html' || /^(?:refs|parts|journeys)\//.test(rel)) paths.push(path)
   }
   return [...new Set(paths)]
 }

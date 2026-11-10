@@ -9,6 +9,12 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.2] - 2026-11-10
+
+- Add opt-in card journeys with concise current decision, development progress, and recent changes. Stable pages group current demos, phase history, development records, original evidence, and acceptance links.
+- Keep original demo URLs and card evidence intact; preserve existing output when journeys are absent.
+- Include journey output in concurrent publication and generated-file protections.
+
 ## [0.19.1] - 2026-11-10
 
 - Add opt-in `concurrentSessions` for shared boards: board-wide Stop findings are advisory; explicit audits and merge/read protections retain their behavior.

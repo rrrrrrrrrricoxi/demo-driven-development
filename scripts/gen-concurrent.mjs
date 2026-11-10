@@ -67,7 +67,7 @@ export async function acquireGenerationLock(board, { timeoutMs = 40000 } = {}) {
   } catch (e) { release(); throw e }
 }
 
-const OUTPUTS = new Set(['index.html', 'shots.html', 'refs', 'parts', '.ddd-gen-stale', '.ddd-gen-lock'])
+const OUTPUTS = new Set(['index.html', 'shots.html', 'refs', 'parts', 'journeys', '.ddd-gen-stale', '.ddd-gen-lock'])
 // 内容 hash 检测保持 mtime 的编辑;mtime 另入 hash,因为卡/文档/截图日期会用它兜底。
 function fingerprint(board) {
   const hash = createHash('sha256')
@@ -138,7 +138,7 @@ export async function beginConcurrentGeneration(board) {
     const pathOf = (path) => {
       const absolute = resolve(path)
       const rel = relative(board, absolute)
-      if (rel === 'index.html' || rel === 'shots.html' || rel === 'refs' || rel.startsWith('refs/') || rel === 'parts' || rel.startsWith('parts/')) return absolute
+      if (rel === 'index.html' || rel === 'shots.html' || rel === 'journeys' || rel.startsWith('journeys/') || rel === 'refs' || rel.startsWith('refs/') || rel === 'parts' || rel.startsWith('parts/')) return absolute
       throw fail('并发生成拒绝写入源文件', 'Concurrent generation refuses to write a source file')
     }
     const stale = join(board, '.ddd-gen-stale')

@@ -6777,9 +6777,9 @@ console.log('T76 生成物只在主线上生成 / 合并前硬闸')
     ok(/将设仓库本地 `git config merge\.ours\.driver true`/.test(p1.stdout), '驱动没配时 plan 说要设')
     const a1 = runInit('apply', '--yes', '--brand', 'XT', '--port', '8999')
     const attr = readFileSync(join(repo, '.gitattributes'), 'utf8')
-    ok(a1.status === 0 && attr.split('\n').filter((l) => l.includes('merge=ours')).length === 4 &&
-      attr.includes('parts/**') && attr.includes('shots.html'),
-      'apply 把四条写进仓库根 .gitattributes', `${a1.status} ${(a1.stderr || '').slice(0, 300)}`)
+    ok(a1.status === 0 && attr.split('\n').filter((l) => l.includes('merge=ours')).length === 5 &&
+      attr.includes('parts/**') && attr.includes('shots.html') && attr.includes('journeys/**'),
+      'apply 把含journeys的五条写进仓库根 .gitattributes', `${a1.status} ${(a1.stderr || '').slice(0, 300)}`)
     ok((g('config', '--get', 'merge.ours.driver').stdout || '').trim() === 'true',
       'merge=ours 的驱动在这个克隆里定义好了(仓库本地)')
     ok(/± [^\n]*\.gitattributes/.test(a1.stdout) && /git config merge\.ours\.driver true/.test(a1.stdout),

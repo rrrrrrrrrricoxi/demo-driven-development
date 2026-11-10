@@ -31,6 +31,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
+import { journeyError } from './journey.mjs'
 import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
@@ -234,7 +235,7 @@ function checkPr(value) {
   for (const v of Array.isArray(value) ? value : [value]) if (!parsePr(v, repo)) die(S.prBad(JSON.stringify(v)))
 }
 
-const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order']
+const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order', 'journey']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
   entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
@@ -275,6 +276,7 @@ function checkField(store, field, value, id = '') {
   if (field === 'session') checkTokens(value, sessionIds(), S.sessionBad)
   if (field === 'pr') checkPr(value)
   if (field === 'after') checkAfter(id, value)
+  if (field === 'journey') { const err = journeyError({ id, journey: value }, CFG.lang); if (err) die(err) }
 }
 
 // ---- 命令 ----------------------------------------------------------------
