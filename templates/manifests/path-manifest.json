@@ -1,0 +1,13 @@
+{
+  "$comment": "决策路径叙事(可选模块)。不需要就删掉本文件,gen 缺省跳过、对应标签页自动不出现。",
+  "demoBase": "{{DEMO_BASE}}",
+  "demoBrief": "",
+  "demoHandover": "",
+  "pivot": "",
+  "principles": [],
+  "epochs": [],
+  "rounds": [],
+  "demos": [],
+  "aDemos": [],
+  "pinboard": []
+}

@@ -1,0 +1,22 @@
+{
+  "format": "ddd-codex-native-package-v1",
+  "source": {
+    "repository": "https://github.com/rrrrrrrrrricoxi/demo-driven-development",
+    "commit": "b81a8731790b38ba537a6a7ea13330038479b1cd",
+    "tree": "534bf7956e9bcfc0cd29d21bc7cd0848880ff626",
+    "version": "0.19.6"
+  },
+  "package": {
+    "name": "demo-driven-development",
+    "version": "0.19.6"
+  },
+  "snapshot": "git commit; uncommitted and untracked files excluded",
+  "publication": "not checked",
+  "adaptations": [
+    {
+      "operation": "remove",
+      "path": "plugin.json",
+      "reason": "Select .codex-plugin/plugin.json for native Codex hooks"
+    }
+  ]
+}

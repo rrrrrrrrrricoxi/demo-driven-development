@@ -1,0 +1,915 @@
+# demo-driven-development
+
+A Claude Code and Codex plugin, with an opt-in Pi extension, that turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
+
+## The idea
+
+Some decisions are SEE-IT decisions: layout, visual weight, interaction feel, copy tone. You can't judge them from a description, but you can judge them in seconds once the options sit side by side in a browser. Other decisions are KNOW-IT decisions, like data models, correctness questions, and migrations. A demo tells you nothing there; specs and tests do.
+
+This plugin packages the SEE-IT half as a workflow:
+
+1. For each real fork in the road, build cheap self-contained HTML demos of the options.
+2. Link every demo to a card on a decision kanban. A guard hook blocks orphan demos, so the audit trail stays complete.
+3. A human picks. Then you write the real code.
+
+`docs/scene-fit.md` describes the applicability boundary, including when *not* to use this. Step 0 of the workflow skill runs that check before every task, so the plugin itself will tell you when a demo is the wrong tool.
+
+## What's in the box
+
+- Two skills. `ddd-workflow` is the day-to-day rhythm: scene-fit check, demo, human review, then code, verify, PR. `kanban-init` scaffolds a new board, merges scattered demos into one, or takes over a legacy hand-rolled board.
+- Host adapters run the Stop guard and `gh pr` reminder. The Codex adapter handles Stop, PreToolUse, and PostToolUse events; its hook definitions use Codex's current tool names. Both adapters check whether the project actually uses this plugin before doing anything. The opt-in Pi extension uses native tool events and read-only settlement; it never automatically generates a board.
+- `gen.mjs` builds the kanban (`index.html`) from four fixed manifest JSONs (iterations, backlog, decisions, decision path), plus the acceptance and release manifests when those tabs are switched on. It also renders project markdown into board-local pages and injects a back-navigation bar into each demo.
+- `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
+- `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
+- `retire-stale-caches.mjs` defuses superseded plugin versions that long-lived sessions are still pinned to (see "Upgrading").
+- `board-branch-check.mjs` says when a branch is carrying board changes that belong on the mainline (see "The board is only edited on the mainline").
+
+The plugin has no npm dependencies: plain Node, plus one optional Python file server.
+
+The adapters call a [shared hook API](docs/hook-core.md). Shared CLI commands and journey audits also work without a host session. Use [portable init and the CLI](docs/hook-core.md#cli-use-without-a-host-adapter) for explicit board work, or follow the [host integration contract](docs/hook-core.md#adding-another-host) to map lifecycle events. Contract tests cover the shared rules and existing Claude, Codex, and Pi adapter mappings; they do not establish support for an untested host.
+
+The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `decisionArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
+
+## Concurrent sessions on a shared board
+
+Set `"concurrentSessions": true` in `kanban.config.json` when several sessions edit one board. This is opt-in; single-session behavior stays unchanged.
+
+Stop checks inspect the entire board and cannot attribute findings to a session. In this mode, orphan demos, new cards with long text, and generation failures remain visible as notices but do not block another session from finishing. Explicit `ddd.mjs audit` checks retain their severity. Generated-file read protection, merge checks, mainline generation rules, and version downgrade protection remain active. Card `session` tags identify work streams, not individual running sessions.
+
+Concurrent generators use a lock per canonical board directory. Generation stages output and checks source content again before publication. If input changed before publication, generation defers without replacing output. Publication replaces files atomically and publishes the index last; it is not a transaction across all files. A change during publication can leave some parts updated while the previous index remains. A stale marker requests another generation; rerun when writers finish. Concurrent mode does not inject or update demo back-navigation bars, because demos are source files another session may be editing. Include the navigation in a new demo's source when needed.
+
+Different demos and cards can be edited in parallel. Shared manifests, Git staging, and commits still require coordination; the generator lock does not lock editors or Git. Use one feature worktree per implementation task and separate test ports. A board server serves one directory: editing a board copy in another worktree does not update the shared server. Sessions must load the updated plugin; an older loaded hook does not acquire the new lock.
+
+## Install
+
+### Claude Code
+
+```
+/plugin marketplace add rrrrrrrrrricoxi/demo-driven-development --scope project
+/plugin install demo-driven-development@demo-driven-development --scope project
+```
+
+`--scope project` writes both entries into the repo's `.claude/settings.json`, so teammates get the workflow with no per-machine setup. Outside a session, use `claude plugin marketplace add …` and `claude plugin install …`.
+
+### Codex
+
+Add the Git marketplace and install the plugin with the Codex CLI:
+
+```
+codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native
+codex plugin add demo-driven-development@demo-driven-development
+```
+
+The `codex-native` branch is generated from tested `main` commits and records the exact source commit. It supplies the native manifest required for hook discovery; shared development stays on `main`.
+
+Codex asks you to review and trust bundled hooks before they run. Open `/hooks` to review them. Plugin installation does not auto-trust hooks. See [host integration notes](docs/hosts.md#codex) before initializing a project.
+
+### Pi (explicit extension, existing boards)
+
+With Pi 1.3.0 and its Node.js requirement (22.19+), load the adapter for a **new invocation**:
+
+```sh
+cd /path/to/project
+pi --extension /absolute/path/to/demo-driven-development/pi/index.ts
+```
+
+Keep existing safety extensions enabled. This command does not install configuration. Remove `--extension` on the next invocation to stop loading DDD. Pi settlement is read-only and can request at most one corrective continuation per input; it never generates the board. Native Pi initialization and managed installation are not included. See [Pi integration](docs/pi.md) for working-directory, child inheritance, retry, and compatibility limits.
+
+## Quick start (new project)
+
+```
+node <plugin>/scripts/init.mjs scan  --dir <projectRoot>
+node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand MyApp --runtime codex --codex-hooks plugin
+node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand MyApp --runtime codex --codex-hooks plugin --yes --no-commit
+python3 app/kanban/serve.py        # then open the printed port
+```
+
+`apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), adds the selected host's read guard, and appends host-specific project instructions. The default runtime is `claude`; use `--runtime codex` or `--runtime both` to select Codex or both hosts. This quick start uses bundled hooks from the native Codex plugin, avoiding duplicate project hooks. For project-local hooks, use `--codex-hooks project`; the absolute hook path is machine-specific, so rerun init with `--runtime codex --codex-hooks project` after cloning to another machine, switching hosts, or changing the plugin path. `--no-commit` leaves the changes uncommitted. Re-running it is a no-op. For projects that already have scattered demos or an older hand-rolled board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. Details live in `skills/kanban-init/SKILL.md` and [host integration notes](docs/hosts.md).
+
+## How the guard works
+
+Claude Code and Codex use the configured Stop guard described below. Pi uses [read-only settlement](docs/pi.md#settlement-and-retries), not automatic generation.
+
+When the configured Stop guard runs, it compares mtimes: if any manifest, demo, theme file, or the generator itself is newer than `index.html`, it regenerates the board. `gen` also writes a version stamp (`<!-- ddd-gen vX.Y.Z -->`) on line 2 of `index.html`. A session running an older plugin refuses to overwrite newer output and warns instead; a newer plugin heals older output automatically. Separately, every `demos/*.html` must be referenced by a manifest or listed in `demos/.no-card-ok`, otherwise the session is blocked until the demo gets a card.
+
+What the guard says is sorted into three levels, by what happens if you ignore it rather than by how stern it sounds. **Blocking** — an orphan demo, a freshly created card whose prose runs past 800 characters with no `detail` — prints in full and stops the session; a second Stop in the same round downgrades it to a warning so nothing can loop. **Broken** — a missing card directory, a card filename that disagrees with the id inside, a card or acceptance list that is not valid JSON, a duplicated pull request or item id, a list pointing at a card that does not exist, generated board files sitting on a branch or stuck in a conflict, a `merge=ours` attribute with no driver defined, board changes on a non-mainline branch — also prints in full, one paragraph each. That level is normally empty, so squeezing it into a number would just hide it. **Chores** — long prose on older cards, uncommitted acceptance feedback, prunable feedback screenshots, cards waiting to be settled, cards settled early, settle holds past their 14 days, prerequisites just cleared, the backlog's count of what can be started now against its WIP limit — are eight categories that are normally non-empty and mostly belong to someone else's line, so since 0.17.5 they collapse — since 0.17.8 into one single unbroken line:
+
+```
+看板守卫 5 条提醒(详情 ddd audit):正文过长没拆 detail 9 张(最长 BL-28)· 已收但 PR 还开着 BL-C74 · 暂不收账满 14 天 BL-C25 · 前置已清可开工 BL-C73、BL-C134 · 可立即做 22/20 超上限
+```
+
+Categories at zero do not appear, and if all eight are zero the line is gone — with one exception, the last item. Since 0.17.11 a board that sets `config.wip` reports its backlog count on each Stop, under the limit (`可立即做 12/20`) as well as over it (`可立即做 22/20 超上限`). A board that does not set `config.wip` says nothing about it. Each item names up to three cards; remaining cards are counted. The guard keeps each severity level on one line. It leaves commands and explanations to `node <plugin>/scripts/ddd.mjs audit`, which prints all three levels in full; `--session <session tag>` narrows card-scoped findings to one line of work (`--line` is a synonym). Guard and `audit` share one implementation (`scripts/audits.mjs`).
+
+### Claude Code hook version handling
+
+A Claude Code hook process is bound to the plugin version its session started with. Since 0.16.2, if the board's stamp is newer than the running hook, it looks up the project's install in `~/.claude/plugins/installed_plugins.json` (`CLAUDE_CONFIG_DIR` is honoured) and forwards the whole hook when that install is at least as new as the board and is not itself. Since 0.17.8 a successful forward says nothing; `DDD_HOOK_FORWARDED` prevents forwarding twice. If the table cannot be read or has no sufficiently new install, the old hook skips regeneration and says why. Running `gen.mjs` by hand from an old path is still refused.
+
+## Upgrading
+
+The plugin version on `main` only moves up. A downgrade would freeze every stamped board, so never merge a lower version.
+
+After an upgrade, the first regeneration changes exactly one line of `index.html` (the stamp). Byte-equivalence checks normalize it first: `sed '/<!-- ddd-gen v/d'`.
+
+Long-lived sessions keep whatever plugin version they started with. After upgrading, run `node <plugin>/scripts/retire-stale-caches.mjs` (dry-run by default, `--yes` to apply). It shims superseded cache versions so old sessions get a restart notice instead of silently overwriting your board with stale output. The script skips versions that are still registered as some project's current install.
+
+Release history is in [CHANGELOG.md](CHANGELOG.md); the process for cutting a release is in [RELEASING.md](RELEASING.md).
+
+## Assumptions
+
+- Card links point at GitHub (blob and commit URLs).
+- The PR reminder hook watches the `gh` CLI.
+- `serve.py` needs Python 3; the helper scripts assume macOS or Linux.
+- The board lives at `app/kanban/` (fixed path, on purpose).
+- Skills, docs, and code comments are written in Chinese; runtime guard messages follow the board's `config.lang` (`zh` or `en`). Chinese-first docs are a maintainer choice, not a runtime limitation.
+
+## Token economy
+
+A mature board's `index.html` can reach hundreds of thousands of characters. `TOKEN-ECONOMY.md` explains how both host adapters support source-only verification. Read manifests and Markdown sources, and use generator results instead of reading generated files. Host guards cover only the tool entry points they can inspect; they do not block arbitrary shell or code reads.
+
+## Document library sections (optional)
+
+Every `config.docs[]` entry carries a `category`, and the document library sorts those categories into four fixed sections, read top to bottom: 地基 (groundwork: data models, calibrations, decision logs), 流程 (process: review, planning, handover), 操作 (operations: environments and deployment), 存档 (archive: session logs and whatever is left, greyed at the end). The default mapping covers all seven categories the board knows about, and `config.docSegments` overrides it one category at a time, so `{"评审与审计": "地基"}` moves reviews up into groundwork. The sections themselves are not configurable: they are part of the hub's design, not a general grouping DSL. A category nobody mapped lands in the archive, with a warning. Left unset, the defaults apply and output is byte-identical to a board without the key.
+
+## Theming (optional)
+
+Drop a `theme.css` next to `kanban.config.json` and `gen` inlines it as the last `<style>` of every page it writes (the board, the doc pages, the screenshot gallery), where it outranks everything above it. `templates/theme.css.example` is the place to start: every token at its factory value, in two `:root` blocks, one for the board and one for the doc and gallery pages, so you can copy it whole and change only the lines you mean to. Six sets of semantic colors (status, backlog status, priority, tier, decision status, doc sections) are baked into the HTML as `style="--c:…"` attributes where no stylesheet can reach them; those go through `config.themeColors` instead, as in `{"STATUS_COLOR": {"done": "#146152"}}`. With neither configured, output is byte-identical to a board without the feature.
+
+## Session tags (optional)
+
+When several sessions work the same board in parallel, `config.sessionTags` records who owns which card: `{"dev": {"label": "dev", "desc": "product work", "color": "#3b82c4"}}`, insertion order preserved, `label` defaulting to the id and `color` to the next entry in a quiet built-in palette. A card claims one or more tags through a `session` field holding space-separated ids. Each tag renders as a small seal on the card and as a filter chip in the toolbar, single-select and intersected with the lane, search and time filters like every other chip. A tag the config never declared renders grey with a warning rather than breaking the build. An empty object counts as unset; left unset, output is byte-identical to a board without the feature.
+
+## Lanes (optional)
+
+Most boards do not need this. When a board tracks parallel timelines or eras (say A archived, B history, C current), set `config.lanes` to an object (`ids`, `titles`, `hints`, and so on) and give each card an explicit `line`. The kanban then renders per-lane filter chips and hints. Left unset, lanes are off and output is byte-identical to a board without the feature. See the kanban-init skill for the full shape.
+
+## Dark mode (optional)
+
+Set `config.darkMode` to `true` and the board (plus doc pages and the screenshot gallery) follows the system light/dark preference, with a manual toggle in the top bar that remembers your choice. Colors are baked as CSS `light-dark()` pairs — the dark side is a warm pastel tuned for night reading, not an inversion. Left unset, output is byte-identical to a board without the feature. Needs a 2024+ browser.
+
+## Lazy tabs (optional)
+
+For boards that have grown heavy on slow links, `config.lazyTabs: true` splits the long tabs into `parts/*.html` fetched on first visit, leaving a small first-paint shell with skeleton cards and a thin real-progress bar. Decisions and backlog always split; the archive, acceptance and release tabs split too when they are switched on, each into its own part. Their baked-in data (checklists, pull request rows) travels with the part as a `<script type="application/json">` block and is read once on injection, so nothing about those tabs weighs on the shell. Deep links — including `#acc-<pr>` and `#pr-<number>` — global search, and every filter keep working: the runtime re-wires each pane after injection, and a pane that needs another one's data (the release table's acceptance column, a card's `n/N` chip) fetches it before rendering the number. Requires serving via the bundled `serve.py` (the documented path anyway). Left unset, output is a single file, byte-identical to a board without the feature.
+
+## Acceptance tab (optional)
+
+Set `config.acceptanceTab` to `true` and the board grows a tab fed by a new
+`acceptance-manifest.json` sitting next to the other manifests: one checklist
+per pull request (or per group of them), with the environment under test, items
+built from *what to do / what to expect / what is wrong / why*, data blocks
+rendered as tables and copyable as TSV, and round and pull-request filters.
+An item can also carry `shots` — the same field cards use, `["x.png"]` or
+`[{file, caption}]`, a bare filename resolving under `kanban/shots/` and
+anything with a `/` read relative to the board root — which renders as a strip
+of evidence thumbnails at the end of the item, each opening the full image in a
+new tab. A screenshot that is not there is left out of the strip and warns once,
+so a missing file costs a line in `gen`'s output rather than a broken-image icon
+on the board.
+An agent can run an item first and record what it saw as `precheck`
+(`ok` / `bad` / `blocked`, a one-line note, when and where) with
+`ddd acc precheck <pr> <item> … --shot <path>`; the board shows it as one line
+above the evidence and counts the results in the checklist header, but the
+verdict stays with a person. When an item is shot again, `--new-round` (or
+`ddd acc shots rotate`) folds the previous round into `shotsHistory`, shown as
+a collapsed list of earlier rounds under the latest one.
+Ticks live in `localStorage`, keyed by the checklist's `revision` — bump it and
+the previous round's ticks retire (switch on `acceptanceFeedback`, below, and
+the tick becomes a shared ✓ / ✕ verdict instead). A "copy result" button produces
+the JSON to paste back into the manifest's `result`, so a finished round of
+acceptance lands in git instead of in one browser. Cards whose pull request has a checklist gain a
+link to it and a live `n/N` counter. Left unset, output is byte-identical to a
+board without the feature; turning it on without the manifest is a hard error.
+
+## Shared acceptance feedback (optional)
+
+A static board keeps every tick in the browser that made it, which is fine while
+one person is testing and useless the moment two are: the other tester's ticks,
+their notes and their screenshots live somewhere you cannot see. Set
+`config.acceptanceFeedback` to `true` (on top of `acceptanceTab`) and the
+checkbox at the left of every checklist row is replaced by the verdict itself:
+two quiet **✓ / ✕** buttons. One click posts it and colours the row optimistically
+(a failure rolls the colour back and prints the reason under that row); ✓ fades
+the row, ✕ leaves it at full strength with a red left edge. Clicking the button
+that is already on retracts the verdict — an appended `verdict: "none"` record,
+not an erasure, so the other tester never sees a mark quietly vanish (a second
+click within 400ms is ignored, and ✓ ↔ ✕ swap directly without a retraction).
+The progress line and the group counts follow **my** verdicts:
+`已判 N / M · 其中 K 条不对`.
+
+Each row also carries a quiet `＋ 备注 / 图` at its bottom right — always there,
+not on hover. It opens one focused input: Enter or blur saves it, leaving it
+empty records nothing, and judging ✕ opens it automatically asking 哪里不对?.
+The paste hint sits inside the right edge of that input while it has focus, the
+paperclip opens a file picker for phones, and an uploaded image records itself
+immediately. A summary chip appears at the end of the row only when somebody
+else has spoken (`乙 ✕ · 1 图`); opening it lists every record for that item,
+mine included, one line each — an initial-dot, ✓ / ✕, the time, the note and the
+thumbnail, which opens in place over a dimmed viewport rather than in a new tab.
+Testers name themselves once (stored as `<brand>_acc_who` in that browser) and
+the tab header carries a `我是 … · 换人` chip.
+
+The shared source of truth is `app/kanban/acceptance-feedback.jsonl`, one JSON
+object per line, written by two append-only `POST` endpoints in the bundled
+`serve.py` (`/api/acceptance/mark` and `/api/acceptance/shot`). The page polls
+that file every 20 seconds while the acceptance tab is visible, plus whenever the
+window regains focus or the tab is opened, so a colleague's verdict shows up in
+seconds without regenerating anything. Later lines win over earlier ones for the
+same (person, item) verdict; notes and screenshots accumulate; a malformed line
+is skipped and counted, never fatal. Bump a checklist's `revision` and the older
+marks stay visible but stop counting: the expanded row greys them with
+「清单已改(rev N)」 and the summary reports them as `旧清单 N`, so a ✓ from
+before the rewrite never reads as a ✓ on the text that replaced it. The
+`复制结果` button reads your verdicts and emits
+`{"checked":[…], "bad":[…], "at":"…"}` — the `checked` key keeps its shape, so
+pasting it back into the checklist's `result` still works, and items already in
+that `result` show a read-only 已收 tag instead of pretending to be somebody's
+verdict. The private tick key from 0.17.0 (`<brand>_acc_<pr>_r<rev>`) is ignored
+and never written again: it recorded what one person had tried, and promoting it
+to a published verdict would sign their name to a claim they never made.
+
+Without a write endpoint — a `serve.py` older than 0.17.0, or a plain static
+server — the controls keep their shape and behaviour, the verdict is stored in
+`<brand>_acc_v_<pr>_r<rev>` in that browser, and a grey line at the top of the
+tab says exactly that. Each page load still probes once, so the board reconnects
+itself as soon as the endpoint is there.
+
+Everything is validated server-side even though the board is on a trusted
+network: the pull request must be in the checklist, the item must belong to it,
+`who` is 1–20 characters with no control characters, `verdict` is `ok` / `bad` /
+`none` (the retraction) or absent, `note` caps at 2000 characters, an upload must be JPEG or PNG by magic
+number and content type and stay under 2 MB, and **the filename is composed by
+the server** (`acc-<pr>-<item>-<UTC timestamp>.jpg`) — a client-supplied name is
+never trusted. Writes are a single `O_APPEND` write plus `fsync`, so two people
+clicking at once cannot interleave. With the key unset the endpoints answer 404
+and generated output is byte-identical to a board without the feature.
+
+Both endpoints refuse cross-site writes: a request whose `Sec-Fetch-Site` says it
+came from somewhere else, or whose `Origin` is not this server's own, gets a 403,
+and `mark` accepts only `application/json` — `text/plain` would be a CORS simple
+request, which is exactly the shape a page you happen to be visiting could use to
+file a verdict under your name. Command-line clients send neither header and are
+unaffected. The trust boundary itself is unchanged and worth stating plainly:
+`serve.py` binds `0.0.0.0` and has no accounts, so **anyone who can reach the
+port can write** — run it on a network you trust, and remember the ledger is
+append-only in git, where a forged line shows up in the next `git diff`.
+
+Feedback screenshots stay out of git by default: add
+`app/kanban/shots/acc-*` to your `.gitignore` (the plugin prints this as a
+reminder and never edits your ignore file), and they are excluded from the
+screenshot gallery. To keep one as evidence, rename it without the `acc-`
+prefix and put it in a card's `shots` field. To clear the rest,
+`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run` lists the shots whose
+pull request merged more than 30 days ago (`--days N` to change the window) and
+dropping `--dry-run` deletes them; the `.jsonl` is never touched, so the record
+of who said what survives the images. The Stop guard says one line when the
+jsonl has uncommitted lines, and another when ten or more shots are prunable —
+it never commits or deletes anything itself.
+
+The endpoints only exist in the `serve.py` shipped with 0.17.0 and later, and
+retractions (`verdict: "none"`) need the 0.17.1 one (`# ddd-serve v3`). Boards
+seeded by an earlier version keep the copy they have (the plugin never overwrites
+a file you may have edited); `kanban-init` prints a line when yours is behind, and
+upgrading is a copy of `templates/serve.py` plus a restart of the server. Until
+then the board says so where it happens, and it says which of the two it is: a
+`serve.py` with no write endpoint at all answers 501, and the row prints that
+sentence instead of the status code; a `ddd-serve v2` refuses only the retraction
+with a 400 about the `verdict` enum, and the row keeps the server's own sentence
+and appends the fix — overwrite `serve.py` from the plugin and restart.
+
+## Acceptance roster and pin (optional)
+
+With `acceptanceFeedback: true`, anyone who can open the board can sign the
+ledger under any name. On a trusted network that is not a security hole, but it
+is a discipline hole: the acceptance ledger is a record, and who gets to appear
+in it should be somebody's decision. Write the key as an object instead —
+
+```json
+"acceptanceFeedback": { "pin": "1111" }
+```
+
+— and the board grows a roster. `app/kanban/acceptance-roster.json` is a plain
+`{"names": […]}` file that lives in git; the ledger accepts only the names in
+it. Signing under a name already on the roster is unchanged — no pin, no extra
+click, and switching back to a name you used before never asks either. A name
+that is *not* on the roster gets one more box on the same line, four digits
+wide, labelled 新名字要口令: enter the pin and the name joins the roster, and
+whatever you had just clicked is recorded right after. A wrong pin leaves a grey
+口令不对 inside the right edge of that box and keeps it open; Esc cancels the
+whole signing. No dialog is ever raised.
+
+The pin is checked by the server, not the page: it is never baked into the
+generated HTML, and `POST /api/acceptance/who` (`{name, pin}`) is the only way
+into the roster. A wrong pin sleeps one second and answers 403 — no lockout, no
+counter, since the trust boundary is still the network and that second only
+blunts a slipped finger. With a pin configured, `mark` and `shot` answer 403 for
+any `who` outside the roster; with `acceptanceFeedback: true` those two behave
+exactly as they did in 0.17.0, the `who` route does not exist (501, the same
+answer 0.17.5 gave it), and the generated board carries not one byte of the
+roster code. Where a pin *is* configured, the server also answers
+`GET /acceptance-roster.json` itself, so a board whose roster file has not been
+committed yet still hands the page an empty roster and the first person can pin
+themselves in. The roster only grows: to remove somebody, edit the file and
+commit it, the same discipline as the ledger itself. Names are normalised the
+same way signatures are (control characters dropped, trimmed, cut to 20 code
+points) and every comparison runs through that normaliser on both sides, so a
+name hand-written into the roster with a stray space still matches its owner.
+The pin must be a 4-digit string; any other shape is a hard error from both
+`gen` and `serve.py` rather than a silent fallback to "no pin", which is
+precisely the case where somebody believes one is set.
+
+Both sides need the newer pieces: the endpoint ships with `serve.py` version
+`# ddd-serve v4`, and the roster flow is baked by the 0.17.6 generator. A board
+whose `serve.py` is still older keeps working — the page cannot fetch a roster,
+so it never asks for a pin, exactly as before — and `kanban-init` prints a line
+when yours is behind. The pin lives in git next to the board; it is a doorbell,
+not a secret, and anything that needs to be a real secret needs a different
+design.
+
+## Release progress (optional)
+
+Set `config.releaseTab` to `true` and the board grows a tab showing where every
+pull request stands: **dev** (open), **test** (merged into the main branch, not
+yet shipped), **prod** (shipped with a release). A board that ships on merge can
+list only two stages. Pull requests based on another branch, and ones closed
+without merging, are counted separately rather than forced into a stage. The tab
+offers two views of the same data — a table (number, title, stage, status and
+date, cards, branch, acceptance progress; sortable, searchable, released ones
+folded by version) and a timeline. The timeline is one band per version plus
+dev, test and the leftovers, around 200px folded; click a band and it expands
+in place, packing its pull requests into six shared lanes, growing a lane at a
+time up to twelve when six will not hold them without overlapping and folding
+whatever is left over into a `+N` at the right edge, so the expanded height
+follows the lanes actually used and still has a ceiling. The date axis is not linear — a quiet day is
+narrow and a day with many pull requests is widened to fit them side by
+side, which is where the old one-row-per-pull-request timeline was spending
+2400px of height for no information. Those weights are relative: the axis is
+scaled to fill the panel, so a shorter window zooms in rather than stopping
+halfway across, and only a window too wide to fit scrolls sideways. How wide a
+day ends up being then picks the glyphs: below 40px a day it renders as it
+always has; from 40 the squares grow with the day and a bar becomes a solid cap
+at each end joined by a hairline — unless it is still open, which ends in a
+dashed edge instead, since a solid cap at the right end means merged in all
+three regimes; from 120 every pull request is a labelled
+`#NNN` chip in its day's cell, with a whisker back to the day it was opened and
+a `+N` for whatever a cell cannot hold.
+Five chips set the window — Last 30 days,
+Last 2 weeks, This week (from the local Monday), Today, All time — starting at
+Last 30 days. The window is worked out in the browser from its own clock, so
+`gen` bakes no date and yesterday's `index.html` is still right today.
+
+Hovering a bar or a square floats a peek card beside it after 150ms, and so
+does tabbing onto one: the number and full title, status and date, branch, the
+linked card chips (clicking one switches pane, as in the table) and the
+acceptance `n/N` when that pull request has a checklist. A pull request opened
+and merged the same day is a square a few pixels wide in a normal window, so
+the card is the only place any of that fits; zoomed in far enough the number is
+written on the glyph and the card is the rest of the story. On a folded version band each segment stands for one
+day, and its card lists that day's pull requests, ten at most; a `+N` chip's
+card lists only the ones it folded away, since the rest are chips beside it. The
+card is as wide as it needs to be, up to 720px or the viewport, and long titles
+wrap rather than being cut. `Esc` or moving
+away dismisses it, the card stays put while the pointer is inside it so the
+chips stay reachable, and touch gets the two-tap pattern. Every field is read
+from the row already in the table below, so nothing is baked a second time, and
+the bars carry no native `title` for a browser tooltip to stack underneath.
+
+The data comes from `release-manifest.json`, written by:
+
+```
+node <plugin>/scripts/pr-sync.mjs [--dir <kanban>] [--dry-run] [--limit N]
+```
+
+which calls `gh` for the repository's pull requests and releases. `gh` has no
+"all" — it takes a count — so `--limit` (default 1000, and `--release-limit`,
+default 200, for tags) says how many to ask for, and the script says so on
+stderr when the answer came back full, which is the only sign that older ones
+exist. Pull requests it did not fetch this run keep the entry they already had
+rather than disappearing from the board. The generator
+itself makes no network call and reads no clock — "today" and "this may be
+stale" are computed in the browser. Run the script after opening or merging a
+pull request, and after tagging a release. Left unset, output is byte-identical
+to a board without the feature.
+
+A release's `at` is the moment its **tag** was cut — an annotated tag's
+`tagger.date`, or the `committer.date` of the commit a lightweight tag points
+at, both read through `gh api`. That is the boundary release attribution uses:
+`mergedAt` after the previous tag and up to and including this one. The tag is
+the cut that decides what a version contains; the release's `publishedAt` only
+records when someone pressed the button, and anything merged in between would
+otherwise be counted into a version whose tag does not contain it. If the tag
+lookup fails, the entry falls back to `publishedAt` and stderr names the
+versions affected. Entries already on disk are never re-dated: back-filling
+would move pull requests between versions while showing only a changed
+timestamp.
+
+## Settling cards against merged pull requests
+
+A `release-manifest.json` is what turns this on — there is no config switch, and
+a board without the file renders byte-identically.
+
+With it present, pull request state flows back onto the cards. A card whose pull
+requests have all merged while the card itself sits in a non-final status gets
+an amber "merged, not settled" chip; a card already in a final status with a
+pull request still open gets the opposite one; a card spanning several rounds
+shows "2/3 merged". Links to a pull request in this repository carry its real
+state wherever they appear, and a state word in the link title that no longer
+matches is struck through rather than rewritten — the data stays as its author
+left it, the board just stops repeating it. A backlog card that is ready, dated
+more than thirty days ago and carrying no pull request picks up a quiet
+"dormant N days" note. `gen` bakes only dates: the day counts are worked out in
+the browser, since it reads neither the clock nor the network.
+
+The release progress tab collects the unsettled cards into a section at the top,
+grouped under the pull request that merged them, and the Stop guard names up to
+five cards of each kind without blocking.
+
+To act on that list:
+
+```
+node <plugin>/scripts/pr-sync.mjs --settle [--write] [--only <id>[,<id>…]]
+```
+
+`--settle` syncs first, then prints each waiting card with the status it should
+move to — `done`, or `live` for a decision card. It only prints. `--write`
+applies it: the status field, plus one dated line appended to the card's
+timeline field where the card kind has one. `--only` narrows the write to the
+cards you name while still printing the whole list, so what you skipped stays
+visible; an id that is not on the list is refused outright and nothing at all is
+written, because a half-applied settle is worse to unpick than an error.
+
+A merged pull request is not the same thing as a finished card: a card routinely
+spans several rounds, and the one that just landed may have shipped half of it.
+Put a one-line reason in the card's `settleHold` field and the card drops out of
+the list, loses its chip, stops being named by the guard, and shows one grey
+chip with the reason in its tooltip. Nothing clears the field on its own; delete
+it when the card really is ready.
+
+A hold is a promise, not an amnesty, so it has a lifetime. Writing `settleHold`
+through the CLI stamps `settleHoldAt` alongside it; after 14 days the grey chip
+turns amber and puts the day count on its face, and the Stop guard adds one
+quiet line naming up to five held cards, oldest first. Restating the hold
+renews it. The reminder never unmutes the card, never blocks, and never writes
+to the board — whether a hold still stands is a judgement, and the guard only
+keeps track of how long it has been standing. Cards held before 0.15.14 have no
+`settleHoldAt`, so their clock starts from the card file's last commit date,
+which also means writing a line of news on the card counts as renewing it.
+
+## Rich text in card bodies (optional)
+
+Card prose is written by one session for the next one to read, so it arrives
+dense: `**bold**`, backticks, numbered findings, dated updates. Set
+`config.richText` to `true` and the long fields of all three card kinds go
+through a small renderer that understands `**bold**`, `` `code` ``,
+blank-line paragraphs, single newlines, `-` and `1.` lists, `①`–`⑩` lists (the
+circled number is kept as the marker), and a `【…】` opening as a dated section
+with a hairline above it. It deliberately does not understand headings, tables,
+link syntax or HTML, and escaping runs before any of it — a card can quote a
+`<script>` tag and it stays text. Fields over 400 characters are baked twice, a
+first-paragraph preview and the full text, with a quiet *展开全文 · N 字*
+button between them, and the preview is clamped to the same height as every
+other field so a long field cannot stretch its card. The same switch enables an optional `detail`
+card field for the long trail of evidence, rendered after every other field as
+a collapsed block. The guard watches the 800-character line in two registers.
+On a card that has just been created it **blocks** the stop, naming the card,
+the field and its length, and giving the remedy verbatim (`ddd.mjs card set
+<id> detail "…"`); a card counts as new when its card file is not yet in `HEAD`
+— untracked, or added but uncommitted, under `cardsDir` — or, on a board that
+has not split its cards into files, when its `date` is today. That is the one
+moment the prose is still in hand and costs nothing to split. Older cards get
+what they always got: one non-blocking line counting them and pointing at the
+longest. Cards already in a terminal status (`done`, `live`, `closed`) are
+skipped either way, since they will not be rewritten. Left unset, output is
+byte-identical to a board without the feature.
+
+## Archive tab (optional)
+
+On a board that has been running a while, finished cards outnumber the live
+ones several to one, and the backlog becomes a tab you scroll past rather than
+work from. Set `config.backlogArchive` to `true` and the backlog lists only
+cards that are not `done` — `deferred` stays, being parked rather than finished
+— while the finished ones move to their own tab at the end of the tab bar,
+rendered by the same card renderer in the same order. Badge counts follow, and
+the `done` filter chip drops out of the backlog toolbar. Global search, the
+lane and time filters, and deep links (`#CARD-ID`) reach the archive exactly as
+they reached the backlog. With `lazyTabs` on it becomes a third part file,
+`parts/archive.html`, with its own entry in the card → pane map, so a deep link
+to an archived card still fetches the right part. Left unset, output is
+byte-identical to a board without the feature.
+
+Decision cards can follow. With `backlogArchive` on, set
+`config.decisionArchive` to `true` and decisions that are `live` or `closed`
+leave the decisions tab for the archive, which then holds two sections,
+`Backlog · n` and `决策/Demo · j` (landed first, then closed, newest first in
+each). A segmented control at the top of the archive, `全部 · Backlog · 决策
+Demo`, shows one source or both; the choice is not saved. The decisions tab
+keeps what is still being decided or decided but not landed, drops the
+`live` and `closed` filter chips, and ends with one grey line saying how many
+cards moved and linking to the archive. Deep links and the lazy part map follow
+the card. `decisionArchive` without `backlogArchive` prints a warning and does
+nothing. Left unset, output is byte-identical to a board without the feature.
+
+## Backlog sort control (optional)
+
+The backlog has been sortable since the toolbar landed, but the control was a
+`<select>` wedged between a filter dropdown and a search box, and it had no
+ruler for *when the card was last touched*. Set `config.backlogSort` to `true`
+and that dropdown becomes a row of segmented buttons under a quiet `排序`
+caption — the same `.tlab` + `.lseg` idiom as the lane filter, no new CSS —
+offering 最近立卡 (card date, newest first) · 最近更新 (last updated) · 最早立卡
+(card date, oldest first) · 按编号 (by id). 最近立卡 is the default and is
+exactly the order the board already bakes, so turning the key on changes
+nobody's board until they pick something else; the last two are the old
+dropdown's remaining options, kept so the swap loses nothing.
+
+*Last updated* is the per-card file date that `cardsDir` boards already show as
+the grey `更新 MM-DD` stamp — one batched `git log`, falling back to mtime. It
+is baked onto each backlog card as `data-udate`, alongside `data-ord`, the
+card's position inside its section. **On a board without `cardsDir` there is no
+per-card file, so the update date is the card date and the two chips sort
+identically** — the chip is still there, it just has nothing extra to say.
+
+Sorting reorders DOM nodes within each status section: sections never move,
+cards are never re-rendered, and so hidden cards stay hidden, the lane filter
+keeps working, and the WIP count is recomputed by the same pass every other
+filter uses. 最近立卡 re-appends by `data-ord` and restores the baked order
+exactly — the board's own order is already card date newest first, which is why
+it is one chip and not two. The choice is kept per browser under
+`<brand>_bl_sort` and applied when the pane is injected, so it survives a
+reload and the `lazyTabs` path both; a value the current version does not
+recognise falls back to the default. The archive
+tab does not get the control in this version. Left unset, output is
+byte-identical to a board without the feature.
+
+## Prerequisites: the `after` field
+
+A card can name what has to clear before it can be started, and the board works
+out whether it has:
+
+```json
+"after": ["BL-C74", "D89", "#266", "owner/repo#12", "v0.0.5"]
+```
+
+Four kinds of reference. A card id is cleared when that card reaches a terminal
+status (`done` for backlog cards, `live` or `closed` for decisions); a pull
+request — written the same way as the `pr` field — is cleared when
+`release-manifest.json` has it as `merged`; a release tag is cleared when that
+tag appears in the manifest's `releases[]`. Every one of those is a fact already
+committed somewhere, so `gen` reads no clock. The clear date of a pull request
+is its `mergedAt` and of a release its `at`; for a card it is the day that card
+reached a terminal status — the last timeline line saying so (`【2026-09-03】
+status → done`, written by `ddd card status`, or `【2026-09-03 收账】…`, written
+by `pr-sync --settle`), failing that the card's own `date`, and failing that
+nothing at all, in which case the chip carries no date and the guard stays
+quiet. It is deliberately not the card file's last change date: that date moves
+every time the finished card is touched again, which would re-date the clearance
+and make the guard repeat a notice it already gave.
+
+A pull request or a tag that is not in the release manifest yet is not cleared,
+and that is not an error — it has simply not happened. A card id that matches
+nothing on the board **is** an error: `gen` fails hard and the CLI refuses to
+write it. So do self-references and cycles, and the message names the cycle.
+`blockedOn` is untouched: it keeps the reasons no machine can check ("waiting on
+a person, on something outside"), and the two can sit on the same card.
+
+While a card is waiting its header carries a grey **「等 N 项」** chip whose
+title lists each item and its state (`✓ BL-C74 已收 09-04 · #266 开着 ·
+v0.0.5 未发`). Once everything clears that becomes **「前置已清 · MM-DD」**,
+dated with the latest of the clear dates. Both chips stop once the card reaches
+a terminal status: a card that is done saying it is "waiting on 2 things" reads
+as a bug, and "prerequisites cleared" on it says nothing. Until then the chips
+stay — `deferred` and `blocked` are not verdicts on the prerequisites.
+
+A card that others wait on, and that is not itself terminal, carries the
+reverse — **「被 BL-C132 · BL-C134 等着」**, three ids on the face at most with
+the rest folded into `+N`, each one a link to that card. It names who lists this
+card as a prerequisite; it does not promise that clearing this card unblocks
+them, because they are usually waiting on other things too. Cards that have
+already reached a terminal status drop off that list — nothing finished is
+still waiting.
+
+The guard adds one non-blocking line at stop time — `前置已清:BL-C132(#266
+已合)…` — for cards whose prerequisites cleared within the last 7 days and that
+are still `ready`, newest first, five at most. There is no state file behind it:
+the clear date is derived, so the line goes quiet on its own.
+
+Nothing here has a config key; the field is the switch. A board where no card
+has an `after` produces byte-identical output.
+
+## WIP limits (optional)
+
+Set `config.wip` to an object — `{ "soft": 10, "hard": 20 }`; the object itself
+is the switch, and the two thresholds default to those values. The count is the
+`ready` cards only: `blocked` is waiting on somebody else and `deferred` is
+parked, so neither takes up room in what can be started today — and neither does
+a `ready` card still waiting on an `after` prerequisite, which is counted
+separately and read out as 「可立即做 12(另 5 等前置)」. Over `soft`, the
+backlog tab gets an amber dot and the pane a quiet grey line reading how many
+cards are ready; over `hard`, the dot turns red and the line becomes a standing
+banner suggesting the pile be cleared before new cards are added. With lanes
+configured the numbers follow the selected lane, recomputed with the same
+visibility rule that drives the tab badges. Since 0.17.11 the guard reports that
+total across lanes on every Stop, never blocking, as the last item of its
+reminder line: `可立即做 12/20`, with ` 超上限` appended once it is over `hard`.
+`gen`'s own closing line counts the same way — `backlog 21 条(可立即做 20(另 1
+等前置) / …)` — so the two can never report different numbers for the same
+board. Left unset, output is byte-identical to a board without the feature.
+
+## One file per card (optional)
+
+Set `config.cardsDir` to a directory name — `"cards"` by convention, relative to
+the kanban directory — and the backlog and decision cards move out of their
+manifests into `<cardsDir>/backlog/<id>.json` and
+`<cardsDir>/decisions/<id>.json`, one file each. The two manifests keep only
+their headers; leaving an `items`/`entries` array behind in one is a hard error,
+as is a filename that disagrees with the `id` inside it, or the same id twice.
+
+The problem this solves is concurrent writes. Several sessions editing one large
+manifest each rewrite the whole file, so they quietly take each other's in-flight
+cards with them and git reports no conflict, because textually there wasn't one.
+One path per card either avoids that or turns it into a conflict git can stop.
+A board only one session ever writes to does not need this.
+
+Each card carries an `order` field written by the migration — the array index it
+had before. `gen` sorts by `order` then by `id` and deletes the field afterwards,
+so the array it works from is the array the board had before the split. That
+array order is not what you see in the backlog and decision panes: those are
+sorted by card date, newest first, ties by id — `order` decides the things that
+do follow the array, the screenshot gallery's group order and the deep-link
+table's key order. Cards created by hand or by the CLI can leave it out; they
+sort last, by id. With the directory
+configured, each card header also shows the date its file was last committed
+(falling back to the file's mtime), and the "dormant N days" note counts from
+that date instead of the card's creation date.
+
+Migrate with:
+
+```
+node <plugin>/scripts/cards-split.mjs --dir app/kanban [--dry-run]
+```
+
+It writes the files, re-runs `gen`, and compares the output byte for byte with
+what was there before; on any difference it puts everything back exactly as it
+was and exits non-zero. `cards-join.mjs` is the way back, with the same check.
+Upgrade every session before splitting — an older `gen` cannot see the card
+directory. Left unset, output is byte-identical to a board without the feature.
+
+## The board is only edited on the mainline
+
+Cards, manifests, config and generated output belong to the mainline branch.
+Feature branches leave the kanban directory alone; a demo or a card that a
+branch's work calls for is committed on the mainline in its own commit.
+
+Two things go wrong when a branch carries board changes back. A branch that
+forked before the one-file-per-card migration still holds the `items` /
+`entries` arrays in the header manifests, and merging it puts them back — `gen`
+then fails hard, which is a backstop rather than a warning, since the mainline
+is already dirty by the time it fires. The quiet failure is worse: the branch's
+cards are a snapshot from the fork point while the mainline's have moved on, and
+merging rewrites the whole array with no conflict for git to report, so the
+board reverts without a sound.
+
+```
+node <plugin>/scripts/board-branch-check.mjs [--dir <kanban>] [--branch <ref>] [--all] [--json] [--strict]
+```
+
+With no arguments it compares the current branch against the mainline (taken
+from `instance.branch`, defaulting to `main`, falling back to `origin/<main>`
+when there is no local copy) and lists what it found, split into data files,
+generated output and everything else, with the `items` hazard called out
+separately and its array length shown. `--all` sweeps every local and remote
+branch. It exits 0 by default — it is a reminder, not a gate — and `--strict`
+exits 1 instead so CI can gate on it. It says nothing at all when there is
+nothing to say.
+
+The Stop guard runs the same check on the current branch and adds one
+non-blocking notice when it hits, and the reminder after `gh pr merge` suggests
+running it before merging. Where a branch already touched the board:
+`git checkout <main> -- <kanban dir>` drops the branch-side changes before
+merging, and whatever genuinely belonged there gets replayed on the mainline.
+
+A third layer turns the reminder into a gate. A PreToolUse hook watches only
+for `gh pr merge` invocations — every other command passes through with zero
+output and zero delay. It resolves the PR's head branch (from the PR number
+when one is given, from the current branch otherwise) and runs the same
+`board-branch-check` logic against it. A hit denies the tool call, with the
+head branch, the offending files, and a one-line fix in the denial reason; a
+clean branch passes silently. Passing here deliberately never returns an
+`allow` decision — `allow` would skip the normal permission prompt and turn a
+violation-blocker into an auto-approval, so a pass just means "no decision,"
+and the usual permission flow still runs. When `gh` isn't available, the
+branch can't be resolved, the command targets another repository via
+`-R`/`--repo`, or anything else in the tool chain fails, the hook steps aside
+with one line explaining why — it only blocks violations it's sure of, never
+tool failures. It only sees tool calls a session makes; running `gh pr merge`
+by hand in a terminal is outside its reach.
+
+## Sticky tab bar (optional, recommended)
+
+Set `config.stickyTabs` to `true` and the tab bar freezes under the hub bar
+instead of scrolling away: deep in a long pane the tabs are still there, one
+click from any other pane, with no trip back to the top and no reach for the
+screen edge. Its resting height is the hub bar's measured height, published as
+`--ddd-hubh` and remeasured on load and on resize (through a rAF), because the
+hub bar wraps to two lines on a narrow window. The bar takes the hub bar's own
+background so cards do not show through, and sits at `z-index: 50` — below the
+hub bar (60), the lazy-load progress line (70) and the release peek card (65),
+above everything inside the panes. Its own horizontal scrolling is unchanged.
+
+Everything that compensated for one sticky bar now compensates for two: the
+global anchor offset becomes `calc(var(--ddd-hubh) + var(--ddd-tabh) + 12px)`,
+so a deep link no longer parks the card's header behind the tab bar, and the
+doc library's sticky nav strip and its scroll-spy boundary move down by the tab
+bar's height as well. `--ddd-tabh` is measured from the live element.
+
+With `tabRail` also set, the rail is suppressed: the two are answers to the
+same problem, and there is nothing for the rail to stand in for once the tab
+bar never leaves. Left unset, output is byte-identical to a board without the
+feature.
+
+## Left tab rail (optional, superseded by `stickyTabs`)
+
+Set `config.tabRail` to `true` and, once the tab bar has scrolled off the top,
+a narrow vertical copy of it appears in the left margin: same labels, same
+count badges, the current tab highlighted, one click to switch. It lives in the
+page margin rather than in the content column, so it does not compete with the
+acceptance pane's section index or the doc library's own left navigation. The
+list is not a second copy to keep in sync — it is parsed out of the tab bar at
+generation time, so a tab added or removed shows up in both places at once, and
+the badges are copied from the tab buttons whenever a filter recomputes them.
+A click scrolls to the tab bar itself, parking it against the bottom edge of
+the sticky hub bar, rather than to the top of the pane. Landing on the pane top
+would push the tab bar just above the fold, and the rail, which exists only
+while the bar is off the top, would then step aside by its own rule, so both
+ways back would disappear at once. While keyboard focus is inside the rail it
+stays put.
+The rail appears the moment the tab bar's bottom edge passes under the hub
+bar — the observer's root is inset from the top by the hub bar's height, so the
+strip the sticky hub bar covers no longer counts as visible, and the same
+measured test backs a rAF-throttled `scroll` fallback. It fades in from 8px to
+the left over 120ms, skipped under `prefers-reduced-motion`.
+Below 1200px there is no margin to put it in, so it never appears; without
+`IntersectionObserver` it stays silent as well. Left unset, output is
+byte-identical to a board without the feature.
+
+## Overview landing pane (optional)
+
+Set `config.overviewTab` to `true` and the first pane stops being the iteration
+task table and becomes a narrative strip, read top to bottom in the order you
+would actually ask the questions:
+
+| row | source | what it says |
+| --- | --- | --- |
+| iteration | `manifest.json` | the one iteration currently `active`, its in-flight tasks, a link to the plan doc |
+| in acceptance | `acceptance-manifest.json` | the `current` PR, `n/N` tried (same localStorage key as the acceptance tab) and a mini bar |
+| ready | `backlog-manifest.json` | how many cards are `ready` — the same count the WIP reminder uses, amber/red at the same thresholds |
+| to settle | `release-manifest.json` | cards whose PRs are all merged but that are not closed out, plus the ones on `settleHold` |
+| dormant | `release-manifest.json` | `ready`, no PR, untouched for over 30 days |
+| last 7 days | `cardsDir` | cards whose file was committed within the window |
+| releases | `release-manifest.json` | dev / test / prod counts and the newest tag |
+
+Every row is derived from data the board already has — no new manifest, no new
+field. A row whose source is absent is not rendered at all: an empty row is
+noisier than no row. The pane keeps the id `progress` and the bare `#` hash, so
+existing links still land on it, and the old iteration table is folded whole
+into an `迭代史` (iteration history) block at the bottom of the page — nothing
+is dropped, and a deep link into a card inside it opens the fold on the way.
+Dates stay dates in the generated file: the day counts, the seven-day window and
+the checklist progress are all computed in the browser, as elsewhere. Left
+unset, output is byte-identical to a board without the feature.
+
+## Design path as a document (optional)
+
+The decision-path tab is a read-it-once narrative for whoever picks the project
+up, not something to click daily. Set `config.pathTab` to `"docs"` and it moves
+out of the tab bar: the same `path-manifest.json` renders into
+`refs/design-path.html`, listed in the doc library under 交接与接手 (override
+with `config.pathDocCategory`). Not a byte of data is dropped, and the old
+`#path` deep links still work — they now land on the doc library entry and flash
+it. Left unset, output is byte-identical to a board without the feature.
+
+## Card CLI
+
+```
+node <plugin>/scripts/ddd.mjs card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev]
+node <plugin>/scripts/ddd.mjs card set <id> <field> <value> [--json]
+node <plugin>/scripts/ddd.mjs card status <id> <status> [--no-note]
+node <plugin>/scripts/ddd.mjs card note <id> "<text>"
+node <plugin>/scripts/ddd.mjs card link <id> "<title>" <href>
+node <plugin>/scripts/ddd.mjs card after <id> <ref>…            # BL-C74 / D89 / #266 / owner/repo#12 / v0.0.5
+node <plugin>/scripts/ddd.mjs card after <id> --rm <ref>
+node <plugin>/scripts/ddd.mjs card show|history <id>
+node <plugin>/scripts/ddd.mjs card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD]
+node <plugin>/scripts/ddd.mjs audit [--json] [--session <session tag>]
+node <plugin>/scripts/ddd.mjs export [--out f.json]
+node <plugin>/scripts/ddd.mjs pr-sync […]
+```
+
+`audit` is the read-only counterpart of the Stop guard: same audits, same module,
+but it prints all three levels in full instead of collapsing each chore into one
+line. It generates nothing and writes nothing. `--session` narrows the
+per-line chores — long prose on older cards, cards to settle, cards settled
+early, settle holds due, prerequisites cleared — to the cards whose `session`
+field carries that tag (`--line` is accepted too, as a synonym). Everything
+else keeps the whole board in view:
+the blocking and broken levels, because the guard blocks regardless of line and a
+narrowed "nothing to deal with" would be a lie; the backlog count, because its
+`config.wip.hard` threshold is a whole-board number and a narrowed numerator
+cannot be read against it; and acceptance lists, branches and orphan demos, which
+have no line to begin with. The dependency graph and the card-id universe are
+never filtered either, or a card waiting on another line's prerequisite would read
+as a typo.
+
+`card new` allocates the next id and reserves it: with one file per card it
+creates the file with `openSync(path, 'wx')`, so two sessions racing for the same
+number both succeed and the loser steps to the next one. It fills a template
+whose prose fields are `<…>` placeholders to be replaced; `--from file.json`
+overrides any of them.
+
+`card set <id> settleHold "<reason>"` also stamps `settleHoldAt` with today's
+date, so the 14-day reminder has a clock to run against; setting the reason to
+an empty string takes the date away with it.
+
+`card after` appends prerequisites and dedupes them, `--rm` drops one, and
+`card set <id> after --json '[…]'` replaces the list; all three go through the
+same checks — a card reference has to exist on the board, and nothing may
+reference itself or close a cycle. `card show` prints a `前置` line with each
+item's current state, derived from the same module `gen` uses:
+
+```
+$ ddd card after BL-C73 "#264" BL-C74 D89
+ddd card after:BL-C73 的前置 = #264 · BL-C74 · D89 → cards/backlog/BL-C73.json
+$ ddd card after BL-C73 --rm D89
+$ ddd card show BL-C73 | tail -1
+  前置: #264 已合 · BL-C74 未收
+```
+
+The write commands check what they write — the status has to be one the board
+declares, a date has to look like `YYYY-MM-DD`, a `pr` has to be a number, `#12`
+or `owner/repo#12`, a lane has to be in `config.lanes.ids` and a session tag in
+`config.sessionTags`. Fields that hold arrays (`links`, `shots`, `walkthroughs`
+and friends) have to be given as arrays, through `--json`. An unrecognised field
+only warns, since boards grow fields; `id` and `order` cannot be changed at all,
+the first because it is the card's identity and with one file per card its
+filename too, the second because it is the array position the split recorded —
+editing it reshuffles what still follows the array (the screenshot gallery, the
+deep-link table) without changing the pane you were looking at. A link's scheme has to
+be `http`, `https`, `mailto` or a path relative to the repository — anything
+else would render as a live link on the board's own origin.
+
+`card status` appends a dated timeline line unless told not to, on the card kinds
+that have such a field; decision cards do not, so there only the status changes,
+and `card note` says so rather than writing somewhere the board never reads.
+`card link` dedupes by href and writes a link to this repository's pull request
+into the `pr` field too. A new card with no `--line` lands in the board's default
+lane, since a card with no lane is invisible in every lane view. A backlog card
+with no `--tier` takes whichever tier is most common among the board's non-`done`
+cards, ties going to the one listed earlier in `tiers`, an empty board falling
+back to the first key. The first key on its own would be a poor default: on a
+board taken over from a hand-rolled one it is usually an init leftover that no
+live card uses. An explicit `--tier` wins over the computed default.
+
+Every write goes through a temp file and a rename, keeps the card's existing key
+order, slots only new keys into place, and ends with two-space indentation and a
+trailing newline. Nothing is ever committed for you. `--json` gives machine
+output (on `card set` it also means the value itself is JSON), and `--dir` picks
+the board the same way `gen` does. Boards without a card directory work too: the
+CLI rewrites the manifest as a whole there.
+
+## License
+
+[MIT](LICENSE)
+
+### Multi-round card journeys
+
+A decision or backlog card can opt into a stable entry with `journey`. The board shows three concise summaries in separate label/value rows and opens `journeys/<card-id>.html`. Current links remain directly accessible on the card. Cards without `journey` keep their existing output. The entry uses the board's typography, colors, theme, and existing demo controls. A 44px return bar contains navigation for the current design, phase history, and development records. The current demo fills the remaining screen, with no outer sidebar or centered card. Record views use the existing fixed contents navigation. The page summary, history, and original resources start collapsed. Original `demo`, `links`, `shots`, `detail`, and development notes remain in the card source and remain accessible from the entry. Do not write pending questions as accepted decisions.
+
+`journey` is optional for backward compatibility, so cards that do not need a multi-round entry keep their current form. When updating an older card with multiple demo rounds and a long card face, organize its history into a journey without waiting for a card-by-card request. Rebuild the summaries from the card's sources and review evidence; chronology alone does not make an old choice current or approved. Preserve the old `note`, `links`, `shots`, `detail`, and other source material. Short cards without `journey` do not need migration, and this is not a request to migrate every existing card.
+
+Write the summaries for product readers: `decision` states confirmed product rules and names pending choices; `progress` states the implementation stage, usable capabilities, and key gaps, distinguishing a demo, product implementation, and human acceptance; `recent` states a meaningful change since the previous round. Put routine verification counts, device sizes, console or overflow results, and investigation notes in `development` or `detail`. Keep a verification detail in its source evidence, and move it yourself after checking the card's requirements; do not ask the product owner to sort the summary. If the CLI or an audit flags verification detail in a summary, check its meaning and evidence, preserve it in the appropriate field, and review the card before finishing. If CLI or audit suggests organizing a card with no `journey`, an existing demo, a long note, and at least three clearly dated sections, the current card owner should review and organize that card; another session should edit it only when that card is in its assigned work. If information needed to support a product claim is missing, check the card's sources or user requirements; do not infer product requirements from test results or invent facts. Keep product requirements and business measures in summaries when they are the actual goal, such as a layout requirement, performance target, or testing tool.
+
+Use the current card's sources and user requirements to set its scope. Reuse a navigation mechanism across cards, but do not inherit another card's or an example's UI layout or viewport requirement unless this card's evidence calls for it. The shared entry container preserves the demo's viewport and controls; it does not require a particular layout inside the demo. An individual UI design does not become a general requirement without user authorization.
+
+For example, suppose the card's evidence says date filtering is available in the demo, implementation has not started, and review has not decided whether to keep it. A misleading summary would be `progress: "No overflow at 390px; zero console errors."` A product-facing summary is `progress: "Date filtering is available in the demo; implementation has not started; decision pending review."` Keep the viewport and console check in `development`. If the card's product goal is responsive layout, state the required viewport behavior in the product summary.
+
+```json
+{
+  "journey": {
+    "decision": "The detail panel stays beside the results; keyboard access is still undecided.",
+    "progress": "The demo shows the selected layout; implementation has not started.",
+    "recent": "The review selected the side-by-side layout.",
+    "current": {
+      "title": "Current design",
+      "href": "demos/current.html",
+      "summary": "The selected overall layout.",
+      "links": [{ "title": "Current legend", "href": "demos/legend.html" }]
+    },
+    "history": [{ "date": "2026-11-10", "title": "First review", "summary": "Compared layouts.", "href": "demos/round-1.html" }],
+    "development": [{ "date": "2026-11-10", "title": "Implementation", "summary": "Check the panel.", "href": "index.html#acc-12" }]
+  }
+}
+```
+
+Write the object with `ddd.mjs card set <id> journey --json '<object>'`. The three summaries, `current.title`, and `current.href` are required nonempty strings. `history` and `development` are required arrays; their rows require `title`. Row `date`, `summary`, and `href` are optional. `current.links` is an optional array of titled URLs. Dates use `YYYY-MM-DD`. URLs are board-relative or HTTP(S); executable schemes, control characters, backslashes, and protocol-relative URLs are rejected. Document URLs follow the existing rendered-document mapping, and board hashes return to `index.html`. Acceptance links use the existing PR/card relationships. A journey does not change the acceptance revision or human judgments.
+
+Set `current.href` to the current interactive demo under `demos/` (`.html` or `.htm`). The entry embeds that local demo immediately and preserves its query and fragment. The existing ‘Open demo’ action opens it separately. For same-origin demos, the entry clips a fixed board-return bar from view and adds its height to the frame. This keeps the demo's original viewport dimensions and its own navigation and controls. Embedded board-return links target the top-level card. The closed current-resources menu contains local refinements and document links. Local refinements use the same full-screen view on demand; document and external links remain links. Other `current.href` destinations remain links because the entry does not embed documents or external sites. Keep `current.links` limited to the current specification and relevant refinements; older links belong in history or the preserved original resources. Demo options that select the current design must be explicit in the URL; generation does not change an old demo's default.
+
+The `journeys/` directory contains generated output. Preserve old demo URLs. Read the card source or run targeted searches instead of reading generated entries in full.

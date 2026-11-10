@@ -1,0 +1,24 @@
+{
+  "$comment": "决策 / Demo 看板真相源。每条 entry 一张卡,必须有 code(gen 硬校验缺 code 即 throw)。改完跑 gen 重生成 index.html。status 取值见 statuses;线路由 config.lanes 派生(默认 null 关)。",
+  "instance": {
+    "label": "{{BRAND}} · 决策 / Demo",
+    "branch": "{{BRANCH}}",
+    "ghRepo": "{{GH_REPO}}",
+    "appBase": "{{APP_BASE}}"
+  },
+  "statuses": {
+    "deciding": "评估中/待决",
+    "mockup": "草稿 demo",
+    "decided": "已决",
+    "live": "已落地",
+    "closed": "已决 · 不做/归档"
+  },
+  "groups": [
+    { "id": "deciding", "title": "Deciding 评估中 / 待决", "detail": "" },
+    { "id": "mockup", "title": "Mockup 草稿", "detail": "" },
+    { "id": "decided", "title": "Decided 已决", "detail": "" },
+    { "id": "live", "title": "Live 已落地", "detail": "" },
+    { "id": "closed", "title": "Closed 归档", "detail": "" }
+  ],
+  "entries": []
+}

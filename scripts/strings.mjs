@@ -1,0 +1,1281 @@
+// 守卫 + init 消息表(zh/en)。按看板 kanban.config.json 的 lang 字段选表,缺省 zh。
+// zh 文案自首宿主项目的原版 claude-stop-hook.mjs / settings.json jq 提醒原样搬入,
+// 孤儿报警增补竞态核实提示(设计 §6-4)。init 段(scan/plan/apply 报告)zh 原样自 init.mjs 提出。
+// 注意:manifest 卡内容(存根卡 question、backlog 卡 title/problem/approach、tiers 词汇)
+// 是数据不是报告,不进本表 —— 跨语言幂等,保持 zh。
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { DEP_WORDS_ZH, depItemShort } from './deps.mjs'
+import { SETTLE_HOLD_DAYS } from './settle.mjs'
+
+/** 前置状态词的英文档(格式化函数与中文共用 depItemShort —— 一份实现,两种语言) */
+const DEP_WORDS_EN = { card: ['settled', 'not settled'], pr: ['merged', 'open'], tag: ['released', 'not released'], bad: ['', 'invalid'] }
+/** 守卫那行的一张卡:「BL-C132(#266 已合)」 */
+const depRow = (r, words, br = '()') => `${r.id}${br[0]}${r.items.map((x) => depItemShort(x, words)).join(' · ')}${br[1]}`
+
+/**
+ * 家务那几行里的卡号列表(v0.17.7)。点名封顶在 audits.mjs 的 CHORE_IDS(entry.ids 已切好),
+ * 剩下的只报个总数 —— 点名是为了认得出是哪张卡,不是为了把一段列表塞回这一行里。
+ */
+const zhCards = (e) => `${e.ids.join('、')}${e.n > e.ids.length ? ` 等 ${e.n} 张` : ''}`
+/** 代验不对的点名(v0.17.16):按 PR 聚成「#293 AC3、AC4 · #294 AD1」 */
+const byPr = (rows, sep) => {
+  const m = new Map()
+  for (const r of rows) { if (!m.has(r.pr)) m.set(r.pr, []); m.get(r.pr).push(r.id) }
+  return [...m.entries()].map(([pr, ids]) => `#${pr} ${ids.join(sep)}`)
+}
+const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} in all` : ''}`
+const summaryFields = (rows) => rows.map((r) => `${r.id} ${r.fields.map((f) => `journey.${f}`).join('/')}`).join('; ')
+
+const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
+
+const zh = {
+  journeySuggested: (rows) => `多轮记录整理提示:${rows.map((r) => `${r.id} ${r.field}(${r.n}字/${r.updates}条日期更新)`).join('; ')} 已有 demo 与较长的多轮记录。写卡会话应主动整理为 journey,用三行摘要说明产品决定、业务实现进度与最近变化,把现行方案和历史分开。保留旧 demo、链接、截图和原始记录;逐项核对决定,待答问题继续标为待答。此提示不推断业务决定、不迁移资料、不阻断写入。`,
+  journeySummary: (rows) => `摘要复核提示:${summaryFields(rows)} 可能写入了验证汇报。写卡会话应复核并整理:三行摘要写产品决定、业务实现进度与最近变化;常规验证证据放 journey.development 或 detail。真实产品要求可保留。规则仅识别少量固定句式,可能漏报或误报;不改卡、不阻断。`,
+  concurrentStopNotice: '共享看板模式:收工检查无法判定问题属于哪个会话,因此本轮仅提醒。显式 audit、合并检查和生成物保护仍然有效。',
+  concurrentGenFail: (err) => `共享看板生成失败或暂缓;本次收工放行。请检查诊断,待输入稳定后显式运行 gen:\n${err}`,
+  piReadOnly: 'Pi 收工检查只读,不自动生成看板;生成需另行授权,并遵守项目分支规则。',
+  piRemind: '[看板提醒] gh pr 命令已成功。若功能或阶段完成,请检查对应卡状态,用 `node <plugin>/scripts/ddd.mjs card link` 关联 PR;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs`。Pi 收工检查只读,不自动生成看板。',
+  piRemindMerge: '[看板提醒] PR 合并命令已成功。请核对对应卡与 PR 状态;需要同步时先确认授权与主线规则,再运行 `node <plugin>/scripts/pr-sync.mjs --settle`(默认只打印,不自动写入)。Pi 收工检查只读,不自动生成看板。',
+  piFailure: (error) => `Pi 看板检查失败;请检查诊断与项目配置,不要反复重试或绕过安全守卫:${error}`,
+  generatedReadDenied: (paths) => `看板生成物不读全文:${paths.join('、')}。请读 manifest、docs 等源文件;用 DDD CLI 点查字段、audit 查审计、gen 验证渲染,或用 rg 精确检索生成物中的字符串。不要用 cat/head/sed 绕读。`,
+  genFail: (err) =>
+    `看板守卫:gen.mjs 重跑失败(多半是 manifest JSON 语法错),请修好再收工:\n${err}`,
+  stampNewer: (stamp, mine) =>
+    `⚠ 看板守卫:index.html 由更新的 ddd-gen v${stamp} 生成,本 session 的 plugin 是 v${mine}(更旧)——已跳过重生成以免旧版盖板;看板将保持现状,请升级 plugin(若已升级,重启 session)后再生成。`,
+  // v0.16.2 起,本机已经装了更新的版本时守卫直接把这一轮交给它跑,不再要求人重启 session。
+  // v0.17.8:转发成功不再出声 —— 转发的意义就是让版本差异隐形,每次收工重复报一遍等于没隐形;
+  // 上面那条(找不到可转发的新版)照旧,那是真要人动手。
+  noSelfVersion:
+    () => '⚠ 看板守卫:plugin 安装异常(读不到自身 plugin.json 的纯数字版本),已跳过看板重生成——请重装/升级 plugin。',
+  healedUnstamped:
+    () => '看板守卫:检测到 index.html 为无戳(旧版 gen)产物,已用当前版重生成自愈;若本机仍有旧版长寿 session 在跑,可执行 plugin scripts/retire-stale-caches.mjs 断火源(先 dry-run,--yes 落盘)。',
+  orphanWarn: (n, list) =>
+    `⚠ 看板守卫:仍有 ${n} 个 demo 未挂看板卡(本次放行):\n${list}`,
+  orphanBlock: (n, list) =>
+    `看板守卫:发现 ${n} 个 demo 未挂任何看板卡(违反「demo 必挂卡」审计规则):\n${list}\n请立即在 app/kanban/decisions-manifest.json 或 backlog-manifest.json 为其补卡(字段风格照现有卡);若确属无需挂卡,把文件名加入 app/kanban/demos/.no-card-ok(一行一个)。处理前先 grep 核实文件名是否已在 manifest——多会话并行存在补链竞态,报警可能已过时。`,
+  accParseFail: (err) =>
+    `⚠ 看板守卫:acceptance-manifest.json 无法解析,验收审计跳过(「验收」tab 也会跟着报错):${err}`,
+  accCurrentNoList: (cur) =>
+    `⚠ 看板守卫:acceptance-manifest.json 的 current = ${cur},但没有任何一份清单含这个 PR —— 「验收」tab 的当前面板会是空的;补一份清单,或把 current 改回 null。`,
+  accDupPr: (pr, a, c) =>
+    `⚠ 看板守卫:PR #${pr} 同时出现在两份验收清单(${a} 与 ${c})—— 勾选进度会分家,请合并成一份或改掉其中一处的 pr。`,
+  accDupItem: (list, id) =>
+    `⚠ 看板守卫:验收清单 ${list} 里条目 id「${id}」重复 —— 勾选状态按 id 存,重复即互相顶掉,请改成唯一 id。`,
+  accUnknownCard: (list, id) =>
+    `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
+  // v0.17.0:验收反馈是当场记下的账,留在工作区里等于没留(换台机器就看不见了)。只提醒,不代提交。
+  accFbUncommitted: (rows, total) =>
+    `验收反馈:${rows.map((r) => `#${r.pr} 新增 ${r.n} 条未提交(${r.who.join(' · ')})`).join(';')}` +
+    `${total > rows.length ? ` …等 ${total} 个 PR` : ''} —— 收工前提交 app/kanban/acceptance-feedback.jsonl。`,
+  accFbPrunable: (n, days) =>
+    `验收反馈截图:${n} 张对应的 PR 已合并满 ${days} 天,可清 —— \`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run\` 先看清单,去掉 --dry-run 才删(jsonl 一行不动)。`,
+  richLongText: (worst, total) =>
+    `⚠ 看板守卫:${total} 张卡的正文字段超过 800 字且无 detail(最长:${worst.id} 的 ${worst.key})—— 卡正文留结论,长证据与灰盒记录移进 detail。`,
+  // 新卡这一档是阻断(v0.16.2):正文刚写出来还在手边,当场拆最省事;等它进了历史再回头拆,改的
+  // 就是别人也在读的卡了 —— 所以老卡照旧只提醒一行,新卡拦一次。字数报出来,是因为「该拆多少」
+  // 只有这个数说得清(一行版的老卡通知刻意不报,那边要的是安静)。
+  richLongNewBlock: (rows, total) =>
+    `看板守卫:${total} 张刚立的卡正文字段超过 800 字、卡上又没有 detail(违反「摘要与细节分家」的写法规矩):\n` +
+    rows.map((r) => `  - ${r.id} 的 ${r.key}(${r.n} 字)`).join('\n') +
+    (total > rows.length ? `\n  …等 ${total} 张` : '') +
+    `\n请当场把长证据搬进 detail:\`node <plugin>/scripts/ddd.mjs card set <卡号> detail "…"\`(一张卡一次)。搬完正文只留结论 —— question / problem ≤2 句、approach 结论先行、note 只记时间线;detail 渲染在卡最下面一个默认折叠的「查证细节」块里,一个字都不会丢。已提交的老卡不在此列(那些只出一行提醒)。`,
+  richLongNewWarn: (rows, total) =>
+    `⚠ 看板守卫:${total} 张刚立的卡正文字段超过 800 字且无 detail(本次放行):${rows.map((r) => `${r.id} 的 ${r.key}(${r.n} 字)`).join('、')}${total > rows.length ? ` …等 ${total} 张` : ''}`,
+  respSettle: (ids, total) =>
+    `⚠ 看板守卫:${total} 张卡的关联 PR 都已合并,卡却还停在非终态(待收账):${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  跑 \`node <plugin>/scripts/pr-sync.mjs --settle\` 看完整清单(卡 → 建议 status),确认后加 --write 收账(挑着收加 --only 卡号)。\n  这一轮不该收的卡(PR 只落了一半),在卡上写 "settleHold": "理由" —— 它从此不进清单、不出芯片,守卫这条也不再点它。`,
+  respReopen: (ids, total) =>
+    `⚠ 看板守卫:${total} 张卡已收到终态,却还有关联 PR 开着:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''}\n  要么 PR 还没合(卡收早了),要么卡上挂了不该算它的 PR —— 核一下,机器不替你改。`,
+  // days 是最久那张的天数(hook 按天数降序取的 old[0]),ids 是前五张 —— 措辞得说清这个数是谁的,
+  // 否则「已 41 天:BL-1 BL-2 BL-3」把最久那张的天数安在了三张卡头上,人会先去动其实没那么急的那两张。
+  respHoldOld: (ids, days, total) =>
+    `暂不收账最久已 ${days} 天:${ids.join(' ')}${total > ids.length ? ` …等 ${total} 张` : ''} —— 仍成立就重设一下(\`node <plugin>/scripts/ddd.mjs card set <卡号> settleHold "理由"\`,起算日跟着归零),收账就删掉卡上的 settleHold。`,
+  // v0.17.4 §1:生成物只在主线上生成。只有「本来会重渲」时才说这一句 —— 产物不过期时一个字不出。
+  genOffMain: (cur, main, detached) =>
+    `${detached ? `游离 HEAD ${cur}` : `非主线分支 ${cur}`},看板未重渲(产物只在 ${main} 上生成)—— 产物一个字节没碰,审计照跑。`,
+  // v0.17.4 §1:分支上已经有生成物改动(旧版守卫留下的)。一行点名 + 一行解法。
+  genOffMainDirty: (files, main) =>
+    `⚠ 看板守卫:分支的工作区里有 ${files.length} 处看板生成物改动(多半是旧版守卫在分支上重渲留下的):${files.slice(0, 3).join(' ')}${files.length > 3 ? ` …等 ${files.length} 个` : ''}\n` +
+    `  生成物是派生状态,分支上不该带:\`git checkout ${main} -- ${files.join(' ')}\` 丢掉。`,
+  // v0.17.4 §4:生成物冲突的机械解法 —— 取主线那份,重新生成,零阅读。路径与主线名都填实。
+  genConflict: (files, main, gen, dir) =>
+    `⚠ 看板守卫:${files.length} 个看板生成物处在冲突状态 —— 不要手解、也不要读它们(它们是派生状态):\n` +
+    `  \`git checkout ${main} -- ${files.join(' ')} && node ${gen} --dir ${dir}\``,
+  // v0.17.4 §2:.gitattributes 写了 merge=ours,但这个克隆没定义驱动 —— 属性写了也不生效。
+  mergeDriverMissing: () =>
+    '⚠ 看板守卫:.gitattributes 给看板生成物写了 merge=ours,但这个克隆没定义驱动 —— 跑 `git config merge.ours.driver true`(仓库本地,每个克隆各配一次),否则合并时那几个大文件照样进冲突状态。',
+  boardBranchGuard: (h, main, dirty = []) =>
+    `⚠ 看板守卫:当前分支 ${h.ref} 带着看板改动(相对 ${main}:数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})—— 看板只在 ${main} 上改。\n` +
+    h.hazard.map((z) => `  ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条):这块板已是一卡一文件,合回 ${main} 会让 gen 当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。\n`).join('') +
+    `  合并前把分支侧的看板改动丢掉(git checkout ${main} -- <看板目录>),真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。全表:\`node <plugin>/scripts/board-branch-check.mjs\`。` +
+    (dirty.length ? `\n  ⚠ 工作区里还有 ${dirty.length} 处没提交的看板改动,上面那条 checkout 会连它们一起盖掉(上面的清单只列已提交的):${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` …等 ${dirty.length} 个` : ''} —— 要留就先提交或 git stash。` : ''),
+  boardBranch: {
+    noGit: () => 'board-branch-check:这块板不在 git 仓里(或 git 跑不起来),没有分支可比 —— 本次不做判断。',
+    noMain: (main) => `board-branch-check:找不到主线分支 ${main}(本地与 origin/${main} 都没有),没有基准可比 —— 本次不做判断。主线名取三份 manifest 的 instance.branch,没写就按 main。`,
+    clean: (n, main) => `board-branch-check:比过 ${n} 条分支,相对 ${main} 都没有看板改动 —— 干净。`,
+    onMain: (main) => `board-branch-check:没有要比的分支(当前就在 ${main} 上)—— 看板改动本来就该落在这里。`,
+    detached: (sha, main) => `board-branch-check:HEAD 是游离的(不在任何分支上),按当前提交 ${sha} 与 ${main} 比 —— 结论照常给,只是没有分支名可报。`,
+    dirty: (files, main, prefix) =>
+      `  ⚠ 工作区里还有 ${files.length} 处没提交的看板改动 —— 上面那条 git checkout ${main} -- ${prefix} 是无条件覆盖,会连它们一起盖掉,而它们没提交过、盖了就找不回来(上面那张清单只列已提交的):\n` +
+      files.slice(0, 5).map((f) => `    ${f}`).join('\n') + (files.length > 5 ? `\n    …等 ${files.length} 个` : '') +
+      `\n  要留就先提交(或 git stash),再执行上面那条。`,
+    head: (n, main) => `⚠ 看板改动落在了非主线分支上(基准 ${main}),${n} 条:`,
+    row: (h) => {
+      const key = [...h.data, ...h.gen]
+      const lines = [`  ${h.ref} —— 数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length}`]
+      for (const f of key.slice(0, 5)) lines.push(`    ${f}`)
+      if (key.length > 5) lines.push(`    …等 ${key.length} 个`)
+      for (const z of h.hazard) lines.push(`    ⛔ ${z.file} 里还带着 ${z.key} 数组(${z.n} 条)—— 这块板已是一卡一文件,合回主线 gen 会当场硬报错;而且那是分叉当时的旧快照,会把主线上改过的卡盖回旧版本。`)
+      return lines.join('\n')
+    },
+    rule: (prefix, main) => `规矩:看板只在 ${main} 上改 —— 分支上不动 ${prefix},demo 与卡都在 ${main} 上单独提交。\n  已经动过的,合并前 git checkout ${main} -- ${prefix} 丢掉分支侧看板改动,再在 ${main} 上重放一遍(重放靠人记,漏了就是安静地丢内容 —— 所以先看这张清单)。`,
+  },
+  // v0.17.4 §3:gh pr merge 前的本地硬闸。只拦确定的违规,工具故障一律放行。
+  mergeGate: {
+    // onIt = 这棵树此刻就站在那条分支上(没给 PR 号那一档)。给了号的那一档人多半正站在主线上,
+    // 「先在分支上丢掉它们」照字面在当下跑等于什么都没做 —— 所以把该切到哪条分支一起填实。
+    deny: (ref, h, main, prefix, gen, dir, onIt = false) => {
+      const files = [...h.gen, ...h.data, ...h.other]
+      const br = String(ref).replace(/^origin\//, '') // origin/feat-x 切不过去;裸分支名走 git 的 DWIM
+      return `看板改动不许经 PR 合回 ${main}:分支 ${ref} 带着 ${files.length} 处看板改动(数据 ${h.data.length} · 产物 ${h.gen.length} · 其它 ${h.other.length})——\n` +
+        files.slice(0, 8).map((f) => `  ${f}`).join('\n') + (files.length > 8 ? `\n  …等 ${files.length} 个` : '') +
+        (onIt
+          ? `\n  先在这条分支上丢掉它们:\`git checkout ${main} -- ${prefix}\`,提交后再合;真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。`
+          : `\n  先切到 ${br} 再丢掉它们:\`git switch ${br} && git checkout ${main} -- ${prefix}\`,提交后再合;真该留的(新 demo、refs 文档)在 ${main} 上重放一遍。`) +
+        (h.gen.length ? `\n  产物那几个是派生状态,永远不要手解、不要读:取主线那份再 \`node ${gen} --dir ${dir}\` 重新生成。` : '') +
+        `\n  全表:\`node ${gen.replace(/gen\.mjs$/, 'board-branch-check.mjs')} --dir ${dir} --branch ${ref}\`。核过之后确要硬合,请人手在终端里跑 gh pr merge(这道闸只拦得住工具调用)。`
+    },
+    skipped: (why) => `看板合并闸:${why} —— 本次不拦(闸只拦确定的违规,不拦工具故障)。`,
+    noGh: () => '找不到 gh 命令,问不出这个 PR 的头分支',
+    ghFailed: (n) => `问不到 PR #${n} 的头分支(gh 未登录 / 无权访问该仓 / 网络不通都会这样)`,
+    noRef: (ref) => `本地与 origin 都没有分支 ${ref},没有东西可比`,
+    // 命令里带了 -R/--repo:那个 PR 号属于另一个仓,而这道闸只问得出「当前仓的同号 PR 是哪条分支」——
+    // 照样判就是拿一条毫不相干的分支去 deny 一次别处的合并。误拦比漏拦坏,放行。
+    otherRepo: () => '这条命令用 -R/--repo 指向了别的仓,而这道闸只认当前仓的分支',
+  },
+  depsUnlocked: (rows, total) =>
+    `前置已清:${rows.map((r) => depRow(r, DEP_WORDS_ZH)).join('、')}${total > rows.length ? ` …等 ${total} 张` : ''} —— 这几张卡等的东西都清掉了,可以开工。`,
+  // v0.17.16:代验不对 —— 只提示,不催人判(判定仍然只有人能点)
+  precheckBad: (rows) =>
+    `代验发现 ${rows.length} 条与预期不符待人看:${byPr(rows, '、').join(' · ')} —— agent 先跑过一遍、记下与预期不符,是人去复跑与判定的先手线索,不是结论。`,
+  // waiting > 0 才提前置那半句:板上一条 after 都没有时,这句与 0.15.x 一字不差
+  wipOver: (n, hard, waiting = 0) =>
+    `⚠ 看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},超过 config.wip.hard = ${hard} —— 在建的活比手能覆盖的多,新卡再立就是往堆里加。先清一批(收掉已落地的、把等外部的改 blocked、把不打算近期做的改 deferred),再立新卡。`,
+  // v0.17.11:没超线也报 —— 同一件事的另一副面孔,措辞与超线那条对齐,只是不再劝人先清一批。
+  wipUnder: (n, hard, waiting = 0) =>
+    `看板守卫:可立即做(ready${waiting ? ' 且前置已清' : ''})的卡有 ${n} 张${waiting ? `,另有 ${waiting} 张 ready 还等着前置` : ''},上限 config.wip.hard = ${hard} —— 还没到线。v0.17.11 起这个数常驻:不必等到超线才知道手上还能接多少。`,
+  // v0.17.7:标签用人话不用行话(「收早了」得先有人教才读得懂),内容点到卡号 —— 0.17.5 那版
+  // 只给标签与计数,两头都落不到实处,读的人只能来问。
+  // v0.17.8:每条压成「标签 + 空格 + 内容」,条内不再有冒号(冒号只在头里出现一次),附加信息进
+  // 全角括号 —— 整段要拼成一条无换行的话,条内的标点越少,一口气读下来越顺。
+  // 次序由 audits.mjs 的 CHORE_KEYS 定,这里只管每一条怎么写字;分隔符由 choreLine 统一加。
+  // 一律不带命令、不带路径、不解释怎么处理 —— 那是 `ddd audit` 的活。
+  chore: {
+    journeySuggested: (e) => `多轮记录待写卡会话整理为 journey ${e.rows.map((r) => `${r.id} ${r.field}`).join('; ')}${e.n > e.rows.length ? ` 等 ${e.n} 张` : ''}(保留原始资料)`,
+    journeySummary: (e) => `摘要待写卡会话复核 ${summaryFields(e.rows)}${e.n > e.rows.length ? ` 等 ${e.n} 张` : ''}(验证证据放 journey.development/detail;真实产品要求可保留)`,
+    longText: (e) => `正文过长没拆 detail ${e.n} 张(最长 ${e.worst})`,
+    // 八类里只有这一类点的是 PR 不是卡:它关乎别人的数据,不点号判断不了该不该现在管
+    accFbUncommitted: (e) => `验收反馈没提交 ${e.n} 条(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
+    accFbPrunable: (e) => `可清的验收截图 ${e.n} 张`,
+    settle: (e) => `PR 全合了还没收账 ${zhCards(e)}`,
+    reopen: (e) => `已收但 PR 还开着 ${zhCards(e)}`,
+    hold: (e) => `暂不收账满 ${SETTLE_HOLD_DAYS} 天 ${zhCards(e)}`,
+    depsUnlocked: (e) => `前置已清可开工 ${zhCards(e)}`,
+    // v0.17.16:点的是「PR 条目」,不是卡号 —— 代验是清单条目上的事
+    precheckBad: (e) => `代验不对待人看 ${e.n} 条(${e.ids.join('、')}${e.n > e.ids.length ? ` 等 ${e.n} 条` : ''})`,
+    // v0.17.11:常驻。写成「N/上限」是为了一眼看出还剩多少额度;超了才多两个字「超上限」。
+    wip: (e) => `可立即做 ${e.n}/${e.hard}${e.n > e.hard ? ' 超上限' : ''}${e.waiting ? `(另 ${e.waiting} 张等前置)` : ''}`,
+  },
+  // v0.17.8:一个换行 = 一个「Stop says」气泡,§9 那六行在手机上是六个气泡,比一行还占地方 ——
+  // 整段拼成一条,手机自己折行。头里不说「家务」:那是内部分级名,对读的人只是一个没来由的词。
+  choreLine: (parts, cmd) => `看板守卫 ${parts.length} 条提醒(详情 ${cmd}):${parts.join(' · ')}`,
+  cardsDirMissing: (rel) =>
+    `⚠ 看板守卫:config.cardsDir 开着,但卡目录 ${rel} 不在 —— gen 会硬失败,看板停在上一版。建目录或把 cardsDir 从 kanban.config.json 去掉。`,
+  cardIdBad: (rows, total) =>
+    `⚠ 看板守卫:${total} 个卡文件的文件名与卡里的 id 对不上 —— 文件名就是卡号(一个真源),对不上 gen 会硬失败:\n` +
+    rows.map((r) => `  - ${r.file}(id 是「${r.id}」)`).join('\n'),
+  cardParseBad: (rows, total) =>
+    `⚠ 看板守卫:${total} 个卡文件不是合法 JSON —— gen 会硬失败,看板停在上一版:\n` +
+    rows.map((r) => `  - ${r.file}:${r.message}`).join('\n'),
+  ghprRemindMerge:
+    '[看板提醒] 刚合了一个 PR。合之前若还没看过,顺手跑一次 `node <plugin>/scripts/board-branch-check.mjs`(看板只在主线上改;分支带着看板改动合回来会让 gen 硬报错、或拿旧快照静默盖掉主线的卡)。然后跑 `node <plugin>/scripts/pr-sync.mjs --settle`:它先把 gh 上的 PR 与版本同步进 release-manifest.json,再列出「PR 都合了、卡还没收」的卡与建议 status(默认只打印;确认无误后加 --write 收账)。顺手核一遍卡的 links 标题:状态词(开而不合 / 待合 / 已合)不必手写,看板会按实际状态渲染。与看板无关则忽略。',
+  ghprRemind:
+    '[看板提醒] 刚运行了 gh pr 命令。若这标志某功能/阶段完成:检查 app/kanban 对应看板卡状态是否需要推进;顺手把 PR 挂上卡 —— `node <plugin>/scripts/ddd.mjs card link <卡号> "<这个 PR 干了什么>" <PR 链接>`(它顺手写 pr 字段),开/合 PR 后跑 `node <plugin>/scripts/pr-sync.mjs` 刷新 release-manifest.json。与看板无关则忽略。',
+  prSync: {
+    noRepo: () => 'pr-sync:三份 manifest 的 instance.ghRepo 都是空的,不知道该同步哪个仓 —— 先在 manifest.json 的 instance.ghRepo 填 "owner/repo"。',
+    ghMissing: () => 'pr-sync:找不到 gh 命令。装 GitHub CLI(https://cli.github.com)并 `gh auth login` 之后重跑;本次一个字节都没写。',
+    ghFailed: (what, err) => `pr-sync:${what} 失败(gh 未登录 / 无权访问该仓 / 网络不通都会这样):${err}\n本次一个字节都没写,修好后重跑。`,
+    ghBadJson: (what, err) => `pr-sync:${what} 的输出不是合法 JSON(gh 版本太旧?需要支持 --json 的 gh 2.x):${err}\n本次一个字节都没写。`,
+    manifestBad: (err) => `pr-sync:release-manifest.json 存在但不是合法 JSON,拒绝覆盖(人手写的 note/prs 可能就在里面):${err}`,
+    badLimit: (name, v) => `pr-sync:--${name} 要跟一个正整数(给的是 ${JSON.stringify(v)})。`,
+    prTruncated: (n, flag) => `⚠ pr-sync:gh 一次就给满了 ${n} 个 PR —— 比这更旧的这趟没取到,它们在 release-manifest.json 里原样留着,但状态不再刷新。要全量:--${flag} <更大的数>。`,
+    relTruncated: (n, flag) => `⚠ pr-sync:gh 一次就给满了 ${n} 个 release —— 比这更旧的 tag 这趟没取到。要全量:--${flag} <更大的数>。`,
+    tagTimeFallback: (tags) => `⚠ pr-sync:取不到这些 tag 自己的时刻(权限 / 网络 / tag 已被删都会这样),这几版的 at 退回了 release 的 publishedAt:${tags.join(' ')}\n  归版口径是「打 tag 时刻」,publishedAt 通常晚几秒到几十分钟 —— 那段时间里合并的 PR 会被算进这一版。核过之后可以手工把 at 改成 tag 时刻(已落盘的 at 脚本不再改写)。`,
+    done: (prs, rels, added, file) => `pr-sync:${prs} 个 PR · ${rels} 个版本(新增 ${added})→ ${file}`,
+    dry: (prs, rels, added) => `pr-sync --dry-run:将写入 ${prs} 个 PR · ${rels} 个版本(新增 ${added});未写文件。`,
+    settleNone: () => 'pr-sync --settle:没有待收账的卡 —— 关联 PR 都合了的卡,status 都已经在终态了。',
+    settleHead: (n) => `pr-sync --settle:${n} 张卡的关联 PR 都已合并,status 还没收:`,
+    settleRow: (id, from, to, prs) => `  ${id}  ${from} → ${to}  ${prs}`,
+    settleDry: (sample) => `干跑:一个字节都没写。核对无误后加 --write 收账 —— 只改这些卡的 status,并在有时间线字段的卡(note / notes)末尾追加一行「【日期 收账】PR#N 已合(自动)」。\n  只收其中几张:--write --only ${sample || '<卡号>'}(逗号分隔多张)。一张卡这一轮本来就不该收(PR 只落了一半)→ 在卡上写 "settleHold": "理由",它不再进这份清单。`,
+    settleWrote: (n, files) => `pr-sync --settle --write:已收账 ${n} 张卡 → ${files}`,
+    settleHeld: (ids, n) => `  已 hold(${n}):${ids.join(' ')} —— 这些卡的 PR 也都合了,但卡上写了 settleHold(理由见卡头灰芯片),本次不收、守卫也不催。要收就先删掉那个字段。`,
+    settleOnlyEmpty: () => 'pr-sync --settle --only:没给卡号。写法 --only BL-1 或 --only BL-1,D2(逗号分隔);本次一个字节都没写。',
+    settleOnlyBad: (ids) => `pr-sync --settle --only:这些卡号不在上面的待收账清单里,本次一个字节都没写:${ids.join(' ')}\n  对着清单核卡号;写了 settleHold 的卡本来就不在清单里(要收它,先删掉卡上的 settleHold)。`,
+    settleDryWins: () => 'pr-sync:--dry-run 与 --write 同时给了,按 --dry-run 处理 —— 只打印,不写。',
+    settleReformat: (file) => `pr-sync --settle --write:${file} 的排版不是 JSON.stringify(…, null, 2) 的标准形制,拒绝改写(重排会动到其它卡的字节)。这几张卡请手工收账。`,
+  },
+  cards: {
+    alreadySplit: (dir) => `cards-split:kanban.config.json 已经配了 cardsDir = "${dir}",这块板已是一卡一文件。要反向合回单文件用 cards-join.mjs。`,
+    notSplit: () => 'cards-join:kanban.config.json 没配 cardsDir,这块板还是单文件形制,没什么可合的。',
+    headNoArray: (file, key) => `cards-split:${file} 里没有 ${key} 数组,不知道要拆什么 —— 这块板的形制不对,先核对 manifest。`,
+    headHasArray: (file, key) => `cards-join:${file} 里已经有 ${key} 数组(一个真源被破坏了)——先手工清理头文件再合。`,
+    dirNotEmpty: (rel) => `cards-split:${rel} 已存在且非空,拒绝往里拆(怕盖掉已有的卡)。换一个目录名,或先清空。`,
+    idBad: (id, why) => `卡 id「${id}」${why}`,
+    idEmpty: () => '是空的 —— 每张卡都要有 id,文件名就是它',
+    idUnsafe: () => '不能当文件名(含 / \\ 或 .. 或前后空白)',
+    idDup: (id) => `卡 id「${id}」出现了两次 —— 拆开之后会是同一个文件名,先把重复的改掉`,
+    orderTaken: (id) => `卡「${id}」已经有 order 字段了 —— 拆分要用这个名字记原数组下标,请先给它改个名`,
+    dirMissing: (rel) => `cards-join:卡目录 ${rel} 不在(相对看板目录),没得可合`,
+    parseBad: (rel, err) => `cards-join:卡文件 ${rel} 不是合法 JSON,拒绝合并(会把这张卡弄丢):${err}`,
+    idMismatch: (rel, id) => `cards-join:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,先改一致再合`,
+    dryRun: (rows, total) =>
+      `cards-split --dry-run:将生成 ${total} 个卡文件\n` + rows.map((r) => `  ${r.rel}/  ${r.n} 个`).join('\n') + '\n未写任何文件。',
+    dryRunJoin: (rows, total) =>
+      `cards-join --dry-run:将合回 ${total} 张卡\n` + rows.map((r) => `  ${r.rel}/  ${r.n} 个 → ${r.file} 的 ${r.key}`).join('\n') + '\n未写任何文件。',
+    genFailed: (err) => `gen.mjs 跑不过,已回滚(看板与拆分前一模一样):\n${err}`,
+    diffFound: (files) => `拆分前后的产物对不上,已回滚(看板与拆分前一模一样)。对不上的:${files}\n这是 0.14.0 的验收门 —— 不相同就不算拆成功,请把差异报上游。`,
+    diffFoundJoin: (files) => `合并前后的产物对不上,已回滚(看板与合并前一模一样)。对不上的:${files}`,
+    splitDone: (total, rows, dir) =>
+      `cards-split:${total} 张卡 → ${rows.map((r) => `${r.rel}/ ${r.n} 个`).join(' · ')};头文件已去掉数组,kanban.config.json 写入 cardsDir = "${dir}"。\n` +
+      '产物与拆分前逐字节相同(除新增的每卡「更新」时间戳)。请把整批改动作为一个 commit 提交,message 写明是 rename 性质。',
+    joinDone: (total, files) => `cards-join:${total} 张卡合回 ${files};卡文件与目录已删除,kanban.config.json 去掉了 cardsDir。产物与合并前逐字节相同。`,
+    baselineFailed: (err) => `跑不出「改动前」的基准产物(gen.mjs 先失败了),一个字节都没写:\n${err}`,
+    cardsDirUnsafe: (v) => `卡目录名 ${JSON.stringify(v)} 不能用:它得是看板目录下的一个纯目录名(不含 / 或 \\,也不是 . / ..)。带路径的值会把整批卡写到看板目录外面 —— gen 与 CLI 都跟着走,看着一切正常,而提交进 git 的看板里一张卡都没有。`,
+    writeFailed: (err) => `落盘中途出错,已回滚(看板与动手前一模一样),一张卡都没搬:\n${err}`,
+  },
+  cli: {
+    usage: () => `ddd —— 看板写操作 CLI(v0.14.0,零依赖)
+
+  node <plugin>/scripts/ddd.mjs <命令> [参数] [--dir <看板目录>] [--json]
+
+卡:
+  card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev] [--from f.json]
+      建卡。卡号由脚本分配并独占预留(一卡一文件时用 openSync 'wx',抢输的自己退到下一号)。
+      模板里的占位写成 <…>,建完把它们填掉;--from 给的字段覆盖模板。
+      backlog 卡的 tier:--tier 缺席时取现有非 done 卡里出现最多的那档(板上没有非 done 卡时
+      退回 tiers 表第一个键)。
+  card set <id> <field> <value> [--json]
+      改一个字段。--json:值按 JSON 解析(要写数组/对象用它,顺带把结果也打成 JSON)。
+      校验:status ∈ 该类卡的 statuses、date 形如 YYYY-MM-DD、pr 形如 12 / "#12" / "owner/repo#12"、
+      line ∈ config.lanes.ids、session ∈ config.sessionTags;links/shots 这类数组字段要 --json;
+      id 与 order 不许改;不认识的字段只警告不拒。
+  card status <id> <status> [--no-note]
+      改状态,并在时间线字段末尾追一行「【日期】status → …」(--no-note 关掉这一行)。
+      决策卡没有时间线字段(看板不渲染),只改 status。
+  card note <id> "<text>"           时间线末尾追一行「【日期】text」(决策卡没有这个字段,会拒)
+  card link <id> "<title>" <href>   links 追一条(href 去重);指向本仓 PR 的链接顺手写进 pr 字段
+  card after <id> <ref>…            前置依赖:追加(去重)。ref = 卡号(BL-C74 / D89)/ PR(#266 / owner/repo#12)/ 版本 tag(v0.0.5)
+  card after <id> --rm <ref>        移除一项(整体覆盖用 card set <id> after --json '[…]')
+      清没清由看板自己推:卡收到终态、PR 合进主线、版本 tag 出现在 release-manifest 里。
+      卡号必须在板上、不许自指、不许成环(这三样 CLI 当场拒写,gen 也会硬报错)。
+      「等人 / 等外部」那种没有机器判据的理由,照旧写 blockedOn 那句自由文本。
+  card show <id> [--json]
+  card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
+  card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
+
+验收代验(v0.17.16,板上开了 acceptanceTab 时;写 acceptance-manifest.json 里的那一条,别的条目一个字节不动):
+  acc precheck <pr> <条目> --result ok|bad|blocked --note "看到了什么" [--env 5177+8003] [--by agent]
+               [--shot <路径> [--caption "…"]]… [--at ISO] [--new-round [--round r2]]
+      记一条代验:agent 先跑一遍、看到了什么。ok = 与预期一致,bad = 不一致,blocked = 没跑成。
+      --shot 可以给几组,每张都得真在看板目录里(纯文件名落 shots/ 下,带 / 的按相对看板根);
+      按文件去重追加进这一条的 shots。--at 缺省取当前 UTC。--new-round:先把上一轮搬进旧轮再写。
+      代验不替人判:不进「已判 N/M」,不改 revision。
+  acc precheck <pr> <条目> --clear   删掉这一条的 precheck(shots 不动)
+  acc precheck <pr> --list           这份清单各条的代验状态
+  acc shots rotate <pr> <条目> [--round r2] [--at ISO]
+      把当前这一轮(shots + precheck)整体搬进 shotsHistory 末尾,shots 清空、precheck 删除。
+      --round 缺省按旧轮数自动编号(r1、r2…);--at 缺省取那一轮代验的时间,没有就取现在。
+
+其它:
+  audit [--json] [--session <session 标签>]
+      只读跑一遍看板审计,把三级(阻断 / 坏了 / 家务)的完整文案打全 —— 收工时守卫把「家务」
+      全压成一条,正文在这儿。不 gen、不改任何文件。
+      --session 只收窄按线分的那几类家务:长正文(老卡)、待收账、收早了、挂账到期、
+      前置已清(--line 同义,仍接受)。阻断与坏了两级、积压、验收清单、分支、孤儿 demo 照旧全板算 ——
+      守卫拦人不看线别,这几样跟着线缩就成了假的「没事」。
+  export [--out f.json]             合成与 manifest 同形的一坨(backlog / decisions 两段),默认打到 stdout
+  pr-sync […]                       转调 pr-sync.mjs,参数原样透传
+
+看板目录:--dir > $CLAUDE_PROJECT_DIR/app/kanban > 当前目录(含 kanban.config.json)。
+本命令从不 commit —— 写完的卡按纪律自己 git add 那几个文件。`,
+    // v0.17.5:`ddd audit` 的壳。正文全是守卫那几段原话(同一份 audits.mjs),这里只给分段与抬头。
+    audit: {
+      head: (dir, session) => `看板审计:${dir}${session ? `(按线分的家务只看 session 标签「${session}」的卡;阻断 / 坏了 / 积压照旧全板)` : ''}\n只读:不重生成看板,也不改任何文件。`,
+      clean: () => '三级都是零 —— 没有要处理的。',
+      sec: { block: (n) => `阻断(${n}):`, broken: (n) => `坏了(${n}):`, chore: (n) => `家务(${n}):` },
+      tail: (cmd) => `收工时守卫把家务那几类合压成一条,正文就是上面这些;要再看一遍:${cmd}`,
+    },
+    unknownFlag: (flag) => `ddd:不认识的旗子 ${flag}。看 --help;要把它当普通参数传就先写一个 -- 隔开。`,
+    flagNeedsValue: (name) => `ddd:--${name} 后面要跟一个值。`,
+    unknownCmd: (cmd) => `ddd:不认识的命令「${cmd}」。可用:card … / acc … / audit / export / pr-sync;看 --help。`,
+    // v0.17.16:验收代验。每条拒写都说清「一个字节都没写」—— agent 跑在循环里,半截写进去的清单比报错难收拾得多。
+    acc: {
+      unknownCmd: (cmd) => `ddd acc:不认识的子命令「${cmd}」。可用:precheck / shots rotate;看 --help。`,
+      noManifest: (err) => `ddd acc:读不了 acceptance-manifest.json(不在,或不是合法 JSON),一个字节都没写:${err}`,
+      prBad: (v) => `ddd acc:PR 号「${v}」不对,要一个正整数(#293 或 293)。`,
+      noList: (n) => `ddd acc:acceptance-manifest.json 里没有哪份清单含 PR #${n},一个字节都没写。`,
+      noItem: (n, id, ids) => `ddd acc:#${n} 那份清单里没有条目「${id}」,一个字节都没写。有的是:${ids.join(' ') || '(空)'}`,
+      precheckUsage: () => 'ddd acc precheck:写法 acc precheck <pr> <条目> --result ok|bad|blocked --note "看到了什么" [--shot <路径> [--caption "…"]]…;--clear 删掉;acc precheck <pr> --list 看全表。',
+      rotateUsage: () => 'ddd acc shots:写法 acc shots rotate <pr> <条目> [--round r2] [--at ISO]。',
+      resultBad: (v) => `ddd acc precheck:--result「${v ?? ''}」不对,只认 ok(与预期一致)/ bad(不一致)/ blocked(没跑成),一个字节都没写。`,
+      noteNeeded: () => 'ddd acc precheck:--note 不能空 —— 写看到了什么(事实,不写判断),一个字节都没写。',
+      atBad: (v) => `ddd acc:--at「${v}」不是带时区的 ISO 时刻(如 2026-09-24T01:12:00Z),一个字节都没写。`,
+      captionAlone: () => 'ddd acc precheck:--caption 要跟在某个 --shot 后面(给它前面那张图配说明)。',
+      clearAlone: () => 'ddd acc precheck --clear:只删 precheck,后面别再跟 --result / --note / --shot 这些。',
+      roundOnly: () => 'ddd acc precheck:--round 只和 --new-round 一起用(给搬走的那一轮起名)。',
+      roundDup: (r) => `ddd acc:旧轮里已经有「${r}」了,换一个名字(或者不写 --round,自动编号),一个字节都没写。`,
+      shotRemote: (v) => `ddd acc precheck:--shot「${v}」是远程地址 —— 代验截图要落在看板目录里(建议 shots/pre-<PR>/),一个字节都没写。`,
+      shotOutside: (v) => `ddd acc precheck:--shot「${v}」不在看板目录里 —— 板上只渲看板目录下的图(建议 shots/pre-<PR>/),一个字节都没写。`,
+      shotMissing: (v, href) => `ddd acc precheck:--shot「${v}」按看板的路径规矩是 ${href},那里没有这个文件,一个字节都没写。纯文件名落 shots/ 下,带 / 的按相对看板根。`,
+      shotAccPrefix: (v) => `⚠ ddd acc precheck:「${v}」以 acc- 打头 —— 那是验收反馈里人贴的截图(默认 gitignore,合并满期会被清),代验截图请放 shots/pre-<PR>/。这次照写。`,
+      roundEarly: (at, r, tailAt) => `ddd acc:这一轮的时间 ${at} 比旧轮最后一轮「${r}」(${tailAt})还早 —— 旧轮按时间先后排,板上「最近」取末项。用 acc shots rotate <pr> <条目> --at <不早于 ${tailAt} 的时刻> 先搬,一个字节都没写。`,
+      locked: (lock) => `ddd acc:另一个进程正在写 acceptance-manifest.json(锁 ${lock} 10 秒没放),一个字节都没写;稍后重试。`,
+      rotateEmpty: (n, id) => `ddd acc shots rotate:#${n} ${id} 这一轮没有 shots 也没有 precheck,没有可搬的,一个字节都没写。`,
+      clearNone: (n, id) => `ddd acc precheck --clear:#${n} ${id} 本来就没有 precheck,一个字节都没写。`,
+      cleared: (n, id) => `ddd acc precheck --clear:#${n} ${id} 的 precheck 删了(shots 没动)。`,
+      rotated: (n, id, round, k) => `ddd acc shots rotate:#${n} ${id} 当前这一轮搬进旧轮「${round}」(${k} 张图),shots 清空、precheck 已随轮走。`,
+      written: (n, id, result, added, round) => `ddd acc precheck:#${n} ${id} 代验 ${result}${added ? `,shots 追加 ${added} 张` : ''}${round ? `;上一轮先搬进了旧轮「${round}」` : ''}。`,
+      newRoundNothing: () => '(--new-round:这一条还没有上一轮的图和代验,没有可搬的,直接写。)',
+      listHead: (n, title) => `#${n} · ${title}`,
+      listNone: () => '—',
+      listTail: (c) => `代验 ${c.ok} 通过 · ${c.bad} 不对 · ${c.blocked} 没跑成 · ${c.none} 条没代验`,
+      listShots: (k, h) => `${k} 张图${h ? ` · 旧轮 ${h}` : ''}`,
+    },
+    unknownCardCmd: (cmd, list) => `ddd card:不认识的子命令「${cmd}」。可用:${list.join(' / ')};看 --help。`,
+    kindBad: (kind) => `ddd card new:第一个参数要写 backlog 或 decision(给的是「${kind}」)。`,
+    readFailed: (what, err) => `ddd:读不了 ${what}(不在,或不是合法 JSON):${err}`,
+    headNoArray: (file, key) => `ddd:${file} 里没有 ${key} 数组,也没配 cardsDir —— 这块板的形制不对,先核对 manifest。`,
+    headHasArray: (file, key, dir) => `ddd:kanban.config.json 配了 cardsDir = "${dir}",${file} 里却还留着 ${key} 数组(一个真源被破坏了)。卡的真源是 ${dir}/ 下的文件,先把头文件的 ${key} 删掉。`,
+    dirMissing: (rel) => `ddd:卡目录 ${rel} 不在(相对看板目录)—— gen 也会硬失败。建目录,或把 cardsDir 从 kanban.config.json 去掉。`,
+    cardParseBad: (rel, err) => `ddd:卡文件 ${rel} 不是合法 JSON,本次一个字节都没写(gen 也会在这儿硬失败):${err}`,
+    cardIdMismatch: (rel, id) => `ddd:卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上,本次一个字节都没写 —— 文件名就是卡号(一个真源)。`,
+    cardNotFound: (id) => `ddd:板上没有卡号「${id}」。用 card list 核一遍(拆成一卡一文件之后,文件名就是卡号)。`,
+    orderLocked: () => 'ddd:order 是拆分时记下的原数组下标(gen 读回时按它再按 id 排,排完就删;跟着数组走的是截图廊组序与深链表键序 —— Backlog / 决策面上的顺序按卡日期新→旧,不看它),不许用 CLI 改 —— 真要挪位置,直接编辑卡文件并说明理由。',
+    idLocked: () => 'ddd:id 是这张卡的身份 —— 一卡一文件时它就是文件名,改了之后 gen 立刻硬失败(文件名与 id 对不上),而 CLI 见到坏卡也拒跑,连改回来的那条命令都用不了。要换卡号:用 card new 建新卡把内容搬过去,或者停下 gen、手工把文件与 id 一起改。本次一个字节都没写。',
+    arrayField: (field) => `ddd:${field} 的形制是数组,给的是标量 —— gen 会在渲染它的时候 TypeError,整块板生成不出来。写法:--json '[…]',例如 card set <id> ${field} --json '[]'。本次一个字节都没写。`,
+    statusBad: (v, list) => `ddd:status「${v}」不在这类卡的 statuses 里。可用:${list.join(' / ')}`,
+    dateBad: (v) => `ddd:日期「${v}」形制不对,要 YYYY-MM-DD(板上按字符串比大小,补零不能省)。`,
+    lineBad: (v, list) => `ddd:线别「${v}」不在 config.lanes.ids 里。可用:${list.join(' / ')}(多线共享写成空格分隔,如 "B C")`,
+    sessionBad: (v, list) => `ddd:session 标签「${v}」不在 config.sessionTags 里。可用:${list.join(' / ')}(多标写成空格分隔,如 "dev release")`,
+    prBad: (v) => `ddd:pr 值 ${v} 形制不对。要 12(本仓号)/ "#12" / "owner/repo#12";一张卡跨几个 PR 用 --json '[227,230]'。`,
+    unknownField: (field, kind) => `⚠ ddd:「${field}」不是${kind}卡认得的字段,还是写进去了 —— 板上不会渲染它。是笔误就用 card set 改回来。`,
+    fromNotObject: (file) => `ddd --from:${file} 的顶层不是一个 JSON 对象(要的是一张卡的字段表)。`,
+    valueNotJson: (err) => `ddd --json:值不是合法 JSON:${err}\n  (shell 里记得整段加单引号,如 --json '["a","b"]')`,
+    writeFailed: (where, err) => `ddd:写 ${where} 失败,原文件一个字节都没变(临时文件 + rename,半截文件不会落到卡的位置上):${err}`,
+    noTiers: () => 'ddd card new backlog:这块板的 backlog-manifest.json 里 tiers 是空的,而 gen 硬要求每张卡的 tier 在 tiers 里 —— 先定义至少一个工作类型再建卡。',
+    newExhausted: (prefix) => `ddd card new:从当前最大号往后 1000 个「${prefix}N」都被占了,没往下试。先看看卡目录里是不是有一批空占位文件。`,
+    newDone: (id, file) => `ddd card new:${id} → ${file}\n  模板里的 <…> 是占位,用 card set 填掉(至少 title / problem / approach)。`,
+    newNoLine: () => '⚠ ddd card new:这张卡没有 line —— 配了 lanes 的板上,它只在「全部」档出现,默认视图里看不见。用 card set <id> line <档> 补上。',
+    tplTitle: () => '<一句话说清这张卡要解决什么>',
+    tplProblem: () => '<用户看到什么、为什么这是问题;≤ 2 句,别写查证过程>',
+    tplApproach: () => '<怎么改、改哪、代价;结论先行,1–3 行>',
+    tplNote: () => '<决策与进展的时间线,一段一条;用 ddd card note 追加>',
+    tplQuestion: () => '<要定的是什么;一句话>',
+    tplDecision: () => '<拍板结论;还没拍板就先留着这行>',
+    setUsage: () => 'ddd card set:写法 card set <id> <字段> <值>;值是数组/对象时加 --json。',
+    setDone: (id, field, value, file) => `ddd card set:${id} 的 ${field} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
+    statusUsage: () => 'ddd card status:写法 card status <id> <status> [--no-note]。',
+    statusDone: (id, from, to, noteField, noTimeline) => `ddd card status:${id} ${from || '(空)'} → ${to}` +
+      (noteField ? `,并在 ${noteField} 末尾记了一行时间线` : noTimeline ? '(决策卡没有时间线字段,只改了 status)' : '(--no-note:没记时间线)'),
+    noteUsage: () => 'ddd card note:写法 card note <id> "<一句话进展>"。',
+    noteDone: (id, field, line) => `ddd card note:${id} 的 ${field} 追加了「${line}」`,
+    noteNoField: (id) => `ddd card note:${id} 是决策卡,决策卡没有时间线字段 —— 写进去的话看板一个字都不会渲染。要留进展就写 detail(card set ${id} detail "…"),要改结论就写 decision。`,
+    linkUsage: () => 'ddd card link:写法 card link <id> "<标题>" <链接>。标题只写这个链接干了什么 —— 状态词(待合 / 已合)看板会自己渲染。',
+    linkScheme: (href) => `ddd card link:链接 ${JSON.stringify(href)} 的协议不在白名单。能写的是 http / https / mailto,或者仓库里的相对路径(docs/x.md、demos/y.html、#锚点)。javascript: 这类链接一点就在看板自己的源上跑脚本,不进卡文件。`,
+    linkDup: (id, href) => `ddd card link:${id} 上已经有这条链接了,一个字节都没写:${href}`,
+    linkDone: (id, href, pr) => `ddd card link:${id} + ${href}` + (pr ? `;顺手把 PR #${pr} 写进了 pr 字段(卡头芯片只认这一档)` : ''),
+    depWords: DEP_WORDS_ZH,
+    afterUsage: () => "ddd card after:写法 card after <id> <ref>…(追加,去重)或 card after <id> --rm <ref>(移除一项)。\n  ref = 卡号(BL-C74 / D89)/ PR(#266 / owner/repo#12)/ 版本 tag(v0.0.5);整体覆盖用 card set <id> after --json '[…]'。",
+    afterRmAlone: () => 'ddd card after --rm:一次只移除一项,后面别再跟别的 ref(要一次换掉整份:card set <id> after --json \'[…]\')。',
+    afterRefBad: (v) => `ddd card after:前置 ${v} 的形制不对。三种写法:卡号(板上存在的 id,如 BL-C74 / D89)、PR(#266 / 266 / owner/repo#12)、版本 tag(v 开头,如 v0.0.5)。`,
+    afterUnknownRef: (id) => `ddd card after:板上没有卡号「${id}」—— 前置指向一张不存在的卡,gen 会硬报错。用 card list 核一遍;要指的是 PR 就写 #号,是版本就写 v 开头的 tag。`,
+    afterSelf: (id) => `ddd card after:${id} 不能把自己写成自己的前置 —— 那张卡永远开不了工。`,
+    afterCycle: (path) => `ddd card after:加上这一条就成环了:${path} —— 互相等着的卡谁都开不了工,本次一个字节都没写。`,
+    afterNotThere: (id, ref, cur) => `ddd card after --rm:${id} 的前置里没有「${ref}」,一个字节都没写。现在写着的是:${cur.length ? cur.join(' · ') : '(空)'}`,
+    afterDone: (id, list, file) => `ddd card after:${id} 的前置 = ${list.join(' · ') || '(空)'} → ${file}`,
+    afterRmDone: (id, ref, list) => `ddd card after --rm:${id} 去掉了「${ref}」,剩下 ${list.join(' · ') || '(空)'}`,
+    afterShow: (rows) => `  after(前置): ${rows.join(' · ')}`,
+    showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
+    showHead: (id, kind, file) => `${id}  (${kind === 'backlog' ? 'backlog' : '决策'}卡 · ${file})`,
+    listEmpty: () => 'ddd card list:这组筛选下一张卡都没有。',
+    listHead: () => '卡号          状态      线别  session   建卡日      标题',
+    listCount: (n) => `  —— 共 ${n} 张`,
+    historyUsage: () => 'ddd card history:写法 card history <id>。',
+    historyUnsplit: () => 'ddd card history:这块板还没拆成一卡一文件,单张卡没有自己的文件,也就没有自己的 git 历史。要么先跑 scripts/cards-split.mjs,要么 git log -p 整份 manifest 自己翻。',
+    historyFailed: (err) => `ddd card history:git log 跑不动(不是 git 仓库?):${err}`,
+    historyEmpty: (id, file) => `ddd card history:${id}(${file})还没进过任何一次 commit。`,
+    historyHead: (id, file) => `${id}  ${file}`,
+    exportWrote: (file) => `ddd export:已写入 ${file}`,
+  },
+  init: {
+    failRuntime: (runtime) => `--runtime 只支持 claude|codex|both|portable,给了 ${runtime} / --runtime supports claude|codex|both|portable only: ${runtime}`,
+    failCodexHooks: (mode) => `--codex-hooks 只支持 project|plugin,给了 ${mode} / --codex-hooks supports project|plugin only: ${mode}`,
+    runtime: (stage, runtime) => `[${stage}] 运行时:${runtime}`,
+    portableScope: (stage) => `[${stage}] portable:仅初始化共享看板;跳过宿主 hooks/skills/config。宿主适配器需另行配置。`,
+    planPortableSmoke: '[plan] apply 末尾自跑 gen 冒烟 + 共享 audit(无阻断项);不运行宿主守卫',
+    applyAuditOk: '[apply] ✓ 共享 audit 冒烟通过(无阻断项)',
+    failAudit: (err) => `共享 audit 冒烟失败(未提交,锁已清):\n${err}`,
+    failCodexInlineHooks: '.codex/config.toml 已含 inline hooks;为避免两种表示并存,本轮未写入。使用 --codex-hooks plugin 保留原生 plugin wiring,或先人工把 inline hooks 合入 .codex/hooks.json。',
+    failCodexFeatures: '.codex/config.toml 的 features 写法无法安全追加 hooks 开关;本轮未写入。请人工配置 [features] hooks = true,保留原有设置后重试。',
+    failCodexHookShape: '.codex/hooks.json 顶层/hooks 必须是对象,事件必须是数组;拒绝覆盖已有配置。',
+    planAgentsAdd: '[plan] AGENTS.md:追加 DDD 源文件/生成物保护段,保留原文',
+    planAgentsOk: '[plan] AGENTS.md:DDD 段已在,不变',
+    planCodexPlugin: (removed) => `[plan] Codex hooks:使用已安装 plugin 的原生 hooks;移除 ${removed} 个 init 生成的项目 handler,不添加项目 hooks/config`,
+    planCodexHooks: (n, replaced) => `[plan] .codex/hooks.json:追加 ${n} 个 DDD handler,替换 ${replaced} 个旧安装路径 handler,保留用户 hooks`,
+    planCodexFeature: '[plan] .codex/config.toml:只追加缺失的 [features] hooks = true,不重排原文',
+    planCodexFeatureOk: '[plan] .codex/config.toml:已有 hooks 开关,原文不变',
+    codexDisabled: '[init] ⚠ 保留宿主 hooks = false;Codex hooks 当前禁用,需人工启用才能运行守卫。',
+    codexTrust: '[init] 项目 .codex 层需受信任;打开 Codex /hooks 审阅并信任新增/变更的 hooks。init 不绕过信任。',
+    applyAgents: '[apply] ± AGENTS.md(追加 DDD 段)',
+    applyCodexHooks: (n, replaced, removed) => `[apply] ± .codex/hooks.json(追加 ${n} 个 DDD handler,替换 ${replaced} 个旧安装路径 handler,移除 ${removed} 个项目 handler)`,
+    applyCodexFeature: '[apply] ± .codex/config.toml(追加 hooks 开关)',
+    moveNoStage: 'mv(保留暂存区,待人工提交)',
+    planNoCommit: '[plan] git:保留工作区变更,不暂存/不提交(--no-commit 或 Codex 运行时缺省)',
+    planDirtyNoCommit: '[plan] git:目标已有变更,为保留用户修改和暂存区,本轮不自动提交',
+    applyNoCommit: '[apply] ✓ 变更留在工作区,未暂存/未提交',
+    applyDirtyNoCommit: '[apply] ⚠ 目标已有变更,本轮未自动暂存/提交;请审阅后手动提交',
+
+    portCaveat: zhPortCaveat,
+    scenario: {
+      greenfield: 'greenfield(全新项目)',
+      installed: '已初始化(有 kanban.config.json;重跑 apply = 幂等补齐机制件 + 归拢散落 demo,不覆写数据)',
+      legacy: '旧版安装(有 manifest/机制件/demos 无 config;apply = 机制接管,数据零改动)',
+      scattered: '散落资源(repo 内有零散 HTML,无看板)',
+    },
+    gitAction: {
+      tracked: 'git mv(历史保留)',
+      untracked: 'mv + git add(此前未入库,无历史可保)',
+      'no-git': '纯 mv(无 git:无历史可保、无 commit 回退点)',
+    },
+    hookLabel: { stop: '旧 Stop 守卫(claude-stop-hook.mjs)', ghpr: '旧 gh-pr 看板提醒' },
+    portExhausted: (start) => `自 ${start} 起探测 100 个端口全被占用,请用 --port 指定`,
+    portNoteExisting: '沿用现有 kanban.config.json',
+    portNoteManual: '--port 指定(未探测占用,请自行确认)',
+    portNoteProbed: (start) => `自 ${start} 起探测到当下空闲位。${zhPortCaveat}`,
+    mergeAbortStatus: (status, usable) =>
+      `既有 decisions-manifest 的 statuses/groups 不含「${status}」;请人先用 --stub-status 指定落位状态(可选:${usable.join(' / ') || '(无)'}),本次 apply 中止。`,
+    skipIdentical: (name) => `与 demos/${name} 逐字节一致(已归拢的副本?),原地保留,人工删除`,
+    skipMentioned: (name) => `decisions-manifest 已提及 ${name},不再造存根卡(文件照迁)`,
+    skipSiblingConflict: (name) => `同层资产 ${name} 与既有归拢目标同名,--take-assets 不覆盖,人工处理`,
+    assetOutside: '引用越出 demo 所在目录,随迁会改变相对关系',
+    assetMissing: '引用目标不存在(本来就断)',
+    assetSharedSkipped: '被跳过候选仍引用此资产,随迁会弄断留在原地的它;去留人工裁决',
+    // ---- 归拢挑选(--only/--exclude/--remember;tag = scan|plan|apply) ----
+    selReasonExclude: (pat) => `--exclude 命中 ${pat}`,
+    selReasonOnly: '--only 未命中',
+    selNoHit: (tag, pats) => `[${tag}] ⚠ 模式未命中任何候选:${pats.join(' · ')}(核对笔误/大小写/是否 repo 相对路径且用 / 分隔;--remember 不记未命中模式)`,
+    selKeep: (tag, rel) => `[${tag}] [归拢] ${rel}`,
+    selSkip: (tag, rel, reason) => `[${tag}] [跳过:${reason}] ${rel}`,
+    selStats: (tag, kept, skipped) => `[${tag}] 挑选统计:归拢 ${kept} 个 / 跳过 ${skipped} 个(跳过项不写卡不动文件,仍是散落态,重跑 scan 会再列出)`,
+    selRemember: (tag, pats) => `[${tag}] --remember:命中模式 ${pats.join(' · ')} 将写入 config.skipScattered(此后 scan 标注[配置跳过],不再当候选)`,
+    selRememberHint: (tag) => `[${tag}] 提示:长期豁免勿用 .no-card-ok(那只管已在 demos/ 内的免挂卡);散落态长期跳过用 --exclude … --remember 记入 config.skipScattered`,
+    applyRemember: (n, pats) => `[apply] ± kanban.config.json(skipScattered 记入 ${n} 条:${pats.join(' · ')})`,
+    scanConfigSkipped: (rel, pat) => `[scan] [配置跳过] ${rel}(kanban.config.json skipScattered 命中「${pat}」,不当候选)`,
+    // ---- plan ----
+    planTarget: (root) => `[plan] 目标:${root}`,
+    planScenario: (label) => `[plan] 场景:${label}`,
+    planVars: (brand, branch, ghRepo) =>
+      `[plan] 变量:brand=${brand ?? '(缺,apply 需 --brand)'} branch=${branch || '(空)'} ghRepo=${ghRepo || '(空)'}`,
+    planPort: (port, note) => `[plan] 端口:${port}(${note})`,
+    planDirs: (dirs) => `[plan] 将建目录:\n${dirs.map((d) => `  + ${d}`).join('\n')}`,
+    planCreates: (files) => `[plan] 将建文件(存在的一律不覆写):\n${files.map((f) => `  + ${f}`).join('\n')}`,
+    planNoCreates: '[plan] 骨架文件已齐,零新建',
+    planNarrativeSkip: '[plan] path-manifest.json:缺省不铺(「决策路径」标签页自动不出现);要叙事模块加 --with-narrative',
+    planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore 已在,将并入缺失条目(去重):${items.join(' · ')}`,
+    // v0.17.4 §2:生成物是派生状态 —— 标成不 diff、冲突取本分支、GitHub 折叠。路径按解析出的看板目录拼。
+    planGitattr: (file, lines) => `[plan] ${file} 将追加 ${lines.length} 行(看板生成物 -diff merge=ours linguist-generated):\n${lines.map((l) => `  + ${l}`).join('\n')}`,
+    planGitattrOk: (file) => `[plan] ${file}:看板生成物那几行已在,跳过`,
+    // v0.17.4 §4:段落标记按首行认,既有安装的标记早就在 —— 不补这一条,那句话对所有已装的板都落不了地。
+    // 段落多半被人改过(melon 的就是),不替人重写:只说缺哪一句、原话给全,人自己贴。
+    planClaudeStale: (line) => `[plan] 提醒:CLAUDE.md 的看板段落是 0.17.4 之前的版本 —— 缺「生成物只在主线上生成」那一句。段落可能被你改过,init 不替你重写;请自行把这一句加在那个段落末尾:\n  ${line}`,
+    planMergeDriver: '[plan] 将设仓库本地 `git config merge.ours.driver true`(merge=ours 属性要每个克隆各定义一次驱动)',
+    planMergeDriverOk: '[plan] merge.ours.driver 已配,跳过',
+    applyGitattr: (file, n) => `[apply] ± ${file}(追加 ${n} 行:看板生成物标成派生状态)`,
+    applyMergeDriver: '[apply] ± git config merge.ours.driver true(仓库本地)',
+    // v0.17.0:反馈截图默认不进 git。init 只说这一行 —— 宿主的 .gitignore 是人的文件,不替人加行。
+    planAccFbIgnore: '[plan] 提醒:config 开着 acceptanceFeedback,验收反馈截图默认不进 git —— 请自行在 .gitignore 加一行 `app/kanban/shots/acc-*`(要留证的图改名去掉 acc- 前缀,再挂进卡的 shots 字段)',
+    planAccFbPin: '[plan] 提醒:config 开着 acceptanceFeedback 但没配口令,今天谁都能在验收账上署任何名 —— 要的话在 kanban.config.json 里把它写成 `"acceptanceFeedback": { "pin": "1111" }`(4 位数字,新名字输一次即进 app/kanban/acceptance-roster.json;已在名册的人照旧不问)。init 不替你改这份文件',
+    planServeStale: (have, want) => `[plan] 提醒:app/kanban/serve.py 是 ${have || '更早的版本'}(plugin 模板已是 ${want})—— 新写口(如 v0.17.0 的验收反馈)只在新版里。要升:先看自己有没有改过那份,没改就用 plugin templates/serve.py 覆盖并重启 serve`,
+    planSettingsAdd: (items) =>
+      `[plan] .claude/settings.json 将并入 permissions.deny(去重,不动其他键):\n${items.map((d) => `  + ${d}`).join('\n')}`,
+    planSettingsOk: '[plan] .claude/settings.json:deny 条目已齐,跳过',
+    planClaudeAdd: (marker) => `[plan] CLAUDE.md 将追加节「${marker}」`,
+    planClaudeOk: '[plan] CLAUDE.md:标记节已在,跳过',
+    planMergeDeferred: '[plan] ⚠ 检出散落 demo 但骨架未立:本轮 apply 只铺骨架;骨架就绪后重跑 scan/plan/apply 归拢',
+    planGitRepo: '[plan] git:apply 后只 add 本次触碰路径并 commit(回退点)',
+    planGitNone: '[plan] git:目标非 git 仓库 —— 无历史可保、无 commit 回退点',
+    planSmoke: '[plan] apply 末尾自跑 gen 冒烟 + 守卫冒烟(期望 exit 0)',
+    legacyHeader: '[plan] —— 旧装接管(设计 §7 表后半)——',
+    legacyDocs: (n) => `[plan] config.docs:从旧 gen.mjs 的 REF_DOCS 机械翻译提取 ${n} 条,随 config 写入`,
+    legacyDocsNone: '[plan] ⚠ config.docs:旧 gen.mjs 里提取不到 REF_DOCS,置空 —— refs 文档表请人工补填 kanban.config.json',
+    legacyHooks: (list) => `[plan] 摘除旧 kanban hook 注册(.claude/settings.json):${list} —— plugin hooks.json 已接管,避免双守卫;其他 hook/键原样`,
+    legacyHooksNone: '[plan] 旧 hook 注册:未发现(已摘除或从未注册),跳过',
+    legacyMech: (list) => `[plan] 旧机制件标记退役(不删除,人裁决):${list}`,
+    legacyCards: (n, list) => `[plan] 接管遗留落 backlog 卡 ${n} 张:${list} —— 除此之外 manifest 零改动`,
+    legacyCardsNone: '[plan] 接管遗留卡:已在,零新增',
+    mergeHeader: '[plan] —— 散落归拢(设计 §7)——',
+    mergeAbort: (msg) => `[plan] ✗ 中止条件:${msg}`,
+    mergeMove: (from, to, act) => `[plan] 归拢 ${from} → ${to}(${act})`,
+    mergeConflict: (from, to, act) => `[plan] 冲突 ${from} → ${to}(同名不同内容,归档人裁决;${act})`,
+    mergeAsset: (from, to, act) => `[plan] 资产随迁 ${from} → ${to}(${act})`,
+    mergeSibling: (from, to, act) => `[plan] 同层资产归拢(--take-assets)${from} → ${to}(${act})`,
+    mergeAssetReview: (demo, ref, note) => `[plan] ⚠ 资产待裁决 ${demo} 引用「${ref}」:${note}`,
+    mergeSkip: (from, reason) => `[plan] 跳过 ${from}:${reason}`,
+    mergeStubs: (n, status, list) => `[plan] 存根卡 ${n} 张 → decisions-manifest(status=${status},code=id):${list}`,
+    mergeStubsNone: '[plan] 存根卡:无需新增',
+    mergeBroken: (n, list) => `[plan] 断链预测 ${n} 处(策略 B 只列不改写):${list}`,
+    mergeBrokenNone: '[plan] 断链预测:无',
+    mergeCards: (n, list) => `[plan] 遗留待办落 backlog 卡 ${n} 张:${list}`,
+    mergeCardsNone: '[plan] 遗留待办卡:无需新增',
+    // ---- apply ----
+    applyMtimeRace: (label) => `[apply] ⚠ ${label} 自盘点后被并发修改 —— 已重读重算(mtime 乐观锁)`,
+    applyStubs: (n, status) => `[apply] ± decisions-manifest.json(存根卡 ${n} 张,status=${status})`,
+    applyLeftoverCards: (n) => `[apply] ± backlog-manifest.json(遗留待办卡 ${n} 张)`,
+    applyGone: (from) => `[apply] ⚠ ${from} 已不在(并发挪走?),跳过`,
+    applyMove: (from, to, act) => `[apply] → ${from} ⇒ ${to}(${act})`,
+    applySkip: (from, reason) => `[apply] 跳过 ${from}:${reason}`,
+    applyBroken: (n) => `[apply] 断链 ${n} 处按策略 B 未改写文档,已落 backlog 卡`,
+    applyLegacyCards: (n) => `[apply] ± backlog-manifest.json(接管遗留卡 ${n} 张;manifest 其余零改动)`,
+    applyHooksRemoved: (n, list) => `[apply] ± .claude/settings.json(摘除旧 kanban hook 注册 ${n} 条:${list})`,
+    applyMechKeep: (f) => `[apply] 旧机制件保留待割接(不删除):app/kanban/${f}`,
+    failSettingsJson: (rel, err) => `${rel} 已存在但不是合法 JSON,拒绝合并(绝不覆盖):${err}`,
+    failNeedBrand: 'greenfield 需要 --brand(短 token,喂看板标题等 ~8 处)',
+    failNeedYes: '非交互环境请加 --yes 确认执行',
+    confirmPrompt: '[apply] 确认执行以上计划?[y/N] ',
+    cancelled: '已取消',
+    failLock: (lockPath) => `${lockPath} 已存在(另一 init 进行中?)。确认无并行 init 后删除锁重试。`,
+    applyCreate: (rel) => `[apply] + ${rel}`,
+    applyGitignoreMerge: (n) => `[apply] ± app/kanban/.gitignore(并入 ${n} 条,去重)`,
+    applySettings: (n) => `[apply] ± .claude/settings.json(并入 deny ${n} 条)`,
+    applyClaudeMd: '[apply] ± CLAUDE.md(追加 token 保护节)',
+    applyGenOk: '[apply] ✓ gen 冒烟通过(index.html/shots.html/refs 已生成)',
+    failGen: (err) => `gen 冒烟失败(未提交,锁已清):\n${err}`,
+    failGuard: (status, err) => `守卫冒烟失败 exit ${status}:\n${err}`,
+    failGuardOrphan: (out) => `守卫冒烟报孤儿 demo(不应出现):\n${out}`,
+    applyGuardOk: '[apply] ✓ 守卫冒烟通过(exit 0)',
+    commitMerge: (mv, cf, stubs, cards) =>
+      `chore(kanban): kanban-init apply(散落归拢:demo ${mv} 迁 + 冲突归档 ${cf} + 存根卡 ${stubs} + 遗留卡 ${cards})`,
+    commitLegacy: (hooks, cards) =>
+      `chore(kanban): kanban-init apply(旧装接管:config 生成 + 旧 hook 摘除 ${hooks} 条 + 遗留卡 ${cards} 张;数据零改动)`,
+    commitGreen: (brand, port) => `chore(kanban): kanban-init apply(greenfield 骨架,brand=${brand}, port=${port})`,
+    applyCommitted: (sha) => `[apply] ✓ 已提交回退点:${sha}(只含本次触碰路径)`,
+    applyNoChange: '[apply] ✓ 零变更(幂等重跑,无需提交)',
+    applyNoGit: '[apply] ⚠ 目标非 git 仓库:无历史可保、无 commit 回退点,出问题只能手工回退。',
+    applyMergeDeferred: '[apply] ⚠ 检出散落 demo:本轮只铺了骨架;请跑 scan/plan 审阅归拢计划后再次 apply 归拢。',
+    applyDone: (port) => `[apply] 完成。端口 ${port} —— ${zhPortCaveat}`,
+    applyServe: (port) => `[apply] 起看板:bash app/kanban/serve-kanban.sh(或 python3 app/kanban/serve.py ${port})`,
+    // ---- scan ----
+    scanTarget: (root, isRepo, branch) => `[scan] 目标:${root}${isRepo ? `(git 分支 ${branch || '?'})` : '(非 git 仓库)'}`,
+    scanScenario: (label) => `[scan] 场景:${label}`,
+    scanConfig: (has) => `[scan] kanban.config.json:${has ? '存在' : '不存在'}`,
+    scanDemo: (rel, size, gitSt, title, assets) =>
+      `[scan] demo ${rel}(${size}B,${gitSt})title=「${title || '(无)'}」 资产引用:${assets.length ? assets.map((a) => `${a.ref}${a.exists ? '' : '(缺)'}`).join(', ') : '无'}`,
+    scanClaimed: (c) => `[scan] 已被 manifest/config 提及(视为已覆盖数据,不动):${c}`,
+    scanFrag: (n) => `[scan] 另有 ${n} 个 .html 不含 <html(片段/模板),不当 demo 候选`,
+    scanSibling: (rel, size) => `[scan] 同层非 HTML 资源(只列名不读内容):${rel}(${size}B)`,
+    scanBroken: (md, ref, demo) => `[scan] 断链预测:${md} 经「${ref}」指向 ${demo}(归拢后断,策略 B 只报告不改写)`,
+    scanLegacyTraces: (manifests, mech, n) =>
+      `[scan] 旧安装痕迹(有 manifest/机制件但无 config):manifest=[${manifests.join(', ')}] 机制件=[${mech.join(', ')}] demos/*.html=${n} 个`,
+    scanLegacyHooks: (list) => `[scan] 旧 kanban hook 注册(.claude/settings.json):${list}(apply 接管时摘除)`,
+    scanHintGreen: '[scan] 未发现散落 demo,未发现旧安装 —— 可走 greenfield:plan 预览,apply 铺骨架',
+    scanHintScattered: '[scan] 散落归拢流程:apply 先铺骨架 → 重跑 scan/plan 审阅 → 再 apply 归拢',
+    scanHintInstalled: '[scan] 骨架已立,散落 demo 待归拢:plan 审阅合并计划 → apply 归拢',
+    scanHintLegacy: '[scan] 旧装接管:plan 审阅 → apply = config 生成(docs 提取自旧 gen.mjs)+ 摘旧 hook 注册 + 遗留卡落 backlog;manifest/demos 数据零改动',
+    scanSummaryHead: '[scan] 摘要 JSON:',
+  },
+}
+
+const enPortCaveat = 'Port probing only avoids ports that are being listened on right now — it cannot see ports another project wrote into its config but has not started. Multi-project machines need manual port allocation (design §5).'
+
+const en = {
+  journeySuggested: (rows) => `Iteration history hint: ${rows.map((r) => `${r.id} ${r.field} (${r.n} characters/${r.updates} dated updates)`).join('; ')} has a demo and a long iteration history. The writing agent/session should organize it as a journey: summarize product decisions, implementation progress, and recent changes, and separate the current design from history. Keep old demos, links, screenshots, and original records. Check each decision; keep unanswered questions pending. This hint infers no business decisions, moves no evidence, and blocks no writes.`,
+  journeySummary: (rows) => `Summary review hint: ${summaryFields(rows)} may contain verification reports. The writing agent/session should review and edit: keep product decisions, implementation progress, and recent changes in the three summaries; put routine verification evidence in journey.development or detail. Keep actual product requirements. Only a few fixed phrases are recognized; hints can miss reports or flag valid prose. No card is changed and nothing is blocked.`,
+  concurrentStopNotice: 'Shared-board mode: Stop checks cannot identify which session owns a finding, so this stop is advisory. Explicit audit, merge checks, and generated-file protections remain active.',
+  concurrentGenFail: (err) => `Shared-board generation failed or was deferred; this stop is allowed. Inspect the diagnostic and run gen explicitly when inputs are stable:\n${err}`,
+  piReadOnly: 'Pi settlement is read-only, with no automatic generation; generation requires separate authorization and the project branch rules still apply.',
+  piRemind: '[Kanban reminder] A gh pr command succeeded. If a feature or phase is complete, check its card status and link the PR with `node <plugin>/scripts/ddd.mjs card link`; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs`. Pi settlement is read-only, with no automatic generation.',
+  piRemindMerge: '[Kanban reminder] A PR merge command succeeded. Check the corresponding card and PR status; if synchronization is needed, confirm authorization and mainline rules before running `node <plugin>/scripts/pr-sync.mjs --settle` (prints only by default, no automatic writes). Pi settlement is read-only, with no automatic generation.',
+  piFailure: (error) => `Pi board check failed; inspect the diagnostic and project configuration rather than retrying repeatedly or bypassing safety guards: ${error}`,
+  generatedReadDenied: (paths) => `Do not read generated board files in full: ${paths.join(', ')}. Read manifest or docs sources; query fields with the DDD CLI, run audit for checks or gen to verify rendering, or use rg for a targeted string search. Do not read them through cat/head/sed.`,
+  genFail: (err) =>
+    `Kanban guard: gen.mjs re-run failed (most likely a manifest JSON syntax error). Please fix it before wrapping up:\n${err}`,
+  stampNewer: (stamp, mine) =>
+    `⚠ Kanban guard: index.html was generated by a newer ddd-gen v${stamp}, but this session's plugin is v${mine}. Regeneration is skipped so the older gen cannot overwrite newer output; the board stays as-is. Upgrade the plugin (or, if already upgraded, restart the session) before regenerating.`,
+  noSelfVersion:
+    () => '⚠ Kanban guard: broken plugin install (cannot read a plain-numeric version from its own plugin.json); board regeneration skipped — reinstall/upgrade the plugin.',
+  healedUnstamped:
+    () => 'Kanban guard: index.html carried no gen stamp (output of an old gen) — regenerated with the current version. If old long-lived sessions are still running on this machine, run the plugin\'s scripts/retire-stale-caches.mjs to cut off the source (dry-run first, --yes to apply).',
+  orphanWarn: (n, list) =>
+    `⚠ Kanban guard: still ${n} demo(s) not linked to any board card (letting this stop through):\n${list}`,
+  orphanBlock: (n, list) =>
+    `Kanban guard: found ${n} demo(s) not linked to any board card (violates the "every demo links to a card" audit rule):\n${list}\nAdd a card for each in app/kanban/decisions-manifest.json or backlog-manifest.json right away (follow the field style of existing cards); if a demo genuinely needs no card, add its filename to app/kanban/demos/.no-card-ok (one per line). Before acting, grep to verify the filename is not already in a manifest — with parallel sessions there is a card-linking race window, so this alert may already be stale.`,
+  accParseFail: (err) =>
+    `⚠ Kanban guard: acceptance-manifest.json could not be parsed, so the acceptance audit was skipped (the "acceptance" tab will fail on it too): ${err}`,
+  accCurrentNoList: (cur) =>
+    `⚠ Kanban guard: acceptance-manifest.json has current = ${cur}, but no checklist covers that PR — the acceptance tab's current panel will be empty. Add a checklist, or set current back to null.`,
+  accDupPr: (pr, a, c) =>
+    `⚠ Kanban guard: PR #${pr} appears in two acceptance checklists (${a} and ${c}) — the tick-off progress would split in two. Merge them into one, or change one of the pr values.`,
+  accDupItem: (list, id) =>
+    `⚠ Kanban guard: acceptance checklist ${list} has a duplicate item id "${id}" — tick state is stored by id, so duplicates overwrite each other. Make the ids unique.`,
+  accUnknownCard: (list, id) =>
+    `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
+  accFbUncommitted: (rows, total) =>
+    `Acceptance feedback: ${rows.map((r) => `#${r.pr} has ${r.n} new uncommitted line(s) (${r.who.join(' · ')})`).join('; ')}` +
+    `${total > rows.length ? ` …and ${total} pull requests in total` : ''} — commit app/kanban/acceptance-feedback.jsonl before you stop.`,
+  accFbPrunable: (n, days) =>
+    `Acceptance feedback shots: ${n} of them belong to pull requests merged more than ${days} days ago and can go — run \`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run\` for the list, drop --dry-run to delete (the jsonl is never touched).`,
+  richLongText: (worst, total) =>
+    `⚠ Kanban guard: ${total} card(s) carry a prose field over 800 characters with no detail (longest: ${worst.key} on ${worst.id}) — keep the card body to conclusions and move long evidence into detail.`,
+  richLongNewBlock: (rows, total) =>
+    `Kanban guard: ${total} freshly created card(s) carry a prose field over 800 characters with no detail (violates the "summary and evidence live apart" rule):\n` +
+    rows.map((r) => `  - ${r.key} on ${r.id} (${r.n} characters)`).join('\n') +
+    (total > rows.length ? `\n  … ${total} in total` : '') +
+    `\nMove the long evidence into detail right now: \`node <plugin>/scripts/ddd.mjs card set <id> detail "…"\` (one call per card). What stays in the body is the conclusion — question/problem in two sentences or fewer, approach conclusion-first, note a dated timeline; detail renders as a collapsed "evidence" block at the bottom of the card, so not a word is lost. Older, already-committed cards are exempt — they only get the one-line notice.`,
+  richLongNewWarn: (rows, total) =>
+    `⚠ Kanban guard: ${total} freshly created card(s) carry a prose field over 800 characters with no detail (letting this stop through): ${rows.map((r) => `${r.key} on ${r.id} (${r.n})`).join(', ')}${total > rows.length ? ` … ${total} in total` : ''}`,
+  depsUnlocked: (rows, total) =>
+    `Prerequisites cleared: ${rows.map((r) => depRow(r, DEP_WORDS_EN, '()')).join('; ')}${total > rows.length ? ` … ${total} card(s) in all` : ''} — everything these cards were waiting on is done; they are ready to start.`,
+  respSettle: (ids, total) =>
+    `⚠ Kanban guard: ${total} card(s) have all their pull requests merged but are still in a non-final status (unsettled): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Run \`node <plugin>/scripts/pr-sync.mjs --settle\` for the full list (card → suggested status), then add --write to settle them (add --only <ids> to pick some).\n  For a card that should not be settled this round (its pull request only landed half the work), put "settleHold": "reason" on it — it then leaves the list, drops its chip, and this notice stops naming it.`,
+  respReopen: (ids, total) =>
+    `⚠ Kanban guard: ${total} card(s) are in a final status but still have an open pull request: ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''}\n  Either the pull request is not merged yet (the card was settled early), or the card links a pull request that is not really its own — check it; nothing is changed for you.`,
+  respHoldOld: (ids, days, total) =>
+    `On settle hold, the oldest for ${days} day(s): ${ids.join(' ')}${total > ids.length ? ` … ${total} in total` : ''} — if the hold still stands, set it again (\`node <plugin>/scripts/ddd.mjs card set <id> settleHold "reason"\` resets the clock); if the work has landed, delete settleHold from the card.`,
+  genOffMain: (cur, main, detached) =>
+    `${detached ? `Detached HEAD ${cur}` : `Branch ${cur} is not the mainline`}: the board was not regenerated (generated files are only built on ${main}) — not a byte of them was touched, and the audits still ran.`,
+  genOffMainDirty: (files, main) =>
+    `⚠ Kanban guard: ${files.length} generated board file(s) are modified in this branch's working tree (usually left behind by an older guard regenerating on a branch): ${files.slice(0, 3).join(' ')}${files.length > 3 ? ` … ${files.length} in total` : ''}\n` +
+    `  Generated files are derived state and do not belong on a branch: \`git checkout ${main} -- ${files.join(' ')}\` drops them.`,
+  genConflict: (files, main, gen, dir) =>
+    `⚠ Kanban guard: ${files.length} generated board file(s) are in a conflicted state — do not resolve them by hand, and do not read them (they are derived state):\n` +
+    `  \`git checkout ${main} -- ${files.join(' ')} && node ${gen} --dir ${dir}\``,
+  mergeDriverMissing: () =>
+    '⚠ Kanban guard: .gitattributes marks the generated board files merge=ours, but this clone does not define that driver — run `git config merge.ours.driver true` (repository-local, once per clone), otherwise those large files still end up conflicted on a merge.',
+  boardBranchGuard: (h, main, dirty = []) =>
+    `⚠ Kanban guard: the current branch ${h.ref} carries board changes (against ${main}: ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) — the board is only edited on ${main}.\n` +
+    h.hazard.map((z) => `  ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries): this board is one file per card, so merging it back into ${main} makes gen fail hard — and that array is a snapshot from the fork point, which would overwrite cards that have moved on since.\n`).join('') +
+    `  Before merging, drop the branch-side board changes (git checkout ${main} -- <kanban dir>) and replay what genuinely belongs there (a new demo, a refs doc) on ${main}. Full table: \`node <plugin>/scripts/board-branch-check.mjs\`.` +
+    (dirty.length ? `\n  ⚠ ${dirty.length} uncommitted board change(s) are in the working tree; that checkout overwrites them too (the list above only covers committed ones): ${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` … ${dirty.length} in total` : ''} — commit or git stash them first.` : ''),
+  boardBranch: {
+    noGit: () => 'board-branch-check: this board is not inside a git repository (or git could not run), so there are no branches to compare — no judgement this time.',
+    noMain: (main) => `board-branch-check: cannot find the mainline branch ${main} (neither locally nor as origin/${main}), so there is no baseline to compare against — no judgement this time. The mainline name comes from instance.branch in the three manifests, defaulting to main.`,
+    clean: (n, main) => `board-branch-check: compared ${n} branch(es); none of them carries board changes against ${main} — clean.`,
+    onMain: (main) => `board-branch-check: nothing to compare (you are on ${main}) — board changes belong here in the first place.`,
+    detached: (sha, main) => `board-branch-check: HEAD is detached (not on any branch), so the comparison is commit ${sha} against ${main} — the verdict still stands, there is just no branch name to report.`,
+    dirty: (files, main, prefix) =>
+      `  ⚠ ${files.length} uncommitted board change(s) are in the working tree — the git checkout ${main} -- ${prefix} above overwrites unconditionally, so it takes those with it, and they were never committed (the list above only covers committed changes):\n` +
+      files.slice(0, 5).map((f) => `    ${f}`).join('\n') + (files.length > 5 ? `\n    … ${files.length} in total` : '') +
+      `\n  Commit them (or git stash) before running that command.`,
+    head: (n, main) => `⚠ Board changes are sitting on non-mainline branches (baseline ${main}), ${n} of them:`,
+    row: (h) => {
+      const key = [...h.data, ...h.gen]
+      const lines = [`  ${h.ref} — ${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other`]
+      for (const f of key.slice(0, 5)) lines.push(`    ${f}`)
+      if (key.length > 5) lines.push(`    … ${key.length} in total`)
+      for (const z of h.hazard) lines.push(`    ⛔ ${z.file} still carries a ${z.key} array (${z.n} entries) — this board is one file per card, so merging it back makes gen fail hard, and that array is a fork-point snapshot that would overwrite cards which have moved on since.`)
+      return lines.join('\n')
+    },
+    rule: (prefix, main) => `The rule: the board is only edited on ${main} — branches leave ${prefix} alone, and demos and cards are committed on ${main} in their own commits.\n  Where a branch already touched it: before merging, run git checkout ${main} -- ${prefix} to drop the branch-side board changes, then replay them on ${main} (replaying is done from memory — miss one and the content is lost silently, which is why this list comes first).`,
+  },
+  mergeGate: {
+    deny: (ref, h, main, prefix, gen, dir, onIt = false) => {
+      const files = [...h.gen, ...h.data, ...h.other]
+      const br = String(ref).replace(/^origin\//, '')
+      return `Board changes must not reach ${main} through a pull request: branch ${ref} carries ${files.length} board change(s) (${h.data.length} data · ${h.gen.length} generated · ${h.other.length} other) —\n` +
+        files.slice(0, 8).map((f) => `  ${f}`).join('\n') + (files.length > 8 ? `\n  … ${files.length} in total` : '') +
+        (onIt
+          ? `\n  Drop them on this branch first: \`git checkout ${main} -- ${prefix}\`, commit, then merge; replay what genuinely belongs there (a new demo, a refs doc) on ${main}.`
+          : `\n  Switch to ${br} and drop them there first: \`git switch ${br} && git checkout ${main} -- ${prefix}\`, commit, then merge; replay what genuinely belongs there (a new demo, a refs doc) on ${main}.`) +
+        (h.gen.length ? `\n  The generated ones are derived state — never resolve or read them by hand: take the mainline copy and rebuild with \`node ${gen} --dir ${dir}\`.` : '') +
+        `\n  Full table: \`node ${gen.replace(/gen\.mjs$/, 'board-branch-check.mjs')} --dir ${dir} --branch ${ref}\`. If you have checked it and still mean to merge, run gh pr merge yourself in a terminal (this gate only stops tool calls).`
+    },
+    skipped: (why) => `Board merge gate: ${why} — not blocking this time (the gate only stops confirmed violations, never tool failures).`,
+    noGh: () => 'the gh command is not available, so the head branch of this pull request cannot be looked up',
+    ghFailed: (n) => `could not look up the head branch of pull request #${n} (gh not logged in, no access to the repository, or no network)`,
+    noRef: (ref) => `neither a local nor an origin branch named ${ref} exists, so there is nothing to compare`,
+    otherRepo: () => 'the command points at another repository with -R/--repo, and this gate only knows the branches of the current one',
+  },
+  wipOver: (n, hard, waiting = 0) =>
+    `⚠ Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, over config.wip.hard = ${hard} — more work is in flight than can be covered, and a new card only adds to the pile. Clear some first (settle what has landed, move waiting-on-others to blocked, move what is not happening soon to deferred), then add new ones.`,
+  precheckBad: (rows) =>
+    `Pre-check found ${rows.length} item(s) not as expected, waiting for a person: ${byPr(rows, ', ').join(' · ')} — an agent ran them first and saw something other than the expectation; it is a lead for the person re-running and judging them, not a verdict.`,
+  // v0.17.11: reported under the limit too — the same fact, minus the advice to clear the pile.
+  wipUnder: (n, hard, waiting = 0) =>
+    `Kanban guard: ${n} card(s) are in the ready status${waiting ? ' with every prerequisite cleared, and ' + waiting + ' more are ready but still waiting on prerequisites' : ''}, against config.wip.hard = ${hard} — under the limit. Since v0.17.11 this count is always reported, so the headroom is visible before the limit is hit.`,
+  // v0.17.7:plain-language labels naming up to CHORE_IDS cards. No command, no path,
+  // no how-to-deal-with-it — that is what `ddd audit` is for.
+  // v0.17.8:label, a space, then the content — no colon inside an item (the header carries the
+  // only one) and extras in parentheses, because the whole thing is now one unbroken line.
+  chore: {
+    longText: (e) => `card prose too long, no detail ${e.n} card(s) (longest ${e.worst})`,
+    journeySuggested: (e) => `writing session to organize iteration history as journey ${e.rows.map((r) => `${r.id} ${r.field}`).join('; ')}${e.n > e.rows.length ? ` and ${e.n} cards in all` : ''} (keep original records)`,
+    journeySummary: (e) => `writing session summary review ${summaryFields(e.rows)}${e.n > e.rows.length ? ` and ${e.n} cards in all` : ''} (verification evidence belongs in journey.development/detail; keep product requirements)`,
+    accFbUncommitted: (e) => `acceptance feedback not committed ${e.n} line(s) (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
+    accFbPrunable: (e) => `acceptance shots that can go ${e.n}`,
+    settle: (e) => `every pull request merged, card not settled ${enCards(e)}`,
+    reopen: (e) => `settled while a pull request is still open ${enCards(e)}`,
+    hold: (e) => `on settle hold for ${SETTLE_HOLD_DAYS} days ${enCards(e)}`,
+    depsUnlocked: (e) => `prerequisites cleared, ready to start ${enCards(e)}`,
+    precheckBad: (e) => `pre-check says not as expected ${e.n} item(s) (${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} in all` : ''})`,
+    // v0.17.11: always on. "N/limit" shows the headroom at a glance; over it adds three words.
+    wip: (e) => `can start now ${e.n}/${e.hard}${e.n > e.hard ? ' over the limit' : ''}${e.waiting ? ` (${e.waiting} more waiting on prerequisites)` : ''}`,
+  },
+  // v0.17.8:every newline is its own "Stop says" bubble, so the whole notice is one line and the
+  // phone wraps it. The header does not say "chores" — that is an internal tier name.
+  choreLine: (parts, cmd) => `Kanban guard · ${parts.length} reminder${parts.length === 1 ? '' : 's'} (details: ${cmd}): ${parts.join(' · ')}`,
+  cardsDirMissing: (rel) =>
+    `⚠ Kanban guard: config.cardsDir is set but the card directory ${rel} is not there — gen will fail hard and the board stays on its last version. Create the directory, or drop cardsDir from kanban.config.json.`,
+  cardIdBad: (rows, total) =>
+    `⚠ Kanban guard: ${total} card file(s) have a filename that does not match the id inside — the filename is the card id (one source of truth), and gen fails hard on a mismatch:\n` +
+    rows.map((r) => `  - ${r.file} (its id is "${r.id}")`).join('\n'),
+  cardParseBad: (rows, total) =>
+    `⚠ Kanban guard: ${total} card file(s) are not valid JSON — gen will fail hard and the board stays on its last version:\n` +
+    rows.map((r) => `  - ${r.file}: ${r.message}`).join('\n'),
+  ghprRemindMerge:
+    '[Kanban reminder] A pull request was just merged. If you have not already, run `node <plugin>/scripts/board-branch-check.mjs` first (the board is only edited on the mainline; a branch that carries board changes back either makes gen fail hard or silently overwrites mainline cards with a fork-point snapshot). Then run `node <plugin>/scripts/pr-sync.mjs --settle`: it syncs pull requests and releases from gh into release-manifest.json, then lists the cards whose pull requests are all merged while the card is not settled, with a suggested status (printing only by default; add --write once the list looks right). While you are there, check the link titles on those cards — hand-written status words are no longer needed, the board renders the real state.',
+  ghprRemind:
+    '[Kanban reminder] A gh pr command just ran. If this marks a feature/phase as complete: check whether the corresponding board card status in app/kanban needs advancing, and attach the pull request to the card with `node <plugin>/scripts/ddd.mjs card link <id> "<what this pull request did>" <pr-url>` (it writes the pr field too); after opening or merging a pull request, run `node <plugin>/scripts/pr-sync.mjs` to refresh release-manifest.json. Ignore if unrelated to the board.',
+  prSync: {
+    noRepo: () => 'pr-sync: instance.ghRepo is empty in all three manifests, so there is no repository to sync — set it to "owner/repo" in manifest.json first.',
+    ghMissing: () => 'pr-sync: the gh command was not found. Install the GitHub CLI (https://cli.github.com), run `gh auth login`, then try again; nothing was written.',
+    ghFailed: (what, err) => `pr-sync: ${what} failed (not logged in, no access to the repository, or no network all look like this): ${err}\nNothing was written; fix it and re-run.`,
+    ghBadJson: (what, err) => `pr-sync: the output of ${what} is not valid JSON (a gh old enough to lack --json?; gh 2.x is required): ${err}\nNothing was written.`,
+    manifestBad: (err) => `pr-sync: release-manifest.json exists but is not valid JSON, refusing to overwrite it (hand-written notes and prs may be in there): ${err}`,
+    badLimit: (name, v) => `pr-sync: --${name} needs a positive integer (got ${JSON.stringify(v)}).`,
+    prTruncated: (n, flag) => `⚠ pr-sync: gh returned exactly ${n} pull requests, i.e. as many as it was asked for — anything older was not fetched this run. Those entries stay in release-manifest.json as they were, but their status no longer refreshes. For all of them: --${flag} <a larger number>.`,
+    relTruncated: (n, flag) => `⚠ pr-sync: gh returned exactly ${n} releases, i.e. as many as it was asked for — older tags were not fetched this run. For all of them: --${flag} <a larger number>.`,
+    tagTimeFallback: (tags) => `⚠ pr-sync: could not read the tags' own timestamps (no permission, no network, or the tag is gone), so their at fell back to the release publishedAt: ${tags.join(' ')}\n  Release attribution is measured from the moment the tag was cut; publishedAt is usually seconds to tens of minutes later — pull requests merged in between get counted into that release. You can set at by hand once you have checked (the script never rewrites an at that is already on disk).`,
+    done: (prs, rels, added, file) => `pr-sync: ${prs} pull request(s) · ${rels} release(s) (${added} new) → ${file}`,
+    dry: (prs, rels, added) => `pr-sync --dry-run: would write ${prs} pull request(s) · ${rels} release(s) (${added} new); nothing written.`,
+    settleNone: () => 'pr-sync --settle: nothing to settle — every card whose pull requests are all merged is already in a final status.',
+    settleHead: (n) => `pr-sync --settle: ${n} card(s) have all their pull requests merged but are not settled yet:`,
+    settleRow: (id, from, to, prs) => `  ${id}  ${from} → ${to}  ${prs}`,
+    settleDry: (sample) => `Dry run: nothing was written. Once the list looks right, add --write to settle — it only changes the status of these cards and, where the card kind has a timeline field (note / notes), appends one dated line to it.\n  To settle only some of them: --write --only ${sample || '<card-id>'} (comma-separated). If a card should not be settled this round at all (its pull request only landed half the work), put "settleHold": "reason" on the card and it drops out of this list.`,
+    settleWrote: (n, files) => `pr-sync --settle --write: settled ${n} card(s) → ${files}`,
+    settleHeld: (ids, n) => `  On hold (${n}): ${ids.join(' ')} — their pull requests are all merged too, but the cards carry settleHold (the reason shows in the grey chip on the card). They are not settled here and the guard stays quiet about them; remove the field to settle one.`,
+    settleOnlyEmpty: () => 'pr-sync --settle --only: no card id given. Write it as --only BL-1 or --only BL-1,D2 (comma-separated); nothing was written.',
+    settleOnlyBad: (ids) => `pr-sync --settle --only: these card ids are not in the list above, so nothing was written: ${ids.join(' ')}\n  Check them against the list; a card carrying settleHold is never in it (remove that field first if you mean to settle it).`,
+    settleDryWins: () => 'pr-sync: both --dry-run and --write were given; --dry-run wins — printing only, nothing written.',
+    settleReformat: (file) => `pr-sync --settle --write: ${file} is not formatted the way JSON.stringify(…, null, 2) writes it, so it is left alone (rewriting it would touch bytes of other cards). Settle those cards by hand.`,
+  },
+  cards: {
+    alreadySplit: (dir) => `cards-split: kanban.config.json already sets cardsDir = "${dir}"; this board is already one file per card. Use cards-join.mjs to go back to single files.`,
+    notSplit: () => 'cards-join: kanban.config.json has no cardsDir, so this board is still single-file — nothing to join.',
+    headNoArray: (file, key) => `cards-split: ${file} has no ${key} array, so there is nothing to split — check the manifest shape first.`,
+    headHasArray: (file, key) => `cards-join: ${file} already has a ${key} array (the one-source-of-truth rule is broken); clean up the header file by hand before joining.`,
+    dirNotEmpty: (rel) => `cards-split: ${rel} already exists and is not empty; refusing to split into it (existing cards could be overwritten). Pick another directory name, or empty it first.`,
+    idBad: (id, why) => `card id "${id}" ${why}`,
+    idEmpty: () => 'is empty — every card needs an id, and the filename is it',
+    idUnsafe: () => 'cannot be a filename (it contains / \\ or .. or leading/trailing whitespace)',
+    idDup: (id) => `card id "${id}" appears twice — after the split both would be the same filename; rename one first`,
+    orderTaken: (id) => `card "${id}" already has an "order" field — the split needs that name to record the original array index; rename the field first`,
+    dirMissing: (rel) => `cards-join: the card directory ${rel} is not there (relative to the kanban directory); nothing to join`,
+    parseBad: (rel, err) => `cards-join: card file ${rel} is not valid JSON, refusing to join (that card would be lost): ${err}`,
+    idMismatch: (rel, id) => `cards-join: card file ${rel} does not match the id "${id}" inside it; make them agree first`,
+    dryRun: (rows, total) =>
+      `cards-split --dry-run: would write ${total} card file(s)\n` + rows.map((r) => `  ${r.rel}/  ${r.n}`).join('\n') + '\nNothing was written.',
+    dryRunJoin: (rows, total) =>
+      `cards-join --dry-run: would join ${total} card(s) back\n` + rows.map((r) => `  ${r.rel}/  ${r.n} → ${r.key} of ${r.file}`).join('\n') + '\nNothing was written.',
+    genFailed: (err) => `gen.mjs failed; rolled back (the board is exactly as it was before):\n${err}`,
+    diffFound: (files) => `The generated output differs before and after the split; rolled back (the board is exactly as it was before). Differing: ${files}\nByte-for-byte equality is the acceptance gate for this change — please report the difference upstream.`,
+    diffFoundJoin: (files) => `The generated output differs before and after the join; rolled back (the board is exactly as it was before). Differing: ${files}`,
+    splitDone: (total, rows, dir) =>
+      `cards-split: ${total} card(s) → ${rows.map((r) => `${r.rel}/ ${r.n}`).join(' · ')}; the array was removed from each header file and kanban.config.json now has cardsDir = "${dir}".\n` +
+      'The generated output is byte-for-byte identical to before the split (apart from the new per-card "updated" stamps). Commit the whole batch as one commit and say in the message that it is a rename.',
+    joinDone: (total, files) => `cards-join: ${total} card(s) joined back into ${files}; the card files and directories are gone and cardsDir was removed from kanban.config.json. The generated output is byte-for-byte identical to before the join.`,
+    baselineFailed: (err) => `Could not produce the "before" baseline (gen.mjs failed first); nothing was written:\n${err}`,
+    cardsDirUnsafe: (v) => `The card directory name ${JSON.stringify(v)} cannot be used: it must be a plain directory name inside the kanban directory (no / or \\, and not . or ..). A value with a path in it writes the whole card store outside the kanban directory — gen and the CLI follow it and everything looks fine, while the board committed to git contains no cards at all.`,
+    writeFailed: (err) => `Something failed part-way through writing; rolled back (the board is exactly as it was) and no card was moved:\n${err}`,
+  },
+  cli: {
+    usage: () => `ddd — the kanban write CLI (v0.14.0, no dependencies)
+
+  node <plugin>/scripts/ddd.mjs <command> [args] [--dir <kanban dir>] [--json]
+
+Cards:
+  card new backlog|decision [--title "…"] [--tier 1] [--line C] [--session dev] [--from f.json]
+      Create a card. The script allocates the id and reserves it exclusively (with one file per
+      card it uses openSync 'wx', so whoever loses the race steps to the next number instead).
+      Template placeholders are written as <…>; fill them in. Fields from --from win over them.
+      A backlog card's tier: when --tier is omitted it takes whichever tier is most common among
+      the existing non-done cards (falling back to the first key in tiers when there are none).
+  card set <id> <field> <value> [--json]
+      Change one field. --json parses the value as JSON (use it for arrays and objects; the
+      report comes back as JSON too).
+      Checked: status is one of that card kind's statuses, date looks like YYYY-MM-DD, pr looks
+      like 12 / "#12" / "owner/repo#12", line is in config.lanes.ids, session is in
+      config.sessionTags. Array fields such as links/shots need --json. "id" and "order" cannot
+      be changed; an unrecognised field only warns.
+  card status <id> <status> [--no-note]
+      Change the status and append one timeline line "【date】status → …" (--no-note skips it).
+      Decision cards have no timeline field (the board does not render one), so only the status changes.
+  card note <id> "<text>"           append one timeline line "【date】text" (refused on decision cards)
+  card link <id> "<title>" <href>   append a link (href deduped); a link to this repository's
+                                    pull request is written into the pr field as well
+  card after <id> <ref>…            prerequisites: append (deduped). A ref is a card id
+                                    (BL-C74 / D89), a pull request (#266 / owner/repo#12),
+                                    or a release tag (v0.0.5).
+  card after <id> --rm <ref>        drop one (replace the whole list with
+                                    card set <id> after --json '[…]')
+      Whether a prerequisite is cleared is derived: the card reached a terminal status, the
+      pull request merged, or the tag turned up in release-manifest.json. A card ref must
+      exist on the board; self-references and cycles are refused here and fail gen too.
+      For "waiting on a person / something outside" — no machine test — keep using blockedOn.
+  card show <id> [--json]
+  card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
+  card history <id>                 git history of that card's file (needs one file per card)
+
+Acceptance pre-checks (v0.17.16, on boards with acceptanceTab; writes that one item of
+acceptance-manifest.json and leaves every other byte alone):
+  acc precheck <pr> <item> --result ok|bad|blocked --note "what was seen" [--env 5177+8003] [--by agent]
+               [--shot <path> [--caption "…"]]… [--at ISO] [--new-round [--round r2]]
+      Record a pre-check: an agent ran the item first and says what it saw. ok = matches the
+      expectation, bad = does not, blocked = could not be run. --shot can repeat; every file
+      must exist under the board directory (a bare name lives in shots/, anything with a / is
+      relative to the board root) and is appended to the item's shots, deduplicated by file.
+      --at defaults to the current UTC time. --new-round moves the previous round into the
+      history first. A pre-check never judges for a person: it is not counted in "judged N/M"
+      and does not bump the revision.
+  acc precheck <pr> <item> --clear   drop that item's precheck (its shots stay)
+  acc precheck <pr> --list           pre-check status of every item in that checklist
+  acc shots rotate <pr> <item> [--round r2] [--at ISO]
+      Move the current round (shots + precheck) to the end of shotsHistory; shots is emptied
+      and precheck removed. --round defaults to r1, r2… by history length; --at defaults to
+      that round's pre-check time, or now when it has none.
+
+Other:
+  audit [--json] [--session <session tag>]
+      Run the board audits read-only and print all three levels (blocking / broken / chores) in
+      full. On Stop the guard squeezes every chore category into one single line;
+      the prose lives here. Nothing is generated and no file is touched.
+      --session narrows only the per-line chores: long prose on older cards, cards
+      to settle, cards settled early, settle holds due, prerequisites cleared (--line is a
+      synonym, still accepted). The blocking and
+      broken levels, the backlog count, acceptance lists, branches and orphan demos still cover
+      the whole board — the guard blocks regardless of line, so narrowing those would report a
+      clean board that still stops the session.
+  export [--out f.json]             one object shaped like the manifests (a backlog and a
+                                    decisions section); goes to stdout unless --out is given
+  pr-sync […]                       hands over to pr-sync.mjs with the arguments unchanged
+
+Kanban directory: --dir > $CLAUDE_PROJECT_DIR/app/kanban > the current directory (if it holds a
+kanban.config.json). This command never commits — git add the card files yourself.`,
+    audit: {
+      head: (dir, session) => `Board audit: ${dir}${session ? ` (per-line chores limited to cards tagged session "${session}"; blocking, broken and the backlog count still cover the whole board)` : ''}\nRead-only: nothing is regenerated and no file is touched.`,
+      clean: () => 'All three levels are empty — nothing to deal with.',
+      sec: { block: (n) => `Blocking (${n}):`, broken: (n) => `Broken (${n}):`, chore: (n) => `Chores (${n}):` },
+      tail: (cmd) => `On Stop the guard squeezes all of those chore categories into one line; the prose above is what it stands for. To see it again: ${cmd}`,
+    },
+    unknownFlag: (flag) => `ddd: unknown flag ${flag}. See --help; to pass it as a plain argument, put a -- in front of it.`,
+    flagNeedsValue: (name) => `ddd: --${name} needs a value after it.`,
+    unknownCmd: (cmd) => `ddd: unknown command "${cmd}". Available: card … / acc … / audit / export / pr-sync; see --help.`,
+    acc: {
+      unknownCmd: (cmd) => `ddd acc: unknown subcommand "${cmd}". Available: precheck / shots rotate; see --help.`,
+      noManifest: (err) => `ddd acc: cannot read acceptance-manifest.json (missing, or not valid JSON); nothing was written: ${err}`,
+      prBad: (v) => `ddd acc: "${v}" is not a pull request number (#293 or 293).`,
+      noList: (n) => `ddd acc: no checklist in acceptance-manifest.json covers pull request #${n}; nothing was written.`,
+      noItem: (n, id, ids) => `ddd acc: the checklist for #${n} has no item "${id}"; nothing was written. It has: ${ids.join(' ') || '(none)'}`,
+      precheckUsage: () => 'ddd acc precheck: acc precheck <pr> <item> --result ok|bad|blocked --note "what was seen" [--shot <path> [--caption "…"]]…; --clear drops it; acc precheck <pr> --list shows the table.',
+      rotateUsage: () => 'ddd acc shots: acc shots rotate <pr> <item> [--round r2] [--at ISO].',
+      resultBad: (v) => `ddd acc precheck: --result "${v ?? ''}" is not one of ok (matches) / bad (does not) / blocked (could not run); nothing was written.`,
+      noteNeeded: () => 'ddd acc precheck: --note cannot be empty — say what was seen (a fact, not a verdict); nothing was written.',
+      atBad: (v) => `ddd acc: --at "${v}" is not an ISO time with a zone (e.g. 2026-09-24T01:12:00Z); nothing was written.`,
+      captionAlone: () => 'ddd acc precheck: --caption has to follow a --shot (it captions the shot before it).',
+      clearAlone: () => 'ddd acc precheck --clear: only drops the precheck; do not pass --result / --note / --shot with it.',
+      roundOnly: () => 'ddd acc precheck: --round only goes with --new-round (it names the round being moved).',
+      roundDup: (r) => `ddd acc: the history already has a round "${r}"; pick another name (or leave --round out to number it); nothing was written.`,
+      shotRemote: (v) => `ddd acc precheck: --shot "${v}" is a remote address — pre-check shots belong under the board directory (shots/pre-<PR>/ is the convention); nothing was written.`,
+      shotOutside: (v) => `ddd acc precheck: --shot "${v}" is outside the board directory — the board only renders pictures under it (shots/pre-<PR>/ is the convention); nothing was written.`,
+      shotMissing: (v, href) => `ddd acc precheck: --shot "${v}" resolves to ${href} under the board's path rule and there is no such file; nothing was written. A bare name lives in shots/, anything with a / is relative to the board root.`,
+      shotAccPrefix: (v) => `⚠ ddd acc precheck: "${v}" starts with acc- — that prefix belongs to screenshots people attach as acceptance feedback (gitignored by default and pruned after merge); put pre-check shots in shots/pre-<PR>/. Written anyway.`,
+      roundEarly: (at, r, tailAt) => `ddd acc: this round's time ${at} is earlier than the last round in history, "${r}" (${tailAt}) — history runs oldest first and the board reads the last one as the latest. Move it with acc shots rotate <pr> <item> --at <a time no earlier than ${tailAt}> first; nothing was written.`,
+      locked: (lock) => `ddd acc: another process is writing acceptance-manifest.json (the lock ${lock} was held for 10 seconds); nothing was written — try again shortly.`,
+      rotateEmpty: (n, id) => `ddd acc shots rotate: #${n} ${id} has neither shots nor a precheck in its current round, so there is nothing to move; nothing was written.`,
+      clearNone: (n, id) => `ddd acc precheck --clear: #${n} ${id} has no precheck; nothing was written.`,
+      cleared: (n, id) => `ddd acc precheck --clear: dropped the precheck of #${n} ${id} (its shots stay).`,
+      rotated: (n, id, round, k) => `ddd acc shots rotate: moved the current round of #${n} ${id} into history as "${round}" (${k} shot${k === 1 ? '' : 's'}); shots emptied, the precheck went with the round.`,
+      written: (n, id, result, added, round) => `ddd acc precheck: #${n} ${id} pre-check ${result}${added ? `, ${added} shot${added === 1 ? '' : 's'} appended` : ''}${round ? `; the previous round moved into history as "${round}" first` : ''}.`,
+      newRoundNothing: () => '(--new-round: this item has no previous shots or pre-check to move, so it was written straight away.)',
+      listHead: (n, title) => `#${n} · ${title}`,
+      listNone: () => '—',
+      listTail: (c) => `pre-check ${c.ok} ok · ${c.bad} bad · ${c.blocked} blocked · ${c.none} not pre-checked`,
+      listShots: (k, h) => `${k} shot${k === 1 ? '' : 's'}${h ? ` · ${h} earlier round${h === 1 ? '' : 's'}` : ''}`,
+    },
+    unknownCardCmd: (cmd, list) => `ddd card: unknown subcommand "${cmd}". Available: ${list.join(' / ')}; see --help.`,
+    kindBad: (kind) => `ddd card new: the first argument must be backlog or decision (got "${kind}").`,
+    readFailed: (what, err) => `ddd: cannot read ${what} (missing, or not valid JSON): ${err}`,
+    headNoArray: (file, key) => `ddd: ${file} has no ${key} array and cardsDir is not configured — check the manifest shape first.`,
+    headHasArray: (file, key, dir) => `ddd: kanban.config.json sets cardsDir = "${dir}", yet ${file} still has a ${key} array (the one-source-of-truth rule is broken). The cards live under ${dir}/; delete ${key} from the header file.`,
+    dirMissing: (rel) => `ddd: the card directory ${rel} is not there (relative to the kanban directory) — gen would fail too. Create it, or drop cardsDir from kanban.config.json.`,
+    cardParseBad: (rel, err) => `ddd: card file ${rel} is not valid JSON; nothing was written (gen fails on this too): ${err}`,
+    cardIdMismatch: (rel, id) => `ddd: card file ${rel} does not match the id "${id}" inside it; nothing was written — the filename is the card id (one source of truth).`,
+    cardNotFound: (id) => `ddd: no card "${id}" on this board. Check with card list (with one file per card, the filename is the id).`,
+    orderLocked: () => 'ddd: "order" is the original array index recorded by the split (gen sorts by it, then by id, and deletes it; what follows the array is the screenshot gallery grouping and the deep-link table — the backlog and decision panes are ordered by card date, newest first) and the CLI will not change it. To really move a card, edit its file and say why.',
+    idLocked: () => 'ddd: "id" is the card\'s identity — with one file per card it is the filename. Change it and the next gen fails hard (filename does not match the id), and the CLI refuses to run on a board with a bad card, so even the command that would change it back is locked out. To renumber a card: create a new one with card new and move the content, or stop gen and change the file and the id together by hand. Nothing was written.',
+    arrayField: (field) => `ddd: ${field} is an array field and a scalar was given — gen throws a TypeError while rendering it and the whole board fails to build. Write it as --json '[…]', e.g. card set <id> ${field} --json '[]'. Nothing was written.`,
+    statusBad: (v, list) => `ddd: status "${v}" is not one of this card kind's statuses. Available: ${list.join(' / ')}`,
+    dateBad: (v) => `ddd: the date "${v}" is malformed; it must be YYYY-MM-DD (the board compares them as strings, so the zero padding matters).`,
+    lineBad: (v, list) => `ddd: lane "${v}" is not in config.lanes.ids. Available: ${list.join(' / ')} (a card on several lanes is space-separated, e.g. "B C")`,
+    sessionBad: (v, list) => `ddd: session tag "${v}" is not in config.sessionTags. Available: ${list.join(' / ')} (several tags are space-separated, e.g. "dev release")`,
+    prBad: (v) => `ddd: the pr value ${v} is malformed. It must be 12 (a number in this repository) / "#12" / "owner/repo#12"; for a card spanning several, use --json '[227,230]'.`,
+    unknownField: (field, kind) => `⚠ ddd: "${field}" is not a field a ${kind} card knows, and it was written anyway — the board will not render it. If it is a typo, put it right with card set.`,
+    fromNotObject: (file) => `ddd --from: the top level of ${file} is not a JSON object (it should be one card's fields).`,
+    valueNotJson: (err) => `ddd --json: the value is not valid JSON: ${err}\n  (remember the single quotes in a shell, e.g. --json '["a","b"]')`,
+    writeFailed: (where, err) => `ddd: writing ${where} failed and the file is byte-for-byte as it was (temp file + rename, so a half-written file never lands where a card belongs): ${err}`,
+    noTiers: () => 'ddd card new backlog: tiers is empty in backlog-manifest.json, and gen requires every card\'s tier to be one of them — define at least one kind of work before creating cards.',
+    newExhausted: (prefix) => `ddd card new: the next 1000 "${prefix}N" after the current highest are all taken, so it stopped trying. Look for a batch of empty placeholder files in the card directory.`,
+    newDone: (id, file) => `ddd card new: ${id} → ${file}\n  The <…> in the template are placeholders; fill them in with card set (at least title / problem / approach).`,
+    newNoLine: () => '⚠ ddd card new: this card has no line — on a board with lanes it only shows under "all", so the default view will not show it. Set one with card set <id> line <lane>.',
+    tplTitle: () => '<one line saying what this card is for>',
+    tplProblem: () => '<what the user sees and why it is a problem; 2 sentences at most, no investigation notes>',
+    tplApproach: () => '<what to change, where, and at what cost; conclusion first, 1-3 lines>',
+    tplNote: () => '<timeline of decisions and progress, one entry per paragraph; append with ddd card note>',
+    tplQuestion: () => '<what has to be decided; one line>',
+    tplDecision: () => '<the call, once it is made; leave this line until then>',
+    setUsage: () => 'ddd card set: card set <id> <field> <value>; add --json when the value is an array or object.',
+    setDone: (id, field, value, file) => `ddd card set: ${field} of ${id} = ${value.length > 60 ? value.slice(0, 60) + '…' : value} → ${file}`,
+    statusUsage: () => 'ddd card status: card status <id> <status> [--no-note].',
+    statusDone: (id, from, to, noteField, noTimeline) => `ddd card status: ${id} ${from || '(empty)'} → ${to}` +
+      (noteField ? `, with one timeline line appended to ${noteField}` : noTimeline ? ' (decision cards have no timeline field, so only the status changed)' : ' (--no-note: no timeline line)'),
+    noteUsage: () => 'ddd card note: card note <id> "<one line of progress>".',
+    noteDone: (id, field, line) => `ddd card note: appended "${line}" to ${field} of ${id}`,
+    noteNoField: (id) => `ddd card note: ${id} is a decision card, and decision cards have no timeline field — anything written there is never rendered on the board. For progress use detail (card set ${id} detail "…"); to change the conclusion use decision.`,
+    linkUsage: () => 'ddd card link: card link <id> "<title>" <href>. The title says what the link is; the board renders the status (open / merged) itself.',
+    linkScheme: (href) => `ddd card link: the scheme in ${JSON.stringify(href)} is not allowed. Use http / https / mailto, or a path relative to the repository (docs/x.md, demos/y.html, #anchor). A javascript: link runs script on the board's own origin the moment someone clicks it, so it does not go into a card.`,
+    linkDup: (id, href) => `ddd card link: ${id} already has this link, nothing was written: ${href}`,
+    linkDone: (id, href, pr) => `ddd card link: ${id} + ${href}` + (pr ? `; pull request #${pr} went into the pr field too (the chip on the card only reads that one)` : ''),
+    depWords: DEP_WORDS_EN,
+    afterUsage: () => "ddd card after: card after <id> <ref>… (append, deduped) or card after <id> --rm <ref> (drop one).\n  A ref is a card id (BL-C74 / D89), a pull request (#266 / owner/repo#12) or a release tag (v0.0.5); replace the whole list with card set <id> after --json '[…]'.",
+    afterRmAlone: () => "ddd card after --rm: drops exactly one ref, so do not pass more after it (to swap the whole list: card set <id> after --json '[…]').",
+    afterRefBad: (v) => `ddd card after: the prerequisite ${v} is not a valid ref. Three shapes: a card id that exists on this board (BL-C74 / D89), a pull request (#266 / 266 / owner/repo#12), or a release tag starting with v (v0.0.5).`,
+    afterUnknownRef: (id) => `ddd card after: no card "${id}" on this board — a prerequisite pointing at a card that does not exist makes gen fail hard. Check with card list; for a pull request write #<number>, for a release a tag starting with v.`,
+    afterSelf: (id) => `ddd card after: ${id} cannot be its own prerequisite — that card could never start.`,
+    afterCycle: (path) => `ddd card after: adding this would close a cycle: ${path} — cards waiting on each other can never start. Nothing was written.`,
+    afterNotThere: (id, ref, cur) => `ddd card after --rm: ${id} has no prerequisite "${ref}"; nothing was written. It currently has: ${cur.length ? cur.join(' · ') : '(none)'}`,
+    afterDone: (id, list, file) => `ddd card after: prerequisites of ${id} = ${list.join(' · ') || '(none)'} → ${file}`,
+    afterRmDone: (id, ref, list) => `ddd card after --rm: dropped "${ref}" from ${id}; left with ${list.join(' · ') || '(none)'}`,
+    // 标签不与上一行那个原样打印的字段名撞:同名两行、值还不一样,读起来像脚本打重了
+    afterShow: (rows) => `  after (state): ${rows.join(' · ')}`,
+    showUsage: () => 'ddd card show: card show <id> [--json].',
+    showHead: (id, kind, file) => `${id}  (${kind} card · ${file})`,
+    listEmpty: () => 'ddd card list: no card matches those filters.',
+    listHead: () => 'id          status    lane  session   created     title',
+    listCount: (n) => `  — ${n} card(s)`,
+    historyUsage: () => 'ddd card history: card history <id>.',
+    historyUnsplit: () => 'ddd card history: this board is not split into one file per card, so a single card has no file of its own and no history of its own. Run scripts/cards-split.mjs first, or read git log -p over the whole manifest.',
+    historyFailed: (err) => `ddd card history: git log failed (not a git repository?): ${err}`,
+    historyEmpty: (id, file) => `ddd card history: ${id} (${file}) has never been part of a commit.`,
+    historyHead: (id, file) => `${id}  ${file}`,
+    exportWrote: (file) => `ddd export: written to ${file}`,
+  },
+  init: {
+    failRuntime: (runtime) => `--runtime supports claude|codex|both|portable only: ${runtime}`,
+    failCodexHooks: (mode) => `--codex-hooks supports project|plugin only: ${mode}`,
+    runtime: (stage, runtime) => `[${stage}] runtime: ${runtime}`,
+    portableScope: (stage) => `[${stage}] portable: initialize the shared board only; skip host hooks/skills/config. Configure any host adapter separately.`,
+    planPortableSmoke: '[plan] apply ends with a gen smoke run + shared audit (no blocking entries); no host guard runs',
+    applyAuditOk: '[apply] ✓ shared audit smoke passed (no blocking entries)',
+    failAudit: (err) => `shared audit smoke failed (nothing committed, lock cleared):\n${err}`,
+    failCodexInlineHooks: '.codex/config.toml already defines inline hooks; no files were written. Use --codex-hooks plugin for native plugin wiring, or manually consolidate inline hooks into .codex/hooks.json before retrying.',
+    failCodexFeatures: 'Cannot safely add a hooks switch to this .codex/config.toml features syntax; no files were written. Manually set [features] hooks = true, preserve existing settings, and retry.',
+    failCodexHookShape: '.codex/hooks.json and its hooks key must be objects; hook events must be arrays. Refusing to overwrite existing configuration.',
+    planAgentsAdd: '[plan] AGENTS.md: append DDD source/generated-file guidance and preserve existing text',
+    planAgentsOk: '[plan] AGENTS.md: DDD section already present, unchanged',
+    planCodexPlugin: (removed) => `[plan] Codex hooks: use the installed plugin hooks; remove ${removed} init-generated project handler(s), add no project hooks/config`,
+    planCodexHooks: (n, replaced) => `[plan] .codex/hooks.json: add ${n} DDD handler(s), replace ${replaced} old-install handler(s), preserve user hooks`,
+    planCodexFeature: '[plan] .codex/config.toml: add only the missing [features] hooks = true switch, preserve existing text',
+    planCodexFeatureOk: '[plan] .codex/config.toml: hooks switch already present, text unchanged',
+    codexDisabled: '[init] ⚠ Preserved hooks = false; Codex hooks remain disabled. Enable them manually to run the guard.',
+    codexTrust: '[init] The project .codex layer must be trusted. Open Codex /hooks to review and trust new or changed hooks. init does not bypass trust.',
+    applyAgents: '[apply] ± AGENTS.md (appended DDD guidance)',
+    applyCodexHooks: (n, replaced, removed) => `[apply] ± .codex/hooks.json (added ${n} DDD handler(s), replaced ${replaced} old-install handler(s), removed ${removed} project handler(s))`,
+    applyCodexFeature: '[apply] ± .codex/config.toml (added hooks switch)',
+    moveNoStage: 'mv (index preserved, manual commit)',
+    planNoCommit: '[plan] git: keep changes in the worktree without staging or committing (--no-commit or Codex runtime default)',
+    planDirtyNoCommit: '[plan] git: target already has changes; skip automatic commit to preserve user edits and the index',
+    applyNoCommit: '[apply] ✓ Changes remain in the worktree, unstaged and uncommitted',
+    applyDirtyNoCommit: '[apply] ⚠ Target already had changes; no automatic staging/commit. Review and commit manually.',
+
+    portCaveat: enPortCaveat,
+    scenario: {
+      greenfield: 'greenfield (brand-new project)',
+      installed: 'already initialized (kanban.config.json present; re-running apply = idempotently backfill mechanism files + merge scattered demos, never overwrites data)',
+      legacy: 'legacy install (manifests/mechanism files/demos without config; apply = mechanism takeover, zero data changes)',
+      scattered: 'scattered resources (loose HTML in the repo, no board)',
+    },
+    gitAction: {
+      tracked: 'git mv (history preserved)',
+      untracked: 'mv + git add (was never committed, no history to preserve)',
+      'no-git': 'plain mv (no git: no history to preserve, no commit rollback point)',
+    },
+    hookLabel: { stop: 'legacy Stop guard (claude-stop-hook.mjs)', ghpr: 'legacy gh-pr kanban reminder' },
+    portExhausted: (start) => `All 100 ports probed from ${start} are taken; specify one with --port`,
+    portNoteExisting: 'from existing kanban.config.json',
+    portNoteManual: 'given via --port (not probed, please verify yourself)',
+    portNoteProbed: (start) => `probed from ${start}, free right now. ${enPortCaveat}`,
+    mergeAbortStatus: (status, usable) =>
+      `Existing decisions-manifest statuses/groups do not contain "${status}"; pick a landing status with --stub-status first (options: ${usable.join(' / ') || '(none)'}). This apply is aborted.`,
+    skipIdentical: (name) => `byte-identical to demos/${name} (already-merged copy?), left in place — delete manually`,
+    skipMentioned: (name) => `decisions-manifest already mentions ${name}; no stub card created (file still moves)`,
+    skipSiblingConflict: (name) => `sibling asset ${name} collides with an existing merge target; --take-assets never overwrites — resolve manually`,
+    assetOutside: 'reference escapes the demo directory; moving it would change the relative layout',
+    assetMissing: 'referenced target does not exist (was already broken)',
+    assetSharedSkipped: 'still referenced by a skipped candidate; moving it would break that page in place — resolve manually',
+    // ---- merge selection (--only/--exclude/--remember; tag = scan|plan|apply) ----
+    selReasonExclude: (pat) => `--exclude hit ${pat}`,
+    selReasonOnly: 'not matched by --only',
+    selNoHit: (tag, pats) => `[${tag}] ⚠ pattern(s) matched no candidate: ${pats.join(' · ')} (check typos/case/repo-relative path with / separators; --remember never records unmatched patterns)`,
+    selKeep: (tag, rel) => `[${tag}] [merge] ${rel}`,
+    selSkip: (tag, rel, reason) => `[${tag}] [skip: ${reason}] ${rel}`,
+    selStats: (tag, kept, skipped) => `[${tag}] selection: ${kept} to merge / ${skipped} skipped (skipped items get no card and no move; still scattered — future scans will list them again)`,
+    selRemember: (tag, pats) => `[${tag}] --remember: matched pattern(s) ${pats.join(' · ')} will be written to config.skipScattered (future scans mark them [config-skip] and drop them as candidates)`,
+    selRememberHint: (tag) => `[${tag}] hint: .no-card-ok is not for this (it only waives cards for files already inside demos/); for a long-term scattered skip use --exclude … --remember to record config.skipScattered`,
+    applyRemember: (n, pats) => `[apply] ± kanban.config.json (skipScattered += ${n}: ${pats.join(' · ')})`,
+    scanConfigSkipped: (rel, pat) => `[scan] [config-skip] ${rel} (kanban.config.json skipScattered hit "${pat}", not a candidate)`,
+    // ---- plan ----
+    planTarget: (root) => `[plan] target: ${root}`,
+    planScenario: (label) => `[plan] scenario: ${label}`,
+    planVars: (brand, branch, ghRepo) =>
+      `[plan] vars: brand=${brand ?? '(missing, apply needs --brand)'} branch=${branch || '(empty)'} ghRepo=${ghRepo || '(empty)'}`,
+    planPort: (port, note) => `[plan] port: ${port} (${note})`,
+    planDirs: (dirs) => `[plan] directories to create:\n${dirs.map((d) => `  + ${d}`).join('\n')}`,
+    planCreates: (files) => `[plan] files to create (existing files are never overwritten):\n${files.map((f) => `  + ${f}`).join('\n')}`,
+    planNoCreates: '[plan] skeleton complete, nothing to create',
+    planNarrativeSkip: '[plan] path-manifest.json: not laid by default (the "decision path" tab simply will not appear); add --with-narrative for the narrative module',
+    planGitignoreMerge: (items) => `[plan] app/kanban/.gitignore exists; missing entries will be merged in (deduped): ${items.join(' · ')}`,
+    planGitattr: (file, lines) => `[plan] ${file} will gain ${lines.length} line(s) (generated board files: -diff merge=ours linguist-generated):\n${lines.map((l) => `  + ${l}`).join('\n')}`,
+    planGitattrOk: (file) => `[plan] ${file}: the generated-board-file lines are already there, skipping`,
+    planClaudeStale: (line) => `[plan] Note: the kanban section in CLAUDE.md predates 0.17.4 — the sentence about generated files being built on the mainline only is missing. You may have edited that section, so init will not rewrite it; please add this line at the end of it yourself:\n  ${line}`,
+    planMergeDriver: '[plan] will set the repository-local `git config merge.ours.driver true` (a merge=ours attribute needs the driver defined once per clone)',
+    planMergeDriverOk: '[plan] merge.ours.driver is already configured, skipping',
+    applyGitattr: (file, n) => `[apply] ± ${file} (appended ${n} line(s): generated board files marked as derived state)`,
+    applyMergeDriver: '[apply] ± git config merge.ours.driver true (repository-local)',
+    planAccFbIgnore: '[plan] Note: acceptanceFeedback is on in the config, and acceptance feedback shots stay out of git by default — add `app/kanban/shots/acc-*` to your .gitignore yourself (to keep one as evidence, rename it without the acc- prefix and put it in a card\'s shots field)',
+    planAccFbPin: '[plan] Note: acceptanceFeedback is on but no pin is configured, so anyone can sign the acceptance ledger under any name — to require one, write it as `"acceptanceFeedback": { "pin": "1111" }` in kanban.config.json (four digits; a new name is asked once and then joins app/kanban/acceptance-roster.json, while names already on the roster are never asked). init does not edit that file for you',
+    planServeStale: (have, want) => `[plan] Note: app/kanban/serve.py is ${have || 'an earlier version'} while the plugin template is ${want} — the newer write endpoints (v0.17.0 acceptance feedback) only exist in the newer one. To upgrade: check whether you have edited your copy, and if not, overwrite it from the plugin's templates/serve.py and restart the server`,
+    planSettingsAdd: (items) =>
+      `[plan] .claude/settings.json will gain permissions.deny entries (deduped, other keys untouched):\n${items.map((d) => `  + ${d}`).join('\n')}`,
+    planSettingsOk: '[plan] .claude/settings.json: every deny entry present, skipping',
+    planClaudeAdd: (marker) => `[plan] CLAUDE.md will gain section "${marker}"`,
+    planClaudeOk: '[plan] CLAUDE.md: marker section present, skipping',
+    planMergeDeferred: '[plan] ⚠ scattered demos found but no skeleton yet: this apply only lays the skeleton; re-run scan/plan/apply to merge once it is in place',
+    planGitRepo: '[plan] git: apply will add only the paths it touched and commit (rollback point)',
+    planGitNone: '[plan] git: target is not a git repo — no history to preserve, no commit rollback point',
+    planSmoke: '[plan] apply ends with a gen smoke run + guard smoke run (expect exit 0)',
+    legacyHeader: '[plan] —— legacy takeover (design §7, lower half) ——',
+    legacyDocs: (n) => `[plan] config.docs: mechanically extracted ${n} entries from the old gen.mjs REF_DOCS, written with config`,
+    legacyDocsNone: '[plan] ⚠ config.docs: no REF_DOCS extractable from the old gen.mjs, leaving empty — fill the refs doc table in kanban.config.json manually',
+    legacyHooks: (list) => `[plan] removing legacy kanban hook registrations (.claude/settings.json): ${list} — plugin hooks.json has taken over, avoiding double guards; other hooks/keys untouched`,
+    legacyHooksNone: '[plan] legacy hook registrations: none found (already removed or never registered), skipping',
+    legacyMech: (list) => `[plan] legacy mechanism files marked for retirement (not deleted, human decides): ${list}`,
+    legacyCards: (n, list) => `[plan] takeover leftovers become ${n} backlog card(s): ${list} — beyond that, manifests are untouched`,
+    legacyCardsNone: '[plan] takeover leftover cards: already present, none added',
+    mergeHeader: '[plan] —— scattered-demo merge (design §7) ——',
+    mergeAbort: (msg) => `[plan] ✗ abort condition: ${msg}`,
+    mergeMove: (from, to, act) => `[plan] merge ${from} → ${to} (${act})`,
+    mergeConflict: (from, to, act) => `[plan] conflict ${from} → ${to} (same name, different content; archived for human decision; ${act})`,
+    mergeAsset: (from, to, act) => `[plan] asset moves along ${from} → ${to} (${act})`,
+    mergeSibling: (from, to, act) => `[plan] sibling asset merge (--take-assets) ${from} → ${to} (${act})`,
+    mergeAssetReview: (demo, ref, note) => `[plan] ⚠ asset needs review: ${demo} references "${ref}": ${note}`,
+    mergeSkip: (from, reason) => `[plan] skip ${from}: ${reason}`,
+    mergeStubs: (n, status, list) => `[plan] ${n} stub card(s) → decisions-manifest (status=${status}, code=id): ${list}`,
+    mergeStubsNone: '[plan] stub cards: none needed',
+    mergeBroken: (n, list) => `[plan] ${n} predicted broken link(s) (policy B: listed, never rewritten): ${list}`,
+    mergeBrokenNone: '[plan] predicted broken links: none',
+    mergeCards: (n, list) => `[plan] leftovers become ${n} backlog card(s): ${list}`,
+    mergeCardsNone: '[plan] leftover cards: none needed',
+    // ---- apply ----
+    applyMtimeRace: (label) => `[apply] ⚠ ${label} was modified concurrently since the scan — re-read and recomputed (mtime optimistic lock)`,
+    applyStubs: (n, status) => `[apply] ± decisions-manifest.json (${n} stub card(s), status=${status})`,
+    applyLeftoverCards: (n) => `[apply] ± backlog-manifest.json (${n} leftover card(s))`,
+    applyGone: (from) => `[apply] ⚠ ${from} is gone (moved concurrently?), skipping`,
+    applyMove: (from, to, act) => `[apply] → ${from} ⇒ ${to} (${act})`,
+    applySkip: (from, reason) => `[apply] skip ${from}: ${reason}`,
+    applyBroken: (n) => `[apply] ${n} broken link(s) left unrewritten per policy B, backlog card filed`,
+    applyLegacyCards: (n) => `[apply] ± backlog-manifest.json (${n} takeover leftover card(s); manifests otherwise untouched)`,
+    applyHooksRemoved: (n, list) => `[apply] ± .claude/settings.json (removed ${n} legacy kanban hook registration(s): ${list})`,
+    applyMechKeep: (f) => `[apply] legacy mechanism file kept until cutover (not deleted): app/kanban/${f}`,
+    failSettingsJson: (rel, err) => `${rel} exists but is not valid JSON; refusing to merge (never overwrite): ${err}`,
+    failNeedBrand: 'greenfield needs --brand (a short token that feeds the board title etc., ~8 places)',
+    failNeedYes: 'non-interactive environment: add --yes to confirm',
+    confirmPrompt: '[apply] Execute the plan above? [y/N] ',
+    cancelled: 'cancelled',
+    failLock: (lockPath) => `${lockPath} already exists (another init in progress?). Verify no parallel init is running, delete the lock, and retry.`,
+    applyCreate: (rel) => `[apply] + ${rel}`,
+    applyGitignoreMerge: (n) => `[apply] ± app/kanban/.gitignore (merged ${n} ${n === 1 ? 'entry' : 'entries'}, deduped)`,
+    applySettings: (n) => `[apply] ± .claude/settings.json (merged ${n} deny ${n === 1 ? 'entry' : 'entries'})`,
+    applyClaudeMd: '[apply] ± CLAUDE.md (appended the token-protection section)',
+    applyGenOk: '[apply] ✓ gen smoke passed (index.html/shots.html/refs generated)',
+    failGen: (err) => `gen smoke failed (nothing committed, lock cleared):\n${err}`,
+    failGuard: (status, err) => `guard smoke failed, exit ${status}:\n${err}`,
+    failGuardOrphan: (out) => `guard smoke reported orphan demos (should not happen):\n${out}`,
+    applyGuardOk: '[apply] ✓ guard smoke passed (exit 0)',
+    commitMerge: (mv, cf, stubs, cards) =>
+      `chore(kanban): kanban-init apply (scattered merge: ${mv} demo(s) moved + ${cf} conflict(s) archived + ${stubs} stub card(s) + ${cards} leftover card(s))`,
+    commitLegacy: (hooks, cards) =>
+      `chore(kanban): kanban-init apply (legacy takeover: config generated + ${hooks} legacy hook(s) removed + ${cards} leftover card(s); zero data changes)`,
+    commitGreen: (brand, port) => `chore(kanban): kanban-init apply (greenfield skeleton, brand=${brand}, port=${port})`,
+    applyCommitted: (sha) => `[apply] ✓ rollback point committed: ${sha} (only paths touched this run)`,
+    applyNoChange: '[apply] ✓ zero changes (idempotent re-run, nothing to commit)',
+    applyNoGit: '[apply] ⚠ target is not a git repo: no history preserved, no commit rollback point — manual rollback only.',
+    applyMergeDeferred: '[apply] ⚠ scattered demos detected: only the skeleton was laid this round; run scan/plan to review the merge plan, then apply again to merge.',
+    applyDone: (port) => `[apply] Done. Port ${port} — ${enPortCaveat}`,
+    applyServe: (port) => `[apply] Serve the board: bash app/kanban/serve-kanban.sh (or python3 app/kanban/serve.py ${port})`,
+    // ---- scan ----
+    scanTarget: (root, isRepo, branch) => `[scan] target: ${root}${isRepo ? ` (git branch ${branch || '?'})` : ' (not a git repo)'}`,
+    scanScenario: (label) => `[scan] scenario: ${label}`,
+    scanConfig: (has) => `[scan] kanban.config.json: ${has ? 'present' : 'absent'}`,
+    scanDemo: (rel, size, gitSt, title, assets) =>
+      `[scan] demo ${rel} (${size}B, ${gitSt}) title="${title || '(none)'}" asset refs: ${assets.length ? assets.map((a) => `${a.ref}${a.exists ? '' : ' (missing)'}`).join(', ') : 'none'}`,
+    scanClaimed: (c) => `[scan] already mentioned by a manifest/config (treated as covered data, untouched): ${c}`,
+    scanFrag: (n) => `[scan] ${n} more .html file(s) without <html (fragments/templates), not demo candidates`,
+    scanSibling: (rel, size) => `[scan] sibling non-HTML asset (name only, content unread): ${rel} (${size}B)`,
+    scanBroken: (md, ref, demo) => `[scan] predicted broken link: ${md} via "${ref}" → ${demo} (breaks after merge; policy B: report only, never rewrite)`,
+    scanLegacyTraces: (manifests, mech, n) =>
+      `[scan] legacy install traces (manifests/mechanism files without config): manifests=[${manifests.join(', ')}] mech=[${mech.join(', ')}] demos/*.html=${n}`,
+    scanLegacyHooks: (list) => `[scan] legacy kanban hook registrations (.claude/settings.json): ${list} (removed on takeover apply)`,
+    scanHintGreen: '[scan] no scattered demos, no legacy install — greenfield path: plan to preview, apply to lay the skeleton',
+    scanHintScattered: '[scan] scattered-merge flow: apply lays the skeleton first → re-run scan/plan to review → apply again to merge',
+    scanHintInstalled: '[scan] skeleton in place, scattered demos pending merge: review the plan, then apply to merge',
+    scanHintLegacy: '[scan] legacy takeover: review plan → apply = generate config (docs extracted from old gen.mjs) + remove legacy hook registrations + leftover backlog cards; manifest/demo data untouched',
+    scanSummaryHead: '[scan] summary JSON:',
+  },
+}
+
+const tables = { zh, en }
+
+/** 直接按 lang 取表(init 用:--lang / config.lang / 'zh')。未知 lang 回落 zh。 */
+export function pickStrings(lang) {
+  return tables[lang] ?? tables.zh
+}
+
+/** @param {string} kanbanDir 看板目录(detect() 的返回值) */
+export function loadStrings(kanbanDir) {
+  let lang = 'zh'
+  try {
+    const cfg = JSON.parse(readFileSync(join(kanbanDir, 'kanban.config.json'), 'utf8'))
+    if (typeof cfg.lang === 'string' && tables[cfg.lang]) lang = cfg.lang
+  } catch {}
+  return tables[lang]
+}
+
+// ---- gen 硬失败文案(gen.mjs 专用)----
+// gen 读到 kanban.config.json 后按 config.lang 选表(genStrings);读 config **之前**的少数硬失败
+// 在 gen.mjs 内用中英合排字面量(那时还不知道 lang)。守卫把 gen 的 stderr 原样喂回,故须双语。
+// 动态值(out/type/category/lanes)由调用方先 JSON.stringify,保 zh 输出与历史逐字节一致。
+const genZh = {
+  cfgMissingBrand: () => 'kanban.config.json 缺 brand',
+  docMissing: (where, k) => `${where} 缺 ${k}`,
+  docOutNotBasename: (where, out) => `${where} out 须是纯文件名,不得含路径分隔符或 ..:${out}`,
+  docUnknownType: (where, type) => `${where} 未知 type ${type};省略 = markdown 渲染,"html" = 自包含 HTML 指南原样复制`,
+  docHtmlUnreadable: (where, path) => `${where} type:"html" 但 path 读不到(相对 repo 根):${path}`,
+  docHtmlNotPage: (where) => `${where} type:"html" 但内容不含 <html —— 不是自包含完整页面(片段/模板不收)`,
+  docMissingBaseDir: (where) => `${where} 缺 baseDir(可为 "" = repo 根)`,
+  docBadCategory: (where, cat, cats) => `${where} category 非法:${cat};合法值:${cats}`,
+  docOutConflict: (out, a, b) => `kanban.config.json docs out 同名冲突:${out}(${a} 与 ${b})—— refs/ 下互相覆盖`,
+  pathDocOutTaken: (out, src) => `pathTab:"docs" 要写 refs/${out},但 kanban.config.json docs 里已有条目占了这个 out(${src})—— 改掉那条的 out,或关掉 pathTab`,
+  taskUnknownIteration: (id, iter) => `task ${id} 引用未知迭代 ${iter}`,
+  taskUnknownStatus: (id, s) => `task ${id} 未知状态 ${s}`,
+  blUnknownStatus: (id, s) => `backlog ${id} 未知状态 ${s}`,
+  blStatusNotInGroups: (id, s) => `backlog ${id} 状态 ${s} 不在 groups`,
+  blUnknownTier: (id, t) => `backlog ${id} 未知 tier ${t}`,
+  blUnknownPriority: (id, p) => `backlog ${id} 未知优先级 ${p}`,
+  decUnknownStatus: (id, s) => `decision ${id} 未知状态 ${s}`,
+  decUnknownClosedKind: (id, k) => `decision ${id} 未知 closedKind ${k}`,
+  decClosedKindNeedsClosed: (id) => `decision ${id} closedKind 只配 closed 状态`,
+  decStatusNotInGroups: (id, s) => `decision ${id} 状态 ${s} 不在 groups`,
+  decMissingCode: (id) => `decisions-manifest entry ${id} 缺 code 字段`,
+  themeNotFile: () => 'theme.css 不是文件(是目录?)—— 换装源须是普通文件',
+  themeHasCloseTag: () => 'theme.css 不得含 </style>(内联注入会被截断)',
+  unknownToken: (n) => `未知主题令牌 ${n}`,
+  unknownRefToken: (n) => `未知 refs 主题令牌 ${n}`,
+  lanesInvalid: (v) => `kanban.config.json lanes 非法:${v};合法值:null 或对象 { "ids": [...], ... }(见 kanban-init SKILL)`,
+  accManifestMissing: (err) => `kanban.config.json 开了 acceptanceTab,但看板目录的 acceptance-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/acceptance-manifest.json;不想开就把 acceptanceTab 去掉)`,
+  relManifestMissing: (err) => `kanban.config.json 开了 releaseTab,但看板目录的 release-manifest.json 读不到或不是合法 JSON:${err}(模板见 plugin templates/manifests/release-manifest.json,内容由 scripts/pr-sync.mjs 填;不想开就把 releaseTab 去掉)`,
+  decArchiveNeedsBacklogArchive: () => 'kanban.config.json 开了 decisionArchive,但没开 backlogArchive —— 决策卡归档住在归档 tab 里,归档 tab 由 backlogArchive 造,本次按关处理(要用就把 backlogArchive 也设成 true)',
+  accFeedbackNeedsTab: () => 'kanban.config.json 开了 acceptanceFeedback,但没开 acceptanceTab —— 反馈是挂在验收行上的,没有验收 tab 就无处可挂,本次按关处理(要用就把 acceptanceTab 也设成 true)',
+  accFbBadPin: (v) => `kanban.config.json 的 acceptanceFeedback 写成了对象,但 pin 不是 4 位数字字符串:${v} —— 两种写法只有两种:true(不要口令,谁都能署名)或 { "pin": "1111" }(新名字要这 4 位才进验收名册)。不硬报错就得悄悄当「没配口令」,而那正是人以为配上了的那一档`,
+  relStagesNoDev: () => 'release-manifest.json 的 stages 里没有 id 为 "dev" 的段:dev(开着的 PR)是必备段,宿主可以只列两段但不能省掉 dev(缺 test = 合了即发,是允许的)',
+  cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json 配了 cardsDir = "${dir}"(一卡一文件),${file} 里却还留着 ${key} 数组 —— 两处都能写的字段迟早对不上。卡的真源是 ${dir}/ 下的文件,把头文件的 ${key} 删掉(或跑 scripts/cards-join.mjs 合回单文件并去掉 cardsDir)`,
+  cardsDirMissing: (rel) => `kanban.config.json 配了 cardsDir,但卡目录 ${rel} 不在(相对看板目录)—— 建目录并把卡放进去,或把 cardsDir 去掉退回单文件形制`,
+  cardParseFail: (rel, err) => `卡文件 ${rel} 不是合法 JSON:${err}`,
+  cardIdMismatch: (rel, id) => `卡文件 ${rel} 的文件名与卡里的 id「${id}」对不上 —— 文件名就是卡号(一个真源),改文件名或改 id`,
+  cardDupId: (id, a, z) => `卡 id「${id}」出现了两次:${a} 与 ${z} —— 深链、截图廊归组、懒加载定位全按 id 走,重复即互相顶掉`,
+  afterNotArray: (id) => `卡 ${id} 的 after 不是数组 —— 形制是 ["BL-C74", "#266", "v0.0.5"](写法见 README「前置依赖」)。悄悄当「没写」处理会让人以为写上了,而板上一个字都不出现`,
+  afterUnknownRef: (id, ref) => `卡 ${id} 的 after 里「${ref}」在板上找不到 —— 前置只认三种写法:卡号(板上存在的 id)、PR(#266 / owner/repo#12)、版本 tag(v 开头,如 v0.0.5)。核一下卡号,或改成 PR / 版本写法`,
+  afterCycle: (path) => `after 成环:${path} —— 互相等着的卡谁都开不了工。拆掉环上任意一条 after(要表达「等人 / 等外部」用 blockedOn 那句自由文本)`,
+}
+const genEn = {
+  cfgMissingBrand: () => 'kanban.config.json is missing "brand"',
+  docMissing: (where, k) => `${where} is missing ${k}`,
+  docOutNotBasename: (where, out) => `${where} "out" must be a bare filename, no path separators or ..: ${out}`,
+  docUnknownType: (where, type) => `${where} unknown type ${type}; omit for markdown rendering, "html" copies a self-contained HTML guide verbatim`,
+  docHtmlUnreadable: (where, path) => `${where} has type:"html" but its path is unreadable (relative to the repo root): ${path}`,
+  docHtmlNotPage: (where) => `${where} has type:"html" but the content has no <html>, so it is not a self-contained page (fragments and templates are rejected)`,
+  docMissingBaseDir: (where) => `${where} is missing baseDir (may be "" for the repo root)`,
+  docBadCategory: (where, cat, cats) => `${where} has an invalid category: ${cat}; valid values: ${cats}`,
+  docOutConflict: (out, a, b) => `kanban.config.json docs "out" collision: ${out} (${a} vs ${b}); the copies would overwrite each other under refs/`,
+  pathDocOutTaken: (out, src) => `pathTab:"docs" writes refs/${out}, but a kanban.config.json docs entry already claims that out (${src}); rename that entry's out or turn pathTab off`,
+  taskUnknownIteration: (id, iter) => `task ${id} references unknown iteration ${iter}`,
+  taskUnknownStatus: (id, s) => `task ${id} has unknown status ${s}`,
+  blUnknownStatus: (id, s) => `backlog ${id} has unknown status ${s}`,
+  blStatusNotInGroups: (id, s) => `backlog ${id} status ${s} is not in groups`,
+  blUnknownTier: (id, t) => `backlog ${id} has unknown tier ${t}`,
+  blUnknownPriority: (id, p) => `backlog ${id} has unknown priority ${p}`,
+  decUnknownStatus: (id, s) => `decision ${id} has unknown status ${s}`,
+  decUnknownClosedKind: (id, k) => `decision ${id} has unknown closedKind ${k}`,
+  decClosedKindNeedsClosed: (id) => `decision ${id} closedKind requires status "closed"`,
+  decStatusNotInGroups: (id, s) => `decision ${id} status ${s} is not in groups`,
+  decMissingCode: (id) => `decisions-manifest entry ${id} is missing the code field`,
+  themeNotFile: () => 'theme.css is not a regular file (a directory?); the theme source must be a plain file',
+  themeHasCloseTag: () => 'theme.css must not contain </style> (inline injection would be truncated)',
+  unknownToken: (n) => `unknown theme token ${n}`,
+  unknownRefToken: (n) => `unknown refs theme token ${n}`,
+  lanesInvalid: (v) => `kanban.config.json lanes is invalid: ${v}; valid values: null, or an object { "ids": [...], ... } (see the kanban-init skill)`,
+  accManifestMissing: (err) => `kanban.config.json enables acceptanceTab, but the board's acceptance-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/acceptance-manifest.json; drop acceptanceTab to turn the tab off)`,
+  relManifestMissing: (err) => `kanban.config.json enables releaseTab, but the board's release-manifest.json is unreadable or not valid JSON: ${err} (template: the plugin's templates/manifests/release-manifest.json, filled in by scripts/pr-sync.mjs; drop releaseTab to turn the tab off)`,
+  decArchiveNeedsBacklogArchive: () => 'kanban.config.json enables decisionArchive but not backlogArchive — archived decisions live in the archive tab, and that tab exists only with backlogArchive. Treated as off for this run (set backlogArchive to true as well to use it)',
+  accFeedbackNeedsTab: () => 'kanban.config.json enables acceptanceFeedback but not acceptanceTab — shared feedback hangs off acceptance checklist rows, so with no acceptance tab there is nothing to hang it on. Treated as off for this run (set acceptanceTab to true as well to use it)',
+  accFbBadPin: (v) => `kanban.config.json writes acceptanceFeedback as an object, but its "pin" is not a 4-digit string: ${v} — there are exactly two shapes: true (no pin, anyone may sign) or { "pin": "1111" } (a new name needs those four digits to enter the acceptance roster). Anything else would have to be read as "no pin configured", which is precisely the case where someone believes one is`,
+  relStagesNoDev: () => 'release-manifest.json has no stage with id "dev": dev (open pull requests) is required. A board may list only two stages, but not drop dev (dropping test — "merged means shipped" — is fine)',
+  cardsDirHeadHasItems: (file, key, dir) => `kanban.config.json sets cardsDir = "${dir}" (one file per card), yet ${file} still has a ${key} array — two writable places for the same field drift apart sooner or later. The cards live under ${dir}/; delete ${key} from the header file (or run scripts/cards-join.mjs to go back to single files and drop cardsDir)`,
+  cardsDirMissing: (rel) => `kanban.config.json sets cardsDir, but the card directory ${rel} is not there (relative to the kanban directory) — create it and put the cards in, or drop cardsDir to stay on single-file manifests`,
+  cardParseFail: (rel, err) => `card file ${rel} is not valid JSON: ${err}`,
+  cardIdMismatch: (rel, id) => `card file ${rel} does not match the id "${id}" inside it — the filename is the card id (one source of truth); rename the file or change the id`,
+  cardDupId: (id, a, z) => `card id "${id}" appears twice: ${a} and ${z} — deep links, screenshot grouping and lazy-pane routing all work by id, so duplicates shadow each other`,
+  afterNotArray: (id) => `card ${id} has an "after" that is not an array — the shape is ["BL-C74", "#266", "v0.0.5"] (see "prerequisites" in the README). Treating it silently as "not written" would leave you believing it was recorded while the board says nothing`,
+  afterUnknownRef: (id, ref) => `card ${id} lists "${ref}" in after, but nothing on the board matches it — a prerequisite is one of three things: a card id that exists on this board, a pull request (#266 / owner/repo#12), or a release tag (starts with v, e.g. v0.0.5). Check the id, or write it as a PR / release`,
+  afterCycle: (path) => `after forms a cycle: ${path} — cards waiting on each other can never start. Break the cycle by dropping one of those after entries (use the free-text blockedOn for "waiting on a person / something outside")`,
+}
+export function genStrings(lang) { return lang === 'en' ? genEn : genZh }
+
+// 多轮导航的用户文案与校验错误。
+export function journeyStrings(lang) {
+  return lang === 'en' ? {
+    open: 'Open demo', currentResources: 'Current resources', overview: 'Decision and progress', originalRecords: 'Original card records', screenshots: 'Screenshots',
+    decision: 'Current decision', progress: 'Development progress', recent: 'Recent changes',
+    current: 'Current design', history: 'Phase history', development: 'Development records',
+    resources: 'Original links and screenshots', originalDemo: 'Original demo', board: 'Back to board',
+    navigation: 'Iteration navigation', acceptance: 'Related acceptance checklists',
+    source: 'Current design, phase history, and development records. Original demos and evidence remain available.',
+    invalid: (id, field) => `Card ${id} has invalid journey.${field}; see the journey contract in README.`,
+  } : {
+    open: '打开 demo', currentResources: '现行资料', overview: '决定与进度', originalRecords: '原始卡片记录', screenshots: '截图',
+    decision: '现行决定', progress: '开发进度', recent: '最近变化',
+    current: '现行方案', history: '阶段历史', development: '开发记录',
+    resources: '原始链接与截图', originalDemo: '原始 demo', board: '返回看板',
+    navigation: '迭代导航', acceptance: '相关验收清单',
+    source: '现行方案、阶段历史与开发记录；原始 demo 与证据继续保留。',
+    invalid: (id, field) => `卡 ${id} 的 journey.${field} 非法;形制见 README 的 journey 契约。`,
+  }
+}

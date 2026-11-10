@@ -1,0 +1,23 @@
+{
+  "$comment": "Backlog 看板真相源。每条 item 一张卡。status: ready|blocked|deferred|done;priority: high|med|low;tier 只表工作类型(默认空,按需自定义)。改完跑 gen 重生成。",
+  "instance": {
+    "label": "{{BRAND}} · Backlog",
+    "branch": "{{BRANCH}}",
+    "ghRepo": "{{GH_REPO}}"
+  },
+  "statuses": {
+    "ready": "可立即做",
+    "blocked": "等外部",
+    "deferred": "推后",
+    "done": "已落地"
+  },
+  "priorities": { "high": "高", "med": "中", "low": "低" },
+  "tiers": {},
+  "groups": [
+    { "id": "ready", "title": "Ready 可立即做", "detail": "" },
+    { "id": "blocked", "title": "Blocked 等外部", "detail": "" },
+    { "id": "deferred", "title": "Deferred 推后", "detail": "" },
+    { "id": "done", "title": "Done 已落地", "detail": "" }
+  ],
+  "items": []
+}

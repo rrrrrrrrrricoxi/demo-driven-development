@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.mjs\"",
+            "timeout": 60,
+            "statusMessage": "看板守卫:检查孤儿 demo…"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/merge-gate.mjs\"",
+            "timeout": 15,
+            "statusMessage": "看板守卫:合并前查分支带没带看板改动…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/ghpr-remind.mjs\"",
+            "timeout": 15,
+            "statusMessage": "看板守卫:PR 后推进卡状态提醒…"
+          }
+        ]
+      }
+    ]
+  }
+}
