@@ -80,7 +80,7 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
   a { color: var(--accent); text-decoration: none; }
   a:focus-visible,summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   /* 原 demo 的 44px 返回栏与 c176 .acts 控件;不另加一层页面标题或卡框。 */
-  .backbar { position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 60; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--bg); border-bottom: 1px solid var(--line-strong); font-size: 13px; }
+  .backbar { position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 60; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--bg); border-bottom: 1px solid var(--line-strong); font: 13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
   .backbar > a { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px 11px; background: var(--card); white-space: nowrap; }
   .backbar > a:hover { border-color: var(--accent); }
   .ctx { color: var(--mut); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -88,10 +88,11 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
   .journey-nav a { padding: 4px 10px; border-radius: 7px; color: var(--mut); white-space: nowrap; font-size: 12.5px; }
   .journey-nav a:hover { background: var(--card); }
   .journey-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
-  .acts { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  .acts { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; font: 15px/1.62 var(--font-ui,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif); }
   .acts a,.acts button,.acts > details > summary { font: inherit; cursor: pointer; font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--card); color: var(--ink); text-decoration: none; }
   .acts a:hover,.acts button:hover,.acts > details > summary:hover { border-color: var(--accent); color: var(--accent-deep); }
   .acts .pri { border-color: var(--accent); color: var(--accent-deep); }
+  .acts .themetoggle { font-size: 13px !important; padding: 4px 8px !important; opacity: .8; }
   .journey-tools { margin-left: auto; flex-wrap: nowrap; flex-shrink: 0; }
   .journey-tools > a { white-space: nowrap; }
   .journey-tools details > summary { list-style: none; white-space: nowrap; }
@@ -132,7 +133,7 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
   .wtshots span { display: block; margin-top: 3px; }
   footer { color: var(--mut); font-size: 12.5px; margin-top: 24px; }
   @media (max-width:800px) { .ctx { display:none; } .backbar { gap:6px; padding:0 8px; } .journey-nav a { padding:4px 7px; } }
-  @media (max-width:600px) { .record-nav { display:none; } .record-content { margin-left:0; padding-left:16px; padding-right:16px; } .backbar > a { font-size:12px; padding:5px 7px; } .journey-nav { gap:0; } .journey-nav a { font-size:12px; padding:4px 5px; } .journey-tools > a,.journey-tools #themetoggle { display:none; } .journey-tools > details > summary { font-size:12px; padding:4px 6px; } .original-records dl { grid-template-columns:minmax(0,1fr); } }
+  @media (max-width:600px) { .record-nav { display:none; } .record-content { margin-left:0; padding-left:16px; padding-right:16px; } .journey-nav { gap:0; } .journey-nav a { font-size:12px; padding:4px 5px; } .journey-tools > a,.journey-tools #themetoggle { display:none; } .original-records dl { grid-template-columns:minmax(0,1fr); } }
   ${JOURNEY_SUMMARY_CSS}${appearance.css || ''}
 </style>${appearance.theme || ''}</head><body>
 <!-- ddd-gen v${esc(version)} -->
