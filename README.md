@@ -26,7 +26,7 @@ This plugin packages the SEE-IT half as a workflow:
 
 The plugin has no npm dependencies: plain Node, plus one optional Python file server.
 
-The adapters call a [shared hook API](docs/hook-core.md). New hosts can reuse its rules, but each host still needs its own event, permission, and lifecycle integration.
+The adapters call a [shared hook API](docs/hook-core.md). Shared CLI commands and journey audits also work without a host session. Use [portable init and the CLI](docs/hook-core.md#cli-use-without-a-host-adapter) for explicit board work, or follow the [host integration contract](docs/hook-core.md#adding-another-host) to map lifecycle events. Contract tests cover the shared rules and existing Claude, Codex, and Pi adapter mappings; they do not establish support for an untested host.
 
 The rest is optional and gets a section each below: `docSegments`, `themeColors` (with `theme.css`), `sessionTags`, `lanes`, `darkMode`, `lazyTabs`, `acceptanceTab`, `acceptanceFeedback` (with its optional roster pin), `releaseTab`, `richText`, `backlogArchive`, `decisionArchive`, `backlogSort`, `wip`, `cardsDir`, `stickyTabs`, `tabRail`, `overviewTab`, `pathTab`.
 

@@ -1,15 +1,16 @@
-// 跨宿主包与发版门的实测:不改真实安装,不联网发版。Codex CLI 若在场,只用本进程的配置覆盖验发现。
+// 跨宿主包与发版门的实测:不改真实安装,不联网发版。Codex CLI 若在场,用独立配置与 commit 导出包验发现。
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validatePackage, releasePlan } from '../scripts/release.mjs'
 import { readPluginVersion } from '../scripts/lib-version.mjs'
+import { packageCodex } from '../scripts/package-codex.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const WORK = mkdtempSync(join(tmpdir(), 'ddd-package-'))
+const WORK = mkdtempSync(join(realpathSync(tmpdir()), 'ddd-package-'))
 let passed = 0
 function check(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`) }
 const read = (path) => JSON.parse(readFileSync(path, 'utf8'))
@@ -25,7 +26,7 @@ function fixture(name) {
 }
 
 function git(root, args) {
-  const result = spawnSync('git', ['-c', 'user.name=DDD fixture', '-c', 'user.email=fixture@example.invalid', ...args], { cwd: root, encoding: 'utf8' })
+  const result = spawnSync('git', ['-c', 'user.name=DDD fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], { cwd: root, encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr)
   return result.stdout.trim()
 }
@@ -101,18 +102,31 @@ try {
     git(root, ['add', 'change.txt']); git(root, ['commit', '-m', 'change'])
     assert.throws(() => releasePlan(root), /another commit/)
   })
-  const cli = spawnSync('codex', ['--version'], { encoding: 'utf8' })
-  if (cli.status === 0) {
+  const codexHome = join(WORK, 'codex-home')
+  mkdirSync(codexHome)
+  // 部分宿主的启动脚本用 HOME 定位自身;只隔离 Codex 状态,保留启动脚本所需的 HOME。
+  const env = { ...process.env, CODEX_HOME: codexHome }
+  const cli = spawnSync('codex', ['--version'], { cwd: WORK, env, encoding: 'utf8', timeout: 15000 })
+  if (cli.error?.code !== 'ENOENT') {
+    assert.equal(cli.status, 0, `Codex CLI version check failed: ${cli.error?.message || cli.stderr}`)
     check('installed Codex discovers the native package without installation', () => {
+      const source = fixture('native-source')
+      git(source, ['init', '-b', 'main']); git(source, ['add', '.']); git(source, ['commit', '-m', 'native discovery fixture'])
+      const { name, version } = validatePackage(source)
+      const marketplace = 'ddd-package-validation', out = join(WORK, 'native-export')
+      packageCodex({ out, source, ref: git(source, ['rev-parse', 'HEAD']), marketplace })
       const result = spawnSync('codex', ['plugin', 'list',
         '-c', 'marketplaces.ddd-validation.source_type="local"',
-        '-c', `marketplaces.ddd-validation.source=${JSON.stringify(ROOT)}`,
-        '--marketplace', 'demo-driven-development', '--available', '--json'], { cwd: ROOT, encoding: 'utf8' })
-      assert.equal(result.status, 0, result.stderr)
-      const data = JSON.parse(result.stdout), item = data.available.find((plugin) => plugin.name === 'demo-driven-development')
-      assert.equal(item.version, readPluginVersion())
-      assert.equal(item.source.path, ROOT)
-      assert.equal(item.pluginId, 'demo-driven-development@demo-driven-development')
+        '-c', `marketplaces.ddd-validation.source=${JSON.stringify(out)}`,
+        '--marketplace', marketplace, '--available', '--json'], { cwd: WORK, env, encoding: 'utf8', timeout: 15000 })
+      assert.equal(result.status, 0, `Codex discovery failed: ${result.error?.message || result.stderr}`)
+      const data = JSON.parse(result.stdout), item = data.available?.find((plugin) => plugin.pluginId === `${name}@${marketplace}`)
+      assert.ok(item, `Codex did not discover the exported package ${name}@${marketplace}:\n${result.stdout}\n${result.stderr}`)
+      assert.deepEqual(data.installed, [], 'isolated discovery must not use a real installation')
+      assert.equal(item.version, version)
+      assert.equal(item.source.path, out)
+      assert.equal(item.marketplaceName, marketplace)
+      assert.equal(item.installed, false)
     })
   } else console.log('  · Native Codex discovery skipped: CLI is not installed; package checks still run.')
   console.log(`Codex package: ${passed} groups passed`)

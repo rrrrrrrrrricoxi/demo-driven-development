@@ -9,6 +9,13 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.6] - 2026-11-11
+
+- Add `init --runtime portable` for shared boards and CLI workflows without host configuration or automatic hook installation.
+- Verify journey rules through the shared core and the existing Claude Code, Codex, and Pi adapters, while documenting the event contract and unverified host boundaries.
+- Export native Codex packages from explicit Git commits and check them against their recorded source with an optional external commit pin. Preserve canonical source manifests and keep compatibility changes in the exporter.
+- Check release packages in CI and document source-first development, runtime provenance, and preservation of active Codex caches.
+
 ## [0.19.5] - 2026-11-10
 
 - Define journey summaries around product decisions, implementation stage, and meaningful changes. Keep routine verification evidence in development records and preserve requirements specific to each card.

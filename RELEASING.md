@@ -10,6 +10,8 @@ How a new version is cut. Everything here runs from a clean checkout of `main`.
 2. In `CHANGELOG.md`, move the items under `## [Unreleased]` into a new
    `## [X.Y.Z] - <date>` section.
 3. Run `npm test`. CI runs it on every push and PR; it must be green.
+   CI also runs `node scripts/release.mjs --check` to validate package
+   manifests, skills, marketplaces, and bundled hook resources.
 4. Commit the implementation, manifests, and `CHANGELOG.md` together in a
    feature branch. Open a PR, wait for CI, and merge it. Update a clean `main`
    checkout to the merged commit before tagging. Do not publish an unmerged
@@ -63,11 +65,39 @@ codex plugin add demo-driven-development@demo-driven-development
 ```
 
 Review changed hooks through Codex `/hooks`; a plugin update does not grant
-hook trust. Start a fresh session to load the updated skills. Portable checkout
-users update their checkout and rerun init with `--runtime codex`; project hook
-mode refreshes its own absolute paths and preserves unrelated hooks. Codex
+hook trust. A user must review and approve any requested hook trust. When
+updating the plugin during an active Codex session, preserve an exact copy of
+the currently loaded cache before `codex plugin add`. If the update removes
+that cache, restore it byte-for-byte, verify its hook entry, and retain it
+until no session uses it. Start a fresh session to load the updated skills.
+Source-checkout users update their checkout and rerun init with the selected
+runtime. Codex project hook mode refreshes its own absolute paths and preserves
+unrelated hooks; `--runtime portable` initializes only shared board resources. Codex
 does not forward stale hooks through Claude's installation metadata. Version
 stamps still prevent older generators from overwriting newer boards.
+
+## Runtime package provenance
+
+Portable and project runtime packages must come from the canonical GitHub
+source repository at an explicit commit. Record the source commit and version
+in package provenance, along with the included snapshot and each compatibility
+adaptation. The native Codex exporter reads committed Git blobs only; dirty and
+untracked worktree files are excluded. Validate the generated package before use. An unpublished branch
+can support local validation, but it is not a published release and must not be
+presented as one. Keep compatibility changes in reviewable source changes;
+never hand-edit an installed cache or generated package.
+
+```sh
+node scripts/package-codex.mjs --out <new-external-directory> --ref <reviewed-commit>
+node scripts/package-codex.mjs --check <new-external-directory> --expect-commit <reviewed-commit>
+```
+
+The native exporter does not install or trust hooks. Its recorded provenance is
+not a signature and does not establish that a commit has been pushed or released.
+Check the GitHub PR or release separately. Exported packages retain the canonical
+manifest in the source repository; only the native output omits it.
+
+## Older active sessions
 
 Since 0.16.2 that no longer has to be followed by a session restart for the
 Stop hook's sake: a session still running the old hook sees that the board's

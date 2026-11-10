@@ -7,6 +7,8 @@ description: Guide feature work in a project with the demo-driven kanban. Distin
 
 固化 demo 驱动工作节奏:**机制归 plugin、数据归项目**。仅当项目已装看板(存在 `app/kanban/kanban.config.json`)时适用。plugin 脚本使用 `node <plugin>/scripts/...`;从当前 skill 路径 `<plugin>/skills/ddd-workflow/SKILL.md` 可解析 plugin 根目录,不要依赖某个宿主提供的 plugin-root 环境变量。
 
+改进 DDD 机制本身时,先用源码 manifest 的 repository 与运行包 provenance 定位来源 commit,在源仓库 feature 分支实现和验证;不手改已安装缓存或项目内生成的运行包。通用规则留在共享核心,宿主差异放适配器,项目业务数据留在项目。按用户授权完成上游 PR/CI 同步,并分别报告源码 commit、上游链接、合并/发布状态与现场安装版本,不要把「本地已修」当成「上游已更新」。源码与打包流程见 plugin 根 `CONTRIBUTING.md`、`RELEASING.md`;接入新宿主时读 `docs/hook-core.md`。
+
 ## 第 0 步:场景自检(动手前先答,两问)
 
 接活先答两问,并把判断对用户报一行(如「SEE-IT:5 个布局方向,得并排看」)——记录本身就是刹车,但只报一行,别造新仪式:

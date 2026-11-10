@@ -22,6 +22,36 @@ encoding. `claude-forward.mjs` contains Claude installation lookup and stale-cac
 forwarding. Neither module belongs to the shared rule interface. The existing
 hook script paths remain available for installed configurations.
 
+## CLI use without a host adapter
+
+The shared scripts need Node.js 18 or later. They do not require a Claude,
+Codex, or Pi session. Resolve `<plugin>` from the package location and pass the
+board directory explicitly when the caller's working directory is uncertain:
+
+```sh
+node <plugin>/scripts/ddd.mjs audit --dir <kanbanDir> --json
+node <plugin>/scripts/ddd.mjs card show <id> --dir <kanbanDir> --json
+node <plugin>/scripts/gen.mjs --dir <kanbanDir>
+```
+
+`audit --json` reports `block`, `broken`, and `chore` arrays. A successful audit
+command can return exit code 0 with findings in those arrays. Inspect the
+findings; exit code 0 does not mean the board is clean or authorize a tool call.
+An explicit `gen` writes generated output. Run it on the project's main board
+branch and keep source-writing sessions coordinated.
+
+For a new board without Claude or Codex configuration, use portable init:
+
+```sh
+node <plugin>/scripts/init.mjs plan --dir <projectRoot> --brand Example --runtime portable
+node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand Example --runtime portable --yes --no-commit
+```
+
+Portable init prepares board data without installing a host adapter. Loading
+skills, running audits, and scheduling generation remain the caller's work.
+CLI availability does not establish lifecycle integration with that caller's
+host. Existing boards can use the CLI and shared API without running init again.
+
 ## Request
 
 ```js
@@ -110,3 +140,63 @@ working directory, subprocess output, and exit status. Codex calls the core
 directly and never imports the forwarding module.
 
 Run `npm test` to check the existing hook behavior and the shared API contract.
+
+## Journey rules and adapter conformance
+
+Journey validation, summary hints, and iteration-history suggestions live in
+shared modules. Card writes call `journey-summary.mjs`; both `ddd audit` and
+settlement call the same collectors in `audits.mjs`. They do not select rules
+by host name.
+
+`journeySummary` flags a few fixed verification-report phrases in the three
+summary fields. `journeySuggested` identifies a nonterminal card without a journey
+that has a demo, more than 800 characters in a supported history field, and at
+least three explicit dated headings. Both are advisory chores. They preserve
+card data and do not request a corrective continuation. Other findings on the
+same board can still block settlement. These heuristics cannot determine a
+product requirement, choose the current design, or approve a decision. The
+writing session must check the source evidence before organizing a card.
+
+`tests/harness-contract.mjs` uses the same synthetic card data in English and
+Chinese to check the following boundaries:
+
+| Caller | Checked behavior |
+| --- | --- |
+| `ddd audit --json` | Both findings are chores; card sources and board files remain unchanged. |
+| Direct `runHook` | Both findings are notices on first and repeated settlement; default settlement is read-only. |
+| Claude and Codex script entry points | Existing adapters return the shared notices without blocking and preserve card JSON; their existing generation stays enabled. |
+| Pi adapter callbacks | Notices preserve earlier boundary entries, request no continuation, and leave the board unchanged. |
+
+The test also checks that generated journey reads are denied through the
+existing mappings. The direct core and Pi checks leave unknown tool kinds
+unclassified. Claude/Codex checks invoke the installed-configuration entry
+scripts as subprocesses; they do not install or trust hooks. Pi checks load the
+real DDD adapter with a small event driver; they do not claim an installed Pi
+runtime test. The separate optional installed-Pi checks are described in
+[Pi integration](pi.md#verification).
+
+## Adding another host
+
+A host can first call the shared CLI for explicit work. To add lifecycle
+integration, implement only the host boundary:
+
+1. Supply the actual project or tool working directory as an absolute `cwd`.
+   Map only tool inputs whose semantics the host defines. Do not guess that a
+   custom tool, PowerShell command, or outer code-mode script is a shell read.
+2. Call `runHook` at the host's before-tool, after-tool, and settlement
+   boundaries as applicable. The core returns a semantic result; it does not
+   register events, install configuration, or manage the host's permissions.
+3. Translate `deny-tool` into that host's denial and `block-stop` into its
+   supported correction mechanism. Preserve other guards' decisions. Display
+   notices and diagnostics without turning `none` into an authorization grant.
+4. Keep settlement read-only unless generation is explicitly part of the
+   adapter's contract. Track repeated settlement attempts in the host's own
+   lifecycle and pass `repeatedStop`; bound corrective continuations.
+5. Test the real host's working-directory selection, event timing, nested tool
+   calls, error composition, retry resets, and hook loading. Reuse synthetic
+   journey fixtures to check advisory delivery and evidence preservation.
+
+Passing the shared contract tests proves the rules and the tested adapter
+mappings. It does not establish compatibility with an untested host, automatic
+child inheritance, hook trust, or a live unattended workflow. Add a supported
+host claim only with that host's implementation and validation evidence.
