@@ -1,6 +1,6 @@
 ---
 name: kanban-init
-description: Initialize or migrate the demo-driven kanban in a project. Use for a new board, scattered demos, a legacy in-repo board, or a repeatable plugin upgrade. Select the Claude Code or Codex runtime and preserve existing project data.
+description: Initialize or migrate the demo-driven kanban in a project. Use for a new board, scattered demos, a legacy in-repo board, or a repeatable plugin upgrade. Select Claude Code, Codex, or a host-neutral portable workflow and preserve existing project data.
 ---
 
 # kanban-init —— 脚手架 + 兼容合并 + 旧装接管
@@ -8,23 +8,23 @@ description: Initialize or migrate the demo-driven kanban in a project. Use for 
 把看板机制种入项目。**机制归 plugin、数据归项目**:init 只敢动机制,绝不覆写数据。
 执行器是确定性脚本 `scripts/init.mjs`(零依赖)。从本 skill 的文件路径解析 plugin 根目录:skill 文件在 `<plugin>/skills/kanban-init/SKILL.md`,所以脚本路径为 `<plugin>/scripts/init.mjs`。不要假定某个宿主提供 plugin-root 环境变量。agent 负责运行脚本、读摘要、陪人审计划;确定性的活儿全部下沉给脚本。
 
-## 前置:启用 plugin
+## 前置:确定插件或源码路径
 
-先按当前宿主的 plugin 安装说明添加 marketplace 并启用 `demo-driven-development`。Claude Code 的命令见 [hosts.md](../../docs/hosts.md#claude-code);Codex CLI 的 Git marketplace 命令见 [hosts.md](../../docs/hosts.md#codex)。
+宿主支持 plugin 时,按其安装说明添加 marketplace 并启用 `demo-driven-development`。没有原生插件适配的宿主可使用已核对来源的源码 checkout,将其根目录作为 `<plugin>`,选择 `--runtime portable`;该模式只初始化共享看板,不安装或修改宿主 hooks、skills、配置。Claude Code 的命令见 [hosts.md](../../docs/hosts.md#claude-code);Codex CLI 的 Git marketplace 命令见 [hosts.md](../../docs/hosts.md#codex)。
 
 ## 三段式:scan → plan → 人审 → apply
 
 ```
 node <plugin>/scripts/init.mjs scan  --dir <projectRoot>
-node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand X [--runtime claude|codex|both] [--codex-hooks project|plugin] [--lang zh|en] [--port N] [--with-narrative] [--take-assets] [--only <路径|glob,…> | --exclude <路径|glob,…> [--remember]]
+node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand X [--runtime claude|codex|both|portable] [--codex-hooks project|plugin] [--lang zh|en] [--port N] [--with-narrative] [--take-assets] [--only <路径|glob,…> | --exclude <路径|glob,…> [--remember]]
 node <plugin>/scripts/init.mjs apply --dir <projectRoot> <同 plan 参数> [--yes] [--no-commit]
 ```
 
-`--runtime` defaults to `claude`. Codex and `both` default to no commit; Claude commits only when the target was initially clean. Use `--no-commit` to leave apply changes uncommitted. Codex hook mode defaults to `project`, which writes portable project hook entries with absolute plugin paths. Use `--codex-hooks plugin` with `--runtime codex` when the installed plugin should supply hooks; this avoids duplicate project hook entries. Codex hook definitions require user review and trust before they run. Preserve an existing `features.hooks = false` setting and report that hooks are disabled.
+`--runtime` defaults to `claude`. Codex, `both`, and `portable` default to no commit; Claude commits only when the target was initially clean. Use `--no-commit` to leave apply changes uncommitted. Codex hook mode defaults to `project`, which writes portable project hook entries with absolute plugin paths. Use `--codex-hooks plugin` with `--runtime codex` when the installed plugin should supply hooks; this avoids duplicate project hook entries. Codex hook definitions require user review and trust before they run. Preserve an existing `features.hooks = false` setting and report that hooks are disabled.
 
 1. **scan(只读盘点)**:场景判定 + 散落 demo 摘要(文件名 / `<title>` / 大小 / git 状态 / 资产引用,**不含正文**)+ 旧装痕迹(manifest、机制件、settings 旧 hook 注册)。散落候选三过滤:`_` 前缀 = 探针/草稿、含 package.json 的子目录 = 应用源码、manifest / config 已提及 = 已覆盖数据(守卫同口径——挪走反而弄断链接;config.docs 登记的 `type:"html"` 指南同此)。
 2. **plan(只读计划)**:列出将建文件、所选宿主的读保护和项目说明、归拢清单(git 策略逐文件)、接管动作、遗留卡预分配 id。**把 plan 原样给人审,拿到确认才 apply。**
-3. **apply(动手,幂等)**:全程持 `app/kanban/.init-lock`(守卫见锁放行本轮);先写卡后 mv(孤儿窗口压为零);末尾自跑 gen + 守卫双冒烟;git 只 add 本次触碰路径。是否提交按 runtime 默认值或 `--no-commit` 执行。重跑 apply = 零变更。
+3. **apply(动手,幂等)**:全程持 `app/kanban/.init-lock`(守卫见锁放行本轮);先写卡后 mv(孤儿窗口压为零);末尾自跑 gen + 所选宿主守卫冒烟(portable 跑共享 audit,不运行宿主 hook);git 只 add 本次触碰路径。是否提交按 runtime 默认值或 `--no-commit` 执行。重跑 apply = 零变更。
 
 ## 三种进场景
 

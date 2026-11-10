@@ -2,7 +2,7 @@
 
 The plugin shares skills, scripts, and project data across supported hosts. Host adapters provide lifecycle hooks and project instructions. Resolve `<plugin>` from the installed plugin root; when working from a skill, its file is at `<plugin>/skills/<skill-name>/SKILL.md`. Do not make shared skill commands depend on a host-specific plugin-root environment variable.
 
-The [shared hook API](hook-core.md) defines the boundary between rule evaluation and host integration. The opt-in [Pi adapter](pi.md) also calls it directly, without Claude cache forwarding or automatic generation. The supported init runtimes remain `claude`, `codex`, and `both`.
+The [shared hook API](hook-core.md) defines the boundary between rule evaluation and host integration. The opt-in [Pi adapter](pi.md) also calls it directly, without Claude cache forwarding or automatic generation. The init runtimes are `claude`, `codex`, `both`, and `portable`. The portable mode initializes shared board data without installing a host adapter.
 
 ## Claude Code
 
@@ -23,6 +23,22 @@ Install from the Git marketplace with the Codex CLI:
 codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git
 codex plugin add demo-driven-development@demo-driven-development
 ```
+
+For Codex versions that discover the root Agent Plugin manifest but do not load
+its hook extension, build a native package from a reviewed source commit:
+
+```sh
+node scripts/package-codex.mjs --out <new-external-directory> --ref <commit>
+node scripts/package-codex.mjs --check <new-external-directory> --expect-commit <commit>
+```
+
+The exporter validates the commit snapshot, omits the root `plugin.json` in the
+output so Codex reads `.codex-plugin/plugin.json`, and records provenance. It
+preserves the shared hooks, scripts, and skills. An optional `--marketplace`
+name is the only other adaptation. Select that generated directory as the
+marketplace source using the host's installation flow; keep one active DDD
+source. Do not delete manifests or patch code in installed caches. See
+[release packaging](../RELEASING.md#runtime-package-provenance).
 
 The Codex plugin bundles hooks in the plugin root. Codex expands `${PLUGIN_ROOT}` in plugin hook commands; `${CLAUDE_PLUGIN_ROOT}` is a compatibility variable. Project hook mode instead records absolute paths to the selected plugin checkout in `.codex/hooks.json`. Rerun init after moving that checkout or cloning the project onto another host.
 
@@ -54,6 +70,25 @@ Load `pi/index.ts` explicitly in a new Pi invocation; keep other guards enabled.
 See [Pi integration](pi.md) for activation/rollback, exact event mapping,
 read-only settlement, and optional child inheritance. No `--runtime pi` init
 mode or automatic installed-configuration changes are provided.
+
+## Other harnesses and standalone CLI use
+
+Use a verified source checkout with Node.js and Git. Initialize the board without
+host configuration, then call the shared CLIs from the project:
+
+```sh
+node <plugin>/scripts/init.mjs plan --dir <projectRoot> --brand <name> --runtime portable
+node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand <name> --runtime portable --yes --no-commit
+node <plugin>/scripts/ddd.mjs audit --dir <projectRoot>/app/kanban --json
+```
+
+Portable init preserves existing host files and runs generation plus the shared
+audit. It does not parse host runtime settings; Markdown instructions may still
+be scanned as ordinary documents when checking links to moved demos. It does not activate automatic lifecycle checks. A harness can call the
+[shared hook API](hook-core.md) through an explicit adapter that maps its events,
+tool requests, permissions, and continuation behavior. Verify those mappings in
+that harness before claiming native support. The portable CLI and shared rules
+do not imply that every host can enforce the same hook behavior.
 
 ## Shared workflow rules
 

@@ -5,9 +5,10 @@
 //   node scripts/init.mjs plan  [--dir <targetRoot>] [选项]     输出将执行的动作(只读)
 //   node scripts/init.mjs apply [--dir <targetRoot>] [选项]     动手(全程持 .init-lock)
 //
-// 选项:--runtime claude|codex|both(缺省 claude)
+// 选项:--runtime claude|codex|both|portable(缺省 claude)
+//       portable 只初始化共享看板,不接入宿主 hooks/skills/config。
 //       --codex-hooks project|plugin(缺省 project;原生 plugin 装法选 plugin 防重复)
-//       --no-commit(Claude 清洁仓库缺省自动提交;Codex/both/已有修改不自动暂存提交)
+//       --no-commit(Claude 清洁仓库缺省自动提交;Codex/both/portable/已有修改不自动暂存提交)
 //       --brand X  --lang zh|en  --port N
 //       --with-narrative(铺 path-manifest 叙事模块,缺省不铺——D45 拍板③)
 //       --take-assets(scan 列出的同层非 HTML 资源随归拢一起迁,缺省只列名不动)
@@ -66,11 +67,17 @@ const MANIFEST_FILES = ['manifest.json', 'decisions-manifest.json', 'backlog-man
 // v0.12.0 的两份 opt-in manifest:只在全新看板铺空模板(存量看板升级时不动 —— 铺进去就成了
 // 「板上多了两个没人填的文件」;两个 tab 缺省关,文件不在也毫无影响)。
 const OPTIN_MANIFEST_FILES = ['acceptance-manifest.json', 'release-manifest.json']
-const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--runtime claude|codex|both] [--codex-hooks project|plugin] [--no-commit] [--brand X] [--lang zh|en] [--port N] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
+const USAGE = `用法: node init.mjs scan|plan|apply [--dir <targetRoot>] [--runtime claude|codex|both|portable] [--codex-hooks project|plugin] [--no-commit] [--brand X] [--lang zh|en] [--port N] [--stub-status <status>] [--with-narrative] [--take-assets] [--only <路径|glob,..> | --exclude <路径|glob,..> [--remember]] [--yes]`
 
 let S = pickStrings('zh') // main() 里按 --lang / config.lang 重选
 
 const fail = (msg) => { console.error(`[init] ✗ ${msg}`); process.exit(1) }
+// portable 没有隐含宿主;后续新增运行时也不能通过「非另一宿主」误入配置分支。
+const selectedRuntimes = (runtime) => runtime === 'portable' ? [] : runtime === 'both' ? ['claude', 'codex'] : [runtime]
+function printRuntime(stage, runtime) {
+  console.log(S.init.runtime(stage, runtime))
+  if (runtime === 'portable') console.log(S.init.portableScope(stage))
+}
 
 // ---- CLI 解析 ----
 function parseArgs(argv) {
@@ -88,7 +95,7 @@ function parseArgs(argv) {
     else fail(`多余参数 ${a}\n${USAGE}`)
   }
   if (!['scan', 'plan', 'apply'].includes(opt.cmd)) fail(USAGE)
-  if (!['claude', 'codex', 'both'].includes(opt.runtime)) fail(S.init.failRuntime(opt.runtime))
+  if (!['claude', 'codex', 'both', 'portable'].includes(opt.runtime)) fail(S.init.failRuntime(opt.runtime))
   if (!['project', 'plugin'].includes(opt.codexHooks)) fail(S.init.failCodexHooks(opt.codexHooks))
   if (opt.lang !== null && !['zh', 'en'].includes(opt.lang)) fail(`--lang 只支持 zh|en,给了 ${opt.lang}`)
   if (opt.port !== null) {
@@ -164,7 +171,7 @@ function classify(root, opt) {
     : (legacyTraces.length || legacyMech.length || kanbanDemos.length) ? 'legacy'
     : scattered.length ? 'scattered'
     : 'greenfield'
-  return { kanban, hasConfig, legacyTraces, legacyMech, legacyHooks: opt.runtime === 'codex' ? { path: join(root, '.claude', 'settings.json'), found: [] } : findLegacyHooks(root), kanbanDemos, scattered, scenario }
+  return { kanban, hasConfig, legacyTraces, legacyMech, legacyHooks: selectedRuntimes(opt.runtime).includes('claude') ? findLegacyHooks(root) : { path: join(root, '.claude', 'settings.json'), found: [] }, kanbanDemos, scattered, scenario }
 }
 
 // ---- 旧装接管:settings.json 旧 hook 注册识别与摘除(设计 §7「机制接管」) ----
@@ -766,11 +773,15 @@ function buildLegacyPlan(root, st, opt) {
   if (lg.mech.length) {
     want.push({
       initKind: 'legacy-retire',
-      title: '割接清理:退役旧机制件(plugin 已接管)',
+      title: opt.runtime === 'portable' ? '割接清理:旧机制件待确认接管' : '割接清理:退役旧机制件(plugin 已接管)',
       tier: 0, area: '看板', priority: 'med', status: 'ready', date: today(),
       source: 'kanban-init apply(旧装接管)',
-      problem: `init 接管只摘 hook 注册、不删文件:${lg.mech.map((f) => `app/kanban/${f}`).join(' / ')} 仍在 repo。守卫/gen 已由 ${opt.runtime === 'claude' ? 'plugin(hooks.json + ${CLAUDE_PLUGIN_ROOT}/scripts)' : 'DDD 的运行时 hook'}接管,旧件留着只会漂移。`,
-      approach: 'plugin 稳定运行一段时间后单独 PR 删除旧机制件;serve 起停切到 serve-kanban.sh。避开上线冲刺窗口(设计:割接晚切)。',
+      problem: opt.runtime === 'portable'
+        ? `portable init 仅接入共享看板与生成器,未安装宿主适配器,也未修改旧 hook 注册:${lg.mech.map((f) => `app/kanban/${f}`).join(' / ')} 仍在 repo。旧机制是否仍被调用需要另行确认。`
+        : `init 接管只摘 hook 注册、不删文件:${lg.mech.map((f) => `app/kanban/${f}`).join(' / ')} 仍在 repo。守卫/gen 已由 ${opt.runtime === 'claude' ? 'plugin(hooks.json + ${CLAUDE_PLUGIN_ROOT}/scripts)' : 'DDD 的运行时 hook'}接管,旧件留着只会漂移。`,
+      approach: opt.runtime === 'portable'
+        ? '先按宿主要求配置并验证适配器,确认旧机制已停用后再单独 PR 清理旧文件与注册;serve 起停可切到 serve-kanban.sh。'
+        : 'plugin 稳定运行一段时间后单独 PR 删除旧机制件;serve 起停切到 serve-kanban.sh。避开上线冲刺窗口(设计:割接晚切)。',
       links: lg.mech.map((f) => ({ title: `app/kanban/${f}`, href: f })),
     })
   }
@@ -845,7 +856,7 @@ async function buildPlan(root, st, gi, opt, det) {
     if (wantVer && haveVer !== wantVer) plan.serveStale = { have: haveVer, want: wantVer }
   }
 
-  if (opt.runtime !== 'codex') {
+  if (selectedRuntimes(opt.runtime).includes('claude')) {
     // settings:模拟合并,列出将新增的 deny 条目
     const inject = JSON.parse(readFileSync(join(TPL, 'settings-inject.json'), 'utf8'))
     const settingsPath = join(root, '.claude', 'settings.json')
@@ -873,7 +884,7 @@ async function buildPlan(root, st, gi, opt, det) {
       if (last && !cm.includes(CLAUDE_SECTION_MARK)) plan.claudeStale = last
     }
   }
-  if (opt.runtime !== 'claude') plan.codex = buildCodexPlan(root, opt)
+  if (selectedRuntimes(opt.runtime).includes('codex')) plan.codex = buildCodexPlan(root, opt)
 
   // .gitattributes + merge.ours 驱动(v0.17.4 §2):非 git 场景为 null,整段跳过
   plan.gitattr = gitattrPlan(root, st.kanban)
@@ -897,7 +908,7 @@ async function buildPlan(root, st, gi, opt, det) {
 
 function printPlan(root, st, gi, plan, opt) {
   console.log(S.init.planTarget(root))
-  console.log(S.init.runtime('plan', opt.runtime))
+  printRuntime('plan', opt.runtime)
   console.log(S.init.planScenario(S.init.scenario[st.scenario]))
   console.log(S.init.planVars(plan.brand, gi.branch, gi.ghRepo))
   console.log(S.init.planPort(plan.port, plan.portNote))
@@ -909,7 +920,7 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.accFbIgnore) console.log(S.init.planAccFbIgnore)
   if (plan.accFbPin) console.log(S.init.planAccFbPin)
   if (plan.serveStale) console.log(S.init.planServeStale(plan.serveStale.have, plan.serveStale.want))
-  if (opt.runtime !== 'codex') {
+  if (selectedRuntimes(opt.runtime).includes('claude')) {
     console.log(plan.settingsAdd.length ? S.init.planSettingsAdd(plan.settingsAdd) : S.init.planSettingsOk)
     console.log(plan.needsClaudeMd ? S.init.planClaudeAdd(plan.claudeMarker) : S.init.planClaudeOk)
     if (plan.claudeStale) console.log(S.init.planClaudeStale(plan.claudeStale))
@@ -923,7 +934,7 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.legacy) printLegacyPlan(plan.legacy, st.hasConfig)
   if (plan.merge) printMergePlan(plan.merge, opt)
   console.log(gi.isRepo ? (opt.noCommit || opt.runtime !== 'claude' ? S.init.planNoCommit : gi.dirty ? S.init.planDirtyNoCommit : S.init.planGitRepo) : S.init.planGitNone)
-  console.log(S.init.planSmoke)
+  console.log(opt.runtime === 'portable' ? S.init.planPortableSmoke : S.init.planSmoke)
 }
 
 function printLegacyPlan(lg, hasConfig) {
@@ -1080,7 +1091,7 @@ function doLegacy(root, lg, touched) {
 
 // ---- apply ----
 async function doApply(root, st, gi, opt, plan) {
-  console.log(S.init.runtime('apply', opt.runtime))
+  printRuntime('apply', opt.runtime)
   if (plan.merge?.abort) fail(plan.merge.abort)
   if (!st.hasConfig && !plan.brand) fail(S.init.failNeedBrand)
 
@@ -1204,8 +1215,21 @@ async function doApply(root, st, gi, opt, plan) {
     }
   } finally { unlock() }
 
-  // -- 4b. 守卫冒烟(锁已释放,让审计真跑;期望 exit 0 且无 block 决定) --
-  const runtimes = opt.runtime === 'both' ? ['claude', 'codex'] : [opt.runtime]
+  // -- 4b. portable 走共享只读审计;宿主模式才执行对应协议的守卫。 --
+  if (opt.runtime === 'portable') {
+    let audit
+    try {
+      audit = JSON.parse(execFileSync(process.execPath, [join(HERE, 'ddd.mjs'), 'audit', '--json', '--dir', st.kanban], {
+        cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
+      }).toString())
+    } catch (e) {
+      fail(S.init.failAudit((e.stderr || e.message || '').toString().slice(0, 1200)))
+    }
+    if (audit.block.length) fail(S.init.failAudit(audit.block.map((e) => e.text).join('\n').slice(0, 1200)))
+    console.log(S.init.applyAuditOk)
+  }
+  // 宿主守卫冒烟(锁已释放,让审计真跑;期望 exit 0 且无 block 决定)。
+  const runtimes = selectedRuntimes(opt.runtime)
   for (const runtime of runtimes) {
     let hookOut = ''
     try {
@@ -1261,7 +1285,7 @@ async function doApply(root, st, gi, opt, plan) {
 // ---- scan ----
 function doScan(root, st, gi, det, opt) {
   console.log(S.init.scanTarget(root, gi.isRepo, gi.branch))
-  console.log(S.init.runtime('scan', opt.runtime))
+  printRuntime('scan', opt.runtime)
   console.log(S.init.scanScenario(S.init.scenario[st.scenario]))
   console.log(S.init.scanConfig(st.hasConfig))
   for (const d of det.demos) console.log(S.init.scanDemo(d.rel, d.size, d.git, d.title, d.assets))
@@ -1287,7 +1311,7 @@ function doScan(root, st, gi, det, opt) {
   // 摘要 JSON(文件名/title/git 状态/资产/大小;绝不含正文)
   const summary = {
     runtime: opt.runtime,
-    codexHooks: opt.runtime === 'claude' ? null : opt.codexHooks,
+    codexHooks: selectedRuntimes(opt.runtime).includes('codex') ? opt.codexHooks : null,
     scenario: st.scenario,
     demos: det.demos.map((d) => ({ file: d.rel, title: d.title, size: d.size, git: d.git, assets: d.assets.map((a) => ({ ref: a.ref, exists: a.exists, inDemoDir: a.inDemoDir })) })),
     configSkipped: det.configSkipped,
