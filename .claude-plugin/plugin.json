@@ -1,6 +1,6 @@
 {
   "name": "demo-driven-development",
-  "version": "0.19.4",
+  "version": "0.19.5",
   "description": "Demo-driven decisions, a source-based kanban, deterministic tools, and lifecycle guards for Claude Code and Codex.",
   "author": { "name": "rrrrrrrrrricoxi" }
 }

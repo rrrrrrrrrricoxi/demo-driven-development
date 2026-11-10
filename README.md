@@ -880,12 +880,20 @@ CLI rewrites the manifest as a whole there.
 
 A decision or backlog card can opt into a stable entry with `journey`. The board shows three concise summaries in separate label/value rows and opens `journeys/<card-id>.html`. Current links remain directly accessible on the card. Cards without `journey` keep their existing output. The entry uses the board's typography, colors, theme, and existing demo controls. A 44px return bar contains navigation for the current design, phase history, and development records. The current demo fills the remaining screen, with no outer sidebar or centered card. Record views use the existing fixed contents navigation. The page summary, history, and original resources start collapsed. Original `demo`, `links`, `shots`, `detail`, and development notes remain in the card source and remain accessible from the entry. Do not write pending questions as accepted decisions.
 
+`journey` is optional for backward compatibility, so cards that do not need a multi-round entry keep their current form. When updating an older card with multiple demo rounds and a long card face, organize its history into a journey without waiting for a card-by-card request. Rebuild the summaries from the card's sources and review evidence; chronology alone does not make an old choice current or approved. Preserve the old `note`, `links`, `shots`, `detail`, and other source material. Short cards without `journey` do not need migration, and this is not a request to migrate every existing card.
+
+Write the summaries for product readers: `decision` states confirmed product rules and names pending choices; `progress` states the implementation stage, usable capabilities, and key gaps, distinguishing a demo, product implementation, and human acceptance; `recent` states a meaningful change since the previous round. Put routine verification counts, device sizes, console or overflow results, and investigation notes in `development` or `detail`. Keep a verification detail in its source evidence, and move it yourself after checking the card's requirements; do not ask the product owner to sort the summary. If the CLI or an audit flags verification detail in a summary, check its meaning and evidence, preserve it in the appropriate field, and review the card before finishing. If CLI or audit suggests organizing a card with no `journey`, an existing demo, a long note, and at least three clearly dated sections, the current card owner should review and organize that card; another session should edit it only when that card is in its assigned work. If information needed to support a product claim is missing, check the card's sources or user requirements; do not infer product requirements from test results or invent facts. Keep product requirements and business measures in summaries when they are the actual goal, such as a layout requirement, performance target, or testing tool.
+
+Use the current card's sources and user requirements to set its scope. Reuse a navigation mechanism across cards, but do not inherit another card's or an example's UI layout or viewport requirement unless this card's evidence calls for it. The shared entry container preserves the demo's viewport and controls; it does not require a particular layout inside the demo. An individual UI design does not become a general requirement without user authorization.
+
+For example, suppose the card's evidence says date filtering is available in the demo, implementation has not started, and review has not decided whether to keep it. A misleading summary would be `progress: "No overflow at 390px; zero console errors."` A product-facing summary is `progress: "Date filtering is available in the demo; implementation has not started; decision pending review."` Keep the viewport and console check in `development`. If the card's product goal is responsive layout, state the required viewport behavior in the product summary.
+
 ```json
 {
   "journey": {
-    "decision": "Use option B with the left summary panel.",
-    "progress": "The panel is implemented; acceptance is pending.",
-    "recent": "Added the option D legend refinement.",
+    "decision": "The detail panel stays beside the results; keyboard access is still undecided.",
+    "progress": "The demo shows the selected layout; implementation has not started.",
+    "recent": "The review selected the side-by-side layout.",
     "current": {
       "title": "Current design",
       "href": "demos/current.html",

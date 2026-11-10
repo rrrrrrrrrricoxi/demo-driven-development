@@ -10,6 +10,7 @@ import { Script } from 'node:vm'
 import { journeyError, journeyHref, isJourneyDemo, renderJourney } from '../scripts/journey.mjs'
 import { generatedReads } from '../scripts/hook-tool-rules.mjs'
 import { GEN_RE } from '../scripts/board-branch-check.mjs'
+import { localDate } from '../scripts/cards.mjs'
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = mkdtempSync(join(tmpdir(), 'ddd-journeys-'))
 const board = join(root, 'app/kanban'); mkdirSync(join(board, 'demos'), { recursive: true })
@@ -66,6 +67,122 @@ check(invalidSet.status !== 0 && JSON.parse(readFileSync(join(board, 'decisions-
 const validSet = run('ddd.mjs', ['card', 'set', 'D1', 'journey', '--json', JSON.stringify(j)])
 check(validSet.status === 0 && !validSet.stderr.includes('不认'), 'CLI recognizes journey field')
 const audit = run('ddd.mjs', ['audit', '--json']); assert.equal(audit.status, 0, audit.stderr); const audited = JSON.parse(audit.stdout); check(Array.isArray(audited.block) && !audited.block.some((finding) => finding.key === 'orphan'), 'current-only and linked journey demos do not create orphan audit findings')
+// Observe the audit/CLI/Stop contracts, including product language that must stay quiet.
+const report = '浏览器30项检查通过，桌面与390px手机无脚本错误或横向溢出'
+const summaryCases = [
+  [true, report],
+  [true, '业务表单已接入；浏览器30项检查通过。'],
+  [true, '30 tests passed.'],
+  [true, 'Playwright: 30 checks passed'],
+  [true, '浏览器检查:无控制台错误和横向溢出'],
+  [true, 'Browser check: no console errors or horizontal overflow'],
+  [false, '支持390px手机填写施肥方案'],
+  [false, '已修横向溢出，窄屏可查看完整产品名'],
+  [false, '桌面与390px手机的图表均可读'],
+  [false, '自动化产品测试功能已可用，用户可按产品创建测试'],
+  [false, '测试工具可显示 30 tests passed'],
+  [false, '用户看到30项通过时可打开对应结果'],
+  [false, '30项测试通过后自动生成产品试验报告'],
+  [false, 'Show 30 tests passed in the product testing dashboard'],
+  [false, '30 tests passed is a supported result label'],
+  [false, '演示已可操作，业务功能未接入；尚未做人工验收'],
+  [false, 'Demo checks passed; human acceptance is pending'],
+  [false, '无横向溢出；无脚本错误'],
+]
+for (const lang of ['zh', 'en']) {
+  cfg.lang = lang; cfg.concurrentSessions = false; write('kanban.config.json', cfg)
+  const cases = summaryCases.map(([warn, text], index) => ({...card, id: `D${102 + index}`, code: `D${102 + index}`, session: index === 0 ? 'summary-owner' : 'other', journey: {...j, progress: text}, expectedHint: warn}))
+  dm.entries = cases.map(({expectedHint, ...entry}) => entry); write('decisions-manifest.json', dm)
+  const before = readFileSync(join(board, 'decisions-manifest.json'), 'utf8')
+  const observed = run('ddd.mjs', ['audit', '--json']); assert.equal(observed.status, 0, observed.stderr)
+  const finding = JSON.parse(observed.stdout).chore.find((entry) => entry.key === 'journeySummary')
+  check(finding?.n === summaryCases.filter(([warn]) => warn).length, `${lang}: audit counts only explicit verification reports`)
+  for (const entry of cases) check(finding.text.includes(`${entry.id} journey.progress`) === entry.expectedHint, `${lang}: audit ${entry.expectedHint ? 'hints' : 'preserves'} ${entry.journey.progress}`)
+  check(readFileSync(join(board, 'decisions-manifest.json'), 'utf8') === before, `${lang}: summary audit leaves source bytes intact`)
+  const filtered = run('ddd.mjs', ['audit', '--session', 'summary-owner', '--json']); assert.equal(filtered.status, 0, filtered.stderr)
+  check(JSON.parse(filtered.stdout).chore.find((entry) => entry.key === 'journeySummary')?.n === 1, `${lang}: summary chores respect the existing session filter`)
+  dm.entries = [{...card, id: 'D102', code: 'D102'}]; write('decisions-manifest.json', dm)
+  const evidence = {decision: j.decision, progress: report, recent: j.recent}
+  for (const field of ['decision', 'progress', 'recent']) {
+    const value = {...j, [field]: report}
+    const saved = run('ddd.mjs', ['card', 'set', 'D102', 'journey', '--json', JSON.stringify(value)])
+    check(saved.status === 0 && JSON.parse(saved.stdout).ok && saved.stderr.includes(`D102 journey.${field}`) && saved.stderr.includes('journey.development') && saved.stderr.includes('detail'), `${lang}: CLI saves ${field} and emits a targeted advisory on stderr`)
+    check(saved.stderr.startsWith(lang === 'en' ? 'Summary review hint:' : '摘要复核提示:'), `${lang}: CLI advisory follows the board language`)
+    check(JSON.parse(readFileSync(join(board, 'decisions-manifest.json'))).entries[0].journey[field] === report, `${lang}: CLI preserves ${field} verbatim`)
+  }
+  const saved = run('ddd.mjs', ['card', 'set', 'D102', 'journey', '--json', JSON.stringify({...j, ...evidence})]); assert.equal(saved.status, 0, saved.stderr)
+  const beforeStop = readFileSync(join(board, 'decisions-manifest.json'), 'utf8')
+  const stopped = spawnSync(process.execPath, [join(repo, 'scripts/codex-hook.mjs'), 'settle'], {cwd: root, input: JSON.stringify({cwd: root}), encoding: 'utf8'})
+  assert.equal(stopped.status, 0, stopped.stderr)
+  const stopPayload = JSON.parse(stopped.stdout)
+  check(!stopPayload.decision && stopPayload.systemMessage.includes('D102 journey.progress') && stopPayload.systemMessage.includes('journey.development/detail'), `${lang}: existing Stop adapter reports the advisory without blocking`)
+  check(readFileSync(join(board, 'decisions-manifest.json'), 'utf8') === beforeStop, `${lang}: Stop leaves card evidence intact`)
+  const clean = run('ddd.mjs', ['card', 'set', 'D102', 'journey', '--json', JSON.stringify(j)])
+  check(clean.status === 0 && clean.stderr === '', `${lang}: valid product summary writes stay silent`)
+  dm.entries = [{...card, id: 'D102', code: 'D102', detail: report, journey: {...j, development: [{title: 'Verification', summary: report}]}}]; write('decisions-manifest.json', dm)
+  const evidenceOnly = run('ddd.mjs', ['audit', '--json']); assert.equal(evidenceOnly.status, 0, evidenceOnly.stderr)
+  check(!JSON.parse(evidenceOnly.stdout).chore.some((entry) => entry.key === 'journeySummary'), `${lang}: verification evidence in development/detail stays silent`)
+}
+// Synthetic BL-C63 shape: long dated rounds, many links/shots, no journey.
+// No real project prose or screenshots are copied into this fixture.
+const originalBacklog = readFileSync(join(board, 'backlog-manifest.json'), 'utf8')
+const timelineBacklog = JSON.parse(originalBacklog); timelineBacklog.tiers = {'1': 'Feature'}
+const dated = (count, length = 10787, english = false) => Array.from({length: count}, (_, i) => `${english ? '[2026-11-10 update]' : '【2026-11-10 更新】'}Round ${i + 1}: confirmed one design; remaining business question is pending.`).join('\n\n').padEnd(length, 'Synthetic development record. ')
+const legacy = {id: 'BL-C63', title: 'Synthetic data overview iterations', status: 'ready', tier: 1, priority: 'med', problem: 'The current design is hard to find.', approach: 'Keep the current design and old evidence accessible.', note: dated(3), links: Array.from({length: 13}, (_, i) => ({title: `Demo round ${i + 1}`, href: 'demos/current.html#round-' + i})), shots: Array.from({length: 28}, (_, i) => `bl-c63-${i}.png`)}
+const suggestions = [
+  [true, legacy],
+  [true, {...legacy, id: 'BL-NOTES', note: '', notes: dated(3, 801, true)}],
+  [true, {...legacy, id: 'BL-DETAIL', detail: 'Original investigation details'}],
+  [true, {...legacy, id: 'BL-HOSTED', links: [], demo: 'https://example.test/interactive-demo'}],
+  [false, {...legacy, id: 'BL-SPEC', note: '', approach: 'A long product specification. '.repeat(50)}],
+  [false, {...legacy, id: 'BL-UNDATED', note: 'Specification without dated rounds. '.repeat(50)}],
+  [false, {...legacy, id: 'BL-TWO', note: dated(2)}],
+  [false, {...legacy, id: 'BL-INLINE', note: 'Previous checks on 【2026-09-01】 and 【2026-09-02】 and 【2026-09-03】. '.repeat(20)}],
+  [false, {...legacy, id: 'BL-SHORT', note: dated(3, 800)}],
+  [false, {...legacy, id: 'BL-NODEMO', links: []}],
+  [false, {...legacy, id: 'BL-DOC', links: [{title: 'Specification', href: 'refs/spec.html'}]}],
+  [false, {...legacy, id: 'BL-ADOPTED', journey: j}],
+  [false, {...legacy, id: 'BL-DONE', status: 'done'}],
+]
+for (const lang of ['zh', 'en']) {
+  cfg.lang = lang; cfg.concurrentSessions = false; write('kanban.config.json', cfg)
+  dm.entries = [{...card, id: 'D-HISTORY', code: 'D-HISTORY', journey: undefined, detail: undefined, decision: dated(3)}]; write('decisions-manifest.json', dm)
+  timelineBacklog.items = suggestions.map(([, entry]) => entry); write('backlog-manifest.json', timelineBacklog)
+  const readAudit = (args = []) => { const out = run('ddd.mjs', ['audit', '--json', ...args]); assert.equal(out.status, 0, out.stderr); return JSON.parse(out.stdout) }
+  const observed = readAudit(), finding = observed.chore.find((entry) => entry.key === 'journeySuggested')
+  check(finding?.n === 5 && finding.text.includes('D-HISTORY decision'), `${lang}: decision and backlog histories share the suggestion audit`)
+  for (const [expected, entry] of suggestions) check(finding.text.includes(`${entry.id} `) === expected, `${lang}: dated-history suggestion ${expected ? 'includes' : 'excludes'} ${entry.id}`)
+  check(observed.chore.find((entry) => entry.key === 'longText')?.n === 6, `${lang}: old long prose remains checked without duplicate journey actions`)
+  // Restore the quiet linked decision; only the reported backlog card needs action.
+  dm.entries = [card]; write('decisions-manifest.json', dm)
+  timelineBacklog.items = [legacy]; write('backlog-manifest.json', timelineBacklog)
+  const beforeAudit = readFileSync(join(board, 'backlog-manifest.json'), 'utf8')
+  const only = readAudit()
+  check(only.block.length === 0 && only.chore.length === 1 && only.chore[0].key === 'journeySuggested' && readFileSync(join(board, 'backlog-manifest.json'), 'utf8') === beforeAudit, `${lang}: BL-C63-shaped history gets one read-only actionable hint`)
+  const stop = spawnSync(process.execPath, [join(repo, 'scripts/codex-hook.mjs'), 'settle'], {cwd: root, input: JSON.stringify({cwd: root}), encoding: 'utf8'})
+  assert.equal(stop.status, 0, stop.stderr)
+  const payload = JSON.parse(stop.stdout)
+  check(!payload.decision && payload.systemMessage.includes('BL-C63 note') && payload.systemMessage.includes('journey') && readFileSync(join(board, 'backlog-manifest.json'), 'utf8') === beforeAudit, `${lang}: existing Stop suggests a journey without editing the legacy card`)
+  timelineBacklog.items = [{...legacy, note: dated(2)}]; write('backlog-manifest.json', timelineBacklog)
+  const note = run('ddd.mjs', ['card', 'note', 'BL-C63', 'Current business question remains pending', '--json']); assert.equal(note.status, 0, note.stderr)
+  const saved = JSON.parse(note.stdout)
+  check(saved.ok && note.stderr.includes('BL-C63 note') && note.stderr.startsWith(lang === 'en' ? 'Iteration history hint:' : '多轮记录整理提示:'), `${lang}: CLI note saves a third dated update and asks the writing session to organize it`)
+  check(saved.card.note === dated(2) + '\n\n' + saved.line && saved.card.journey === undefined && JSON.stringify(saved.card.links) === JSON.stringify(legacy.links) && JSON.stringify(saved.card.shots) === JSON.stringify(legacy.shots), `${lang}: note preserves earlier rounds, links, screenshots, and pending questions`)
+  const setNote = run('ddd.mjs', ['card', 'set', 'BL-C63', 'note', JSON.stringify(dated(3)), '--json']); assert.equal(setNote.status, 0, setNote.stderr)
+  check(setNote.stderr.includes('BL-C63 note') && JSON.parse(setNote.stdout).card.note === dated(3), `${lang}: CLI set note uses the same nonblocking suggestion`)
+  timelineBacklog.items = [{...legacy, links: []}]; write('backlog-manifest.json', timelineBacklog)
+  const setDemo = run('ddd.mjs', ['card', 'set', 'BL-C63', 'demo', JSON.stringify('demos/current.html'), '--json']); assert.equal(setDemo.status, 0, setDemo.stderr)
+  check(setDemo.stderr.includes('BL-C63 note'), `${lang}: adding a demo to a dated history also suggests a journey`)
+  const adopted = run('ddd.mjs', ['card', 'set', 'BL-C63', 'journey', '--json', JSON.stringify(j)]); assert.equal(adopted.status, 0, adopted.stderr)
+  check(!readAudit().chore.some((entry) => ['journeySuggested', 'longText'].includes(entry.key)) && JSON.parse(adopted.stdout).card.note === dated(3), `${lang}: adopting a journey silences old-history reminders while keeping original prose`)
+  // Force existing fresh-card semantics without relying on an untracked card directory.
+  timelineBacklog.items = [{...legacy, date: localDate()}]
+  write('backlog-manifest.json', timelineBacklog)
+  check(readAudit().block.some((entry) => entry.key === 'richLongNew'), `${lang}: journey suggestion preserves the existing fresh-card long-text block`)
+}
+writeFileSync(join(board, 'backlog-manifest.json'), originalBacklog)
+cfg.lang = 'zh'; cfg.concurrentSessions = true; write('kanban.config.json', cfg)
+dm.entries = [card]; write('decisions-manifest.json', dm)
 // 比较父提交原版:去掉版本戳后的产物字节应相同,涵盖并发/lazy/验收。
 const base = join(root, 'base-plugin'); mkdirSync(base)
 const archive = spawnSync('git', ['archive', 'c9f9ecd5e50809aa45fdaa027fb1d933cc90ba63'], {cwd: repo, encoding: null, maxBuffer: 64 * 1024 * 1024}); assert.equal(archive.status, 0)

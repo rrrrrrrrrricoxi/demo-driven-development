@@ -25,10 +25,13 @@ const byPr = (rows, sep) => {
   return [...m.entries()].map(([pr, ids]) => `#${pr} ${ids.join(sep)}`)
 }
 const enCards = (e) => `${e.ids.join(', ')}${e.n > e.ids.length ? ` and ${e.n} in all` : ''}`
+const summaryFields = (rows) => rows.map((r) => `${r.id} ${r.fields.map((f) => `journey.${f}`).join('/')}`).join('; ')
 
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
 const zh = {
+  journeySuggested: (rows) => `多轮记录整理提示:${rows.map((r) => `${r.id} ${r.field}(${r.n}字/${r.updates}条日期更新)`).join('; ')} 已有 demo 与较长的多轮记录。写卡会话应主动整理为 journey,用三行摘要说明产品决定、业务实现进度与最近变化,把现行方案和历史分开。保留旧 demo、链接、截图和原始记录;逐项核对决定,待答问题继续标为待答。此提示不推断业务决定、不迁移资料、不阻断写入。`,
+  journeySummary: (rows) => `摘要复核提示:${summaryFields(rows)} 可能写入了验证汇报。写卡会话应复核并整理:三行摘要写产品决定、业务实现进度与最近变化;常规验证证据放 journey.development 或 detail。真实产品要求可保留。规则仅识别少量固定句式,可能漏报或误报;不改卡、不阻断。`,
   concurrentStopNotice: '共享看板模式:收工检查无法判定问题属于哪个会话,因此本轮仅提醒。显式 audit、合并检查和生成物保护仍然有效。',
   concurrentGenFail: (err) => `共享看板生成失败或暂缓;本次收工放行。请检查诊断,待输入稳定后显式运行 gen:\n${err}`,
   piReadOnly: 'Pi 收工检查只读,不自动生成看板;生成需另行授权,并遵守项目分支规则。',
@@ -168,6 +171,8 @@ const zh = {
   // 次序由 audits.mjs 的 CHORE_KEYS 定,这里只管每一条怎么写字;分隔符由 choreLine 统一加。
   // 一律不带命令、不带路径、不解释怎么处理 —— 那是 `ddd audit` 的活。
   chore: {
+    journeySuggested: (e) => `多轮记录待写卡会话整理为 journey ${e.rows.map((r) => `${r.id} ${r.field}`).join('; ')}${e.n > e.rows.length ? ` 等 ${e.n} 张` : ''}(保留原始资料)`,
+    journeySummary: (e) => `摘要待写卡会话复核 ${summaryFields(e.rows)}${e.n > e.rows.length ? ` 等 ${e.n} 张` : ''}(验证证据放 journey.development/detail;真实产品要求可保留)`,
     longText: (e) => `正文过长没拆 detail ${e.n} 张(最长 ${e.worst})`,
     // 八类里只有这一类点的是 PR 不是卡:它关乎别人的数据,不点号判断不了该不该现在管
     accFbUncommitted: (e) => `验收反馈没提交 ${e.n} 条(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
@@ -589,6 +594,8 @@ const zh = {
 const enPortCaveat = 'Port probing only avoids ports that are being listened on right now — it cannot see ports another project wrote into its config but has not started. Multi-project machines need manual port allocation (design §5).'
 
 const en = {
+  journeySuggested: (rows) => `Iteration history hint: ${rows.map((r) => `${r.id} ${r.field} (${r.n} characters/${r.updates} dated updates)`).join('; ')} has a demo and a long iteration history. The writing agent/session should organize it as a journey: summarize product decisions, implementation progress, and recent changes, and separate the current design from history. Keep old demos, links, screenshots, and original records. Check each decision; keep unanswered questions pending. This hint infers no business decisions, moves no evidence, and blocks no writes.`,
+  journeySummary: (rows) => `Summary review hint: ${summaryFields(rows)} may contain verification reports. The writing agent/session should review and edit: keep product decisions, implementation progress, and recent changes in the three summaries; put routine verification evidence in journey.development or detail. Keep actual product requirements. Only a few fixed phrases are recognized; hints can miss reports or flag valid prose. No card is changed and nothing is blocked.`,
   concurrentStopNotice: 'Shared-board mode: Stop checks cannot identify which session owns a finding, so this stop is advisory. Explicit audit, merge checks, and generated-file protections remain active.',
   concurrentGenFail: (err) => `Shared-board generation failed or was deferred; this stop is allowed. Inspect the diagnostic and run gen explicitly when inputs are stable:\n${err}`,
   piReadOnly: 'Pi settlement is read-only, with no automatic generation; generation requires separate authorization and the project branch rules still apply.',
@@ -707,6 +714,8 @@ const en = {
   // only one) and extras in parentheses, because the whole thing is now one unbroken line.
   chore: {
     longText: (e) => `card prose too long, no detail ${e.n} card(s) (longest ${e.worst})`,
+    journeySuggested: (e) => `writing session to organize iteration history as journey ${e.rows.map((r) => `${r.id} ${r.field}`).join('; ')}${e.n > e.rows.length ? ` and ${e.n} cards in all` : ''} (keep original records)`,
+    journeySummary: (e) => `writing session summary review ${summaryFields(e.rows)}${e.n > e.rows.length ? ` and ${e.n} cards in all` : ''} (verification evidence belongs in journey.development/detail; keep product requirements)`,
     accFbUncommitted: (e) => `acceptance feedback not committed ${e.n} line(s) (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
     accFbPrunable: (e) => `acceptance shots that can go ${e.n}`,
     settle: (e) => `every pull request merged, card not settled ${enCards(e)}`,
