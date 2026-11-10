@@ -9,6 +9,11 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.4] - 2026-11-10
+
+- Keep current demos at their original viewport width and height; reuse existing demo return bars and controls instead of a centered page shell.
+- Organize current designs, phase history, and development records without changing the embedded demo UI. Restore the original Open demo action.
+
 ## [0.19.3] - 2026-11-10
 
 - Fix journey card summaries with separate grid rows, readable labels, and direct access to current documents.

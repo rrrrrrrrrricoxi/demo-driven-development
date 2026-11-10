@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { Script } from 'node:vm'
 import { journeyError, journeyHref, isJourneyDemo, renderJourney } from '../scripts/journey.mjs'
 import { generatedReads } from '../scripts/hook-tool-rules.mjs'
 import { GEN_RE } from '../scripts/board-branch-check.mjs'
@@ -33,18 +34,24 @@ check(journeyError({...card, id: '../escape'}, 'en').includes('invalid'), 'rejec
 check(journeyHref('#acc-12') === '../index.html#acc-12' && journeyHref('refs/doc.html#s') === '../refs/doc.html#s', 'relative and hash links rebase')
 check(journeyHref('https://example.test/x') === 'https://example.test/x' && journeyHref('javascript:bad') === '#', 'safe URL fallback')
 check(isJourneyDemo(j.current.href) && isJourneyDemo('./demos/legend.html') && !['refs/spec.html', 'https://example.test/demos/current.html', 'index.html#D1', 'demos/../index.html', 'demos/%2e%2e/index.html'].some(isJourneyDemo), 'only local demo HTML is embedded')
+// Current URLs also enter the runtime's JSON list; HTML escaping alone cannot protect a script element.
+const scriptedUrl = renderJourney({...card, journey: {...j, current: {...j.current, href: 'demos/current.html?q=</script><script>alert(1)</script>'}}}, {lang: 'en', version: 'test', resolveLink: (s) => s})
+const scripts = [...scriptedUrl.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+check(scripts.length === 1 && scripts.every(([, body]) => new Script(body)), 'URL characters cannot close the runtime script and rendered runtime compiles')
 const result = run('gen.mjs'); assert.equal(result.status, 0, result.stderr)
 const html = readFileSync(join(board, 'journeys/D1.html'), 'utf8')
 const part = readFileSync(join(board, 'parts/decisions.html'), 'utf8')
 check(part.includes('现行决定') && part.includes('开发进度') && part.includes('最近变化') && part.includes('&lt;chosen&gt;'), 'three escaped summaries on decision card')
 check(part.includes('journeys/D1.html') && !part.includes('Original detail') && !part.includes('Historical link'), 'stable card entry replaces flat original content')
-check(part.includes('href="refs/spec.html"') && part.includes('Current specification') && part.includes('查看现行方案') && !part.includes('▶ 打开 demo'), 'current documents stay directly accessible and entry label names the destination')
+check(part.includes('href="refs/spec.html"') && part.includes('Current specification') && part.includes('▶ 打开 demo') && !part.includes('查看现行方案'), 'current documents stay directly accessible and the original demo label stays unchanged')
 check(part.includes('<dl class="journey-summary">') && (part.match(/class="journey-summary-row"/g) || []).length === 3, 'each card summary has one label/value row')
 check(html.includes('src="../demos/current.html?statistics=left#chart"') && html.includes('loading="eager"') && html.includes('title="Overall B"'), 'current demo is interactive immediately with query and fragment preserved')
-check(html.includes('<details class="demo-option"><summary>Legend D</summary><iframe') && html.includes('src="../demos/legend.html"') && html.includes('loading="lazy"') && !html.includes('src="../refs/spec.html"'), 'local refinement opens inline while specifications remain documents')
-check(html.includes('class="wrap journey-nav"') && html.includes('hashchange') && html.includes('s.hidden = s.id !== id') && html.includes('--bg:#f6f5f2') && html.includes('font: 15px/1.6'), 'board-aligned navigation switches current, history, and development views')
+check(html.includes('href="#current-1">Legend D</a>') && html.includes('id="current-1" class="current-design" hidden') && html.includes('src="../demos/legend.html"') && html.includes('loading="lazy"') && !html.includes('src="../refs/spec.html"'), 'local refinement uses the full current viewport on demand while specifications remain documents')
+check(html.includes('class="journey-nav"') && html.includes('hashchange') && html.includes('s.hidden = s.id !== id') && html.includes('--bg:#f6f5f2') && html.includes('font: 15px/1.6'), 'compact navigation switches current, history, and development views')
 check(html.includes('<details class="journey-status"><summary>决定与进度</summary>') && !html.includes('根据卡片 journey 生成'), 'compact header leaves the current demo visible and avoids implementation copy')
-check(html.includes("querySelectorAll('#ddd-backnav a')") && html.includes("a.href = document.querySelector('.backbar a').href") && html.includes("a.target = '_top'") && html.includes("frame.addEventListener('load', wireBacknav)"), 'embedded demo return links target their board card at runtime without rewriting old sources')
+check(html.includes('main { position: fixed; inset: 44px 0 0; }') && html.includes('width: 100%; height: 100%;') && !html.includes('max-width: 1060px') && !html.includes('height: 720px') && !html.includes('resource-link'), 'current demo fills the viewport below the original 44px bar without a new centered shell or button style')
+check(html.includes('class="acts journey-tools"') && html.includes('font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 7px;') && html.includes('class="record-nav"'), 'controls and record navigation reuse established demo tokens')
+check(html.includes("querySelectorAll('#ddd-backnav,nav')") && html.includes("frame.style.setProperty('--demo-backnav'") && html.includes("a.href = board.href; a.target = '_top'") && html.includes("frame.addEventListener('load', wireBacknav)") && html.includes("frame.addEventListener('ddd-show', wireBacknav)"), 'same-origin return bars are clipped with viewport height preserved and return links keep the top-level board card target')
 check(html.includes('../demos/current.html') && html.includes('../demos/legend.html') && html.includes('../demos/old.html'), 'both current demos and historical URLs retained')
 check(html.includes('href="../index.html#acc-12"') && !html.includes('href="#acc-12"'), 'acceptance hash returns to board including grouped PR checklist')
 check(!html.includes('<details open') && html.includes('阶段历史 · 1'), 'history starts collapsed')

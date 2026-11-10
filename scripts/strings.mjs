@@ -1245,7 +1245,7 @@ export function genStrings(lang) { return lang === 'en' ? genEn : genZh }
 // 多轮导航的用户文案与校验错误。
 export function journeyStrings(lang) {
   return lang === 'en' ? {
-    open: 'View current design', standalone: 'Open standalone demo', overview: 'Decision and progress', originalRecords: 'Original card records', screenshots: 'Screenshots',
+    open: 'Open demo', currentResources: 'Current resources', overview: 'Decision and progress', originalRecords: 'Original card records', screenshots: 'Screenshots',
     decision: 'Current decision', progress: 'Development progress', recent: 'Recent changes',
     current: 'Current design', history: 'Phase history', development: 'Development records',
     resources: 'Original links and screenshots', originalDemo: 'Original demo', board: 'Back to board',
@@ -1253,7 +1253,7 @@ export function journeyStrings(lang) {
     source: 'Current design, phase history, and development records. Original demos and evidence remain available.',
     invalid: (id, field) => `Card ${id} has invalid journey.${field}; see the journey contract in README.`,
   } : {
-    open: '查看现行方案', standalone: '单独打开 demo', overview: '决定与进度', originalRecords: '原始卡片记录', screenshots: '截图',
+    open: '打开 demo', currentResources: '现行资料', overview: '决定与进度', originalRecords: '原始卡片记录', screenshots: '截图',
     decision: '现行决定', progress: '开发进度', recent: '最近变化',
     current: '现行方案', history: '阶段历史', development: '开发记录',
     resources: '原始链接与截图', originalDemo: '原始 demo', board: '返回看板',
