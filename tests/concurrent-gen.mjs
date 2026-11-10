@@ -63,6 +63,14 @@ fs.readFileSync = function(path, ...args) {
       const data = JSON.parse(result); data.instance.name = 'EDIT-DURING-GENERATION';
       fs.writeFileSync(path, JSON.stringify(data)); fs.utimesSync(path, stat.atime, stat.mtime);
     }
+    if (['log', 'log-card'].includes(process.env.TEST_CHANGE)) {
+      fs.appendFileSync(join(process.env.TEST_BOARD, 'kanban.log'), 'GET /index.html during generation\\n');
+      if (process.env.TEST_CHANGE === 'log-card') {
+        const cardPath = join(process.env.TEST_BOARD, 'backlog-manifest.json');
+        const data = JSON.parse(read(cardPath, 'utf8')); data.items[0].title = 'CARD EDIT DURING GENERATION';
+        fs.writeFileSync(cardPath, JSON.stringify(data));
+      }
+    }
     if (process.env.TEST_CHANGE === 'asset') fs.unlinkSync(process.env.TEST_ASSET);
     if (process.env.TEST_CHANGE === 'doc') {
       fs.writeFileSync(process.env.TEST_DOC, '# EDIT-DURING-GENERATION');
@@ -129,6 +137,31 @@ try {
   ok(log.indexOf('publish:a') < log.indexOf('enter:b'), 'first publication precedes second renderer source read')
   ok(hash(join(board, 'demos/user.html')) === beforeDemo, 'concurrent generator preserves user demo bytes')
   ok(readdirSync(lockRoot(board)).length === 0, 'successful generators release contender records')
+
+  // 自带服务器会在浏览器 GET 时追加根日志;只忽略它,同一时段的真实卡片编辑仍要延后。
+  for (const mutation of ['log', 'log-card']) {
+    const kb = fixture(mutation), cardPath = join(kb, 'backlog-manifest.json')
+    const backlog = JSON.parse(readFileSync(cardPath, 'utf8'))
+    backlog.tiers = { '1': 'Feature' }
+    backlog.items = [{ id: 'BL-1', title: 'Original card', status: 'ready', tier: 1, priority: 'med' }]
+    writeFileSync(cardPath, JSON.stringify(backlog))
+    writeFileSync(join(kb, 'kanban.log'), 'GET /index.html before generation\n')
+    assert.equal(run(kb).status, 0)
+    const indexBefore = hash(join(kb, 'index.html')), sourceBefore = hash(cardPath)
+    const p = launch(kb, mutation, { TEST_CHANGE: mutation })
+    const result = await p.done
+    ok(readFileSync(join(kb, 'kanban.log'), 'utf8').includes('during generation'), `${mutation}: browser access log changes during rendering`)
+    if (mutation === 'log') {
+      assert.equal(result.status, 0, result.stderr)
+      ok(eventsOf(p.events).includes('publish:log') && !existsSync(join(kb, '.ddd-gen-stale')), 'browser access log alone permits complete publication')
+      ok(hash(cardPath) === sourceBefore, 'log-only generation preserves card source bytes')
+    } else {
+      ok(result.status !== 0 && result.stderr.includes('Sources changed'), 'card editing with browser traffic still defers generation')
+      ok(hash(join(kb, 'index.html')) === indexBefore && existsSync(join(kb, '.ddd-gen-stale')), 'card edit preserves previous index and requests retry')
+      ok(readFileSync(cardPath, 'utf8').includes('CARD EDIT DURING GENERATION'), 'card edit survives deferred generation')
+    }
+    ok(readdirSync(lockRoot(kb)).length === 0, `${mutation}: generator releases contender record`)
+  }
 
   for (const mutation of ['source', 'doc', 'asset', 'late', 'newer']) {
     const kb = fixture(mutation)
