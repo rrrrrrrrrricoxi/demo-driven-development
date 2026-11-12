@@ -47,6 +47,8 @@ try {
     rmSync(join(checkout, '.git'), { recursive: true })
     assert.equal(checkCodexPackage({ source: f.source, dir: checkout, expectCommit: f.first }).source.commit, f.first)
     assert.equal(existsSync(join(checkout, 'plugin.json')), false)
+    assert.equal(existsSync(join(checkout, '.claude-plugin')), false)
+    assert.deepEqual(readFileSync(join(checkout, 'package.json')), readFileSync(join(f.source, 'package.json')))
     assert.equal(JSON.parse(readFileSync(join(checkout, '.agents/plugins/marketplace.json'))).name, 'demo-driven-development')
     assert.equal(git(f.remote, ['tag', '--list']), '')
   })

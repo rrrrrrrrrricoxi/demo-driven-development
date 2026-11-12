@@ -4,7 +4,7 @@
 // 目录探测会误伤 Next.js app-router 的 app/kanban/ 路由,见 §6-1)。
 // 路径 v0.1 写死 app/kanban/(YAGNI,monorepo 自定义路径将来再议)。
 //
-// P = DDD_PROJECT_DIR > 事件 cwd > CLAUDE_PROJECT_DIR > 进程 cwd。
+// P = DDD_PROJECT_DIR > 事件 cwd > 进程 cwd。
 // 先认看板目录本身,再试 P/app/kanban,最后经 Git 根查找(含 worktree)。
 // 全不中 → 返回 null(调用方静默 exit 0)。
 import { statSync } from 'node:fs'
@@ -17,7 +17,7 @@ const CONFIG = 'kanban.config.json'
 export function detect({ cwd, env = process.env } = {}) {
   // DDD 显式上下文优先;事件 cwd 防止从别的目录启动 hook 时误判项目。
   const eventCwd = typeof cwd === 'string' && cwd ? cwd : null
-  const P = resolve(env.DDD_PROJECT_DIR || eventCwd || env.CLAUDE_PROJECT_DIR || process.cwd())
+  const P = resolve(env.DDD_PROJECT_DIR || eventCwd || process.cwd())
   const configured = (dir) => { try { return statSync(join(dir, CONFIG)).isFile() } catch { return false } }
   if (configured(P)) return P // 保留直接从看板目录运行 CLI 的入口。
   const direct = join(P, 'app', 'kanban')

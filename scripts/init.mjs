@@ -5,7 +5,7 @@
 //   node scripts/init.mjs plan  [--dir <targetRoot>] [选项]     输出将执行的动作(只读)
 //   node scripts/init.mjs apply [--dir <targetRoot>] [选项]     动手(全程持 .init-lock)
 //
-// 选项:--runtime claude|codex|both|portable(缺省 claude)
+// 选项:--runtime claude|codex|both|portable(缺省 portable;宿主接入须显式选择)
 //       portable 只初始化共享看板,不接入宿主 hooks/skills/config。
 //       --codex-hooks project|plugin(缺省 project;原生 plugin 装法选 plugin 防重复)
 //       --no-commit(Claude 清洁仓库缺省自动提交;Codex/both/portable/已有修改不自动暂存提交)
@@ -21,9 +21,9 @@
 //   1. 铺骨架:config + 三个 manifest(templates/manifests 变量填充;path-manifest 仅
 //      --with-narrative 时铺,缺失时 gen 自动跳过对应标签页)+ demos/ + shots/
 //      + demos/.no-card-ok + demos 侧 .gitignore + serve.py + serve-kanban.sh
-//   2. settings 注入:templates/settings-inject.json 的 permissions.deny 深合并进
+//   2. 显式 Claude 接入时:templates/settings-inject.json 的 permissions.deny 深合并进
 //      <targetRoot>/.claude/settings.json(去重合并,绝不覆盖其他键)
-//   3. CLAUDE.md 注入:追加 templates/claude-md-section.md(已含标记节则跳过)
+//   3. 显式 Claude 接入时:追加 templates/claude-md-section.md(已含标记节则跳过)
 //   Codex 改为 AGENTS.md + .codex/hooks.json,只追加缺失的 hooks 开关且保留宿主关闭选择。
 //   4. apply 末尾自跑 gen 冒烟 + 已选运行时守卫冒烟;Claude 清洁仓库只 add 触碰路径并提交
 //
@@ -81,7 +81,7 @@ function printRuntime(stage, runtime) {
 
 // ---- CLI 解析 ----
 function parseArgs(argv) {
-  const opt = { cmd: null, dir: null, runtime: 'claude', codexHooks: 'project', noCommit: false, brand: null, lang: null, port: null, stubStatus: null, only: null, exclude: null, remember: false, withNarrative: false, takeAssets: false, yes: false }
+  const opt = { cmd: null, dir: null, runtime: 'portable', codexHooks: 'project', noCommit: false, brand: null, lang: null, port: null, stubStatus: null, only: null, exclude: null, remember: false, withNarrative: false, takeAssets: false, yes: false }
   const valued = { '--dir': 'dir', '--runtime': 'runtime', '--codex-hooks': 'codexHooks', '--brand': 'brand', '--lang': 'lang', '--port': 'port', '--stub-status': 'stubStatus', '--only': 'only', '--exclude': 'exclude' }
   const flags = { '--no-commit': 'noCommit', '--yes': 'yes', '--with-narrative': 'withNarrative', '--take-assets': 'takeAssets', '--remember': 'remember' }
   for (let i = 0; i < argv.length; i++) {
@@ -134,7 +134,7 @@ function gitInfo(root) {
 }
 
 // ---- 场景识别(设计 §7 三种进场景) ----
-const EXCLUDE_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', '.next', 'coverage', 'vendor', '__pycache__', '.claude', '.codex', '.agents'])
+const EXCLUDE_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', '.next', 'coverage', 'vendor', '__pycache__', '.claude', '.codex', '.agents', '.pi'])
 function findScatteredHtml(root) {
   // 只收路径/不读正文(token 纪律);标题/资产引用等完整盘点随 brownfield 落地
   const found = []
@@ -1235,7 +1235,7 @@ async function doApply(root, st, gi, opt, plan) {
     try {
       hookOut = execFileSync(process.execPath, runtime === 'codex' ? [join(HERE, 'codex-hook.mjs'), 'stop'] : [join(HERE, 'stop-hook.mjs')], {
         input: JSON.stringify({ cwd: root, hook_event_name: 'Stop' }),
-        env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+        env: { ...process.env, DDD_PROJECT_DIR: root },
         stdio: ['pipe', 'pipe', 'pipe'],
       }).toString()
     } catch (e) {

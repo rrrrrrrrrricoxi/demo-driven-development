@@ -37,18 +37,26 @@ node <plugin>/scripts/gen.mjs --dir <kanbanDir>
 `audit --json` reports `block`, `broken`, and `chore` arrays. A successful audit
 command can return exit code 0 with findings in those arrays. Inspect the
 findings; exit code 0 does not mean the board is clean or authorize a tool call.
+Shared CLI discovery uses `DDD_PROJECT_DIR` or the working directory, with an
+explicit `--dir` taking precedence. Host environment variables belong to the
+adapter and do not select a board for the CLI.
+
 An explicit `gen` writes generated output. Run it on the project's main board
 branch and keep source-writing sessions coordinated.
 
-For a new board without Claude or Codex configuration, use portable init:
+For a new board without host configuration, use init. Its default runtime is
+`portable`; these commands make that choice explicit:
 
 ```sh
 node <plugin>/scripts/init.mjs plan --dir <projectRoot> --brand Example --runtime portable
 node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand Example --runtime portable --yes --no-commit
 ```
 
-Portable init prepares board data without installing a host adapter. Loading
-skills, running audits, and scheduling generation remain the caller's work.
+Portable init prepares board data without installing a host adapter or changing
+host configuration. The shared engine reads its canonical version from
+`package.json`; host manifests and installed-plugin registries are not core
+version sources. Loading skills, running audits, and scheduling generation
+remain the caller's work.
 CLI availability does not establish lifecycle integration with that caller's
 host. Existing boards can use the CLI and shared API without running init again.
 

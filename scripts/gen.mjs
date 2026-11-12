@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * 看板生成器(零依赖;ddd-kanban plugin 版,配置来自看板目录下 kanban.config.json)。
+ * 看板生成器(零依赖;配置来自看板目录下 kanban.config.json,运行包身份来自 package.json)。
  *
- *   node scripts/gen.mjs --dir <kanbanDir>   # 缺省:$CLAUDE_PROJECT_DIR/app/kanban,或 cwd(若含 kanban.config.json)
+ *   node scripts/gen.mjs --dir <kanbanDir>   # 缺省:$DDD_PROJECT_DIR/app/kanban,或 cwd/项目/Git 根探测
  *   python3 <kanbanDir>/serve.py             # 服务化(:config.port, no-cache),refs/ 文档可点开
  *
  * 做三件事:
@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync as directWrite, copyFileSync as directCopy,
 import { execFileSync } from 'node:child_process'
 import { join, relative, sep } from 'node:path'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
-import { genStrings, journeyStrings } from './strings.mjs'
+import { genStrings, journeyStrings, runtimeStrings } from './strings.mjs'
 import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { beginConcurrentGeneration } from './gen-concurrent.mjs'
@@ -35,7 +35,7 @@ import { resolveCurrentRecords } from './current-records.mjs'
 import { currentRenderStrings } from './current-render-strings.mjs'
 import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFrom, depItemText, openCount, reverseAfter } from './deps.mjs'
 
-// ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
+// ---- 看板目录定位:--dir <kanbanDir> > $DDD_PROJECT_DIR/app/kanban > cwd/项目/Git 根探测----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
 const REQUESTED_HERE = resolveKanbanDir()
 const GENERATION = await beginConcurrentGeneration(REQUESTED_HERE)
@@ -47,10 +47,10 @@ const REPO_ROOT = join(HERE, '..', '..') // 项目根(读 docs 用)
 const REFS_DIR = join(HERE, 'refs')
 
 // ---- gen 版本戳(防「旧版 session 盖板」)----
-// 版本自 ../.claude-plugin/plugin.json(真源);读不到硬失败——必须保证「gen 跑过就一定留戳」,
+// 版本自 ../package.json(运行包真源);读不到硬失败——必须保证「gen 跑过就一定留戳」,
 // 守卫才有「无戳 = 旧 gen 产物 → 重跑自愈」的等价性;放行无戳输出会造出每次收工都重生成的永动。
 const GEN_VER = readPluginVersion()
-if (!GEN_VER) throw new Error('[gen] 读不到 plugin 自身 .claude-plugin/plugin.json 的 version(或其值非纯数字点分——勿用 -rc/-beta 后缀)——gen.mjs 不应脱离 plugin 目录单跑;修复安装或从 plugin 根运行 / cannot read a plain-numeric "version" from the plugin\'s own .claude-plugin/plugin.json (no -rc/-beta suffixes); do not run gen.mjs outside the plugin directory — repair the install or run from the plugin root')
+if (!GEN_VER) throw new Error(`[gen] ${runtimeStrings('zh').genNoIdentity} / ${runtimeStrings('en').genNoIdentity}`)
 // 拒降级:现有产物的戳比本 gen 新 → 拒跑(防旧 gen 盖新产物;多半是本 session 的 plugin 旧了)。
 // 越过是 human-only 动作:须显式 --force-downgrade=<产物戳版本>(报错文案不提示此旗——
 // 守卫会把 stderr 喂回 agent 自修,防线别变教程)。

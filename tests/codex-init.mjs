@@ -15,7 +15,8 @@ mkdirSync(HOME)
 for (const dir of ['scripts', 'templates', '.claude-plugin', '.codex-plugin']) {
   if (existsSync(join(REPO, dir))) cpSync(join(REPO, dir), join(PLUGIN, dir), { recursive: true })
 }
-const env = { ...process.env, HOME, CODEX_HOME: join(HOME, '.codex'), CLAUDE_PROJECT_DIR: '' }
+cpSync(join(REPO, 'package.json'), join(PLUGIN, 'package.json'))
+const env = { ...process.env, HOME, CODEX_HOME: join(HOME, '.codex'), CLAUDE_PROJECT_DIR: '', DDD_PROJECT_DIR: '' }
 let checks = 0
 const check = (fn) => { fn(); checks++ }
 const read = (root, rel) => readFileSync(join(root, rel), 'utf8')
@@ -122,6 +123,14 @@ try {
   init(root, ['apply', '--runtime', 'codex', '--yes'], true, movedPlugin)
   check(() => assert.deepEqual(snapshot(root), movedOnce))
 
+  // 历史重复注册归并为一个自有组;用户的 Stop handler 仍保留。
+  const hooksBeforeDuplicates = structuredClone(movedHooks)
+  for (const event of ['Stop', 'PreToolUse', 'PostToolUse']) movedHooks.hooks[event].push(structuredClone(movedHooks.hooks[event].at(-1)))
+  write(root, '.codex/hooks.json', JSON.stringify(movedHooks, null, 2) + '\n')
+  init(root, ['apply', '--runtime', 'codex', '--yes'], true, movedPlugin)
+  const deduplicated = JSON.parse(read(root, '.codex/hooks.json'))
+  check(() => assert.deepEqual(deduplicated, hooksBeforeDuplicates))
+
   // 项目接入改为原生 plugin:只去掉 init 自己的组,用户 hooks 与 TOML 一字不动。
   write(root, '.codex/config.toml', read(root, '.codex/config.toml') + '\n[hooks]\ncustom = "preserve inline TOML during plugin transition"\n')
   const transitionConfig = read(root, '.codex/config.toml')
@@ -185,18 +194,18 @@ try {
 
   const clean = fixture('claude compatibility')
   repository(clean)
-  init(clean, ['apply', '--brand', 'CLAUDE', '--yes'])
+  init(clean, ['apply', '--runtime', 'claude', '--brand', 'CLAUDE', '--yes'])
   check(() => assert.equal(git(clean, 'rev-list', '--count', 'HEAD').trim(), '2'))
   check(() => assert.equal(existsSync(join(clean, 'AGENTS.md')), false))
   check(() => assert.equal(existsSync(join(clean, '.codex')), false))
   const cleanOnce = snapshot(clean)
-  init(clean, ['apply', '--yes'])
+  init(clean, ['apply', '--runtime', 'claude', '--yes'])
   check(() => assert.deepEqual(snapshot(clean), cleanOnce))
   check(() => assert.equal(git(clean, 'rev-list', '--count', 'HEAD').trim(), '2'))
 
   const noCommit = fixture('claude no commit')
   repository(noCommit)
-  init(noCommit, ['apply', '--brand', 'NOCOMMIT', '--no-commit', '--yes'])
+  init(noCommit, ['apply', '--runtime', 'claude', '--brand', 'NOCOMMIT', '--no-commit', '--yes'])
   check(() => assert.equal(git(noCommit, 'rev-list', '--count', 'HEAD').trim(), '1'))
   check(() => assert.equal(git(noCommit, 'diff', '--cached'), ''))
 
@@ -211,7 +220,7 @@ try {
   write(dirty, 'CLAUDE.md', read(dirty, 'CLAUDE.md') + 'User unstaged edit.\n')
   write(dirty, '.claude/settings.json', JSON.stringify({ model: 'user dirty model', permissions: { allow: ['custom'] }, user: 'preserve' }))
   const index = git(dirty, 'diff', '--cached')
-  const dirtyOutput = init(dirty, ['apply', '--brand', 'DIRTY', '--yes'])
+  const dirtyOutput = init(dirty, ['apply', '--runtime', 'claude', '--brand', 'DIRTY', '--yes'])
   check(() => assert.match(dirtyOutput, /Target already had changes/))
   check(() => assert.equal(git(dirty, 'diff', '--cached'), index))
   check(() => assert.equal(git(dirty, 'rev-list', '--count', 'HEAD').trim(), '2'))

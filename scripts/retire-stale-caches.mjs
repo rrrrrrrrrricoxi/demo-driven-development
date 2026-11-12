@@ -28,7 +28,7 @@ import { cmpVer, readPluginVersion } from './lib-version.mjs'
 
 const SHIM_MARK = 'ddd-retired-shim'
 const MY_VER = readPluginVersion()
-if (!MY_VER) { console.error('[retire] 读不到自身 .claude-plugin/plugin.json 的纯数字版本,中止'); process.exit(1) }
+if (!MY_VER) process.exit(1) // readPluginVersion 已输出 package.json 的双语修复说明。
 let MY_NAME
 try {
   MY_NAME = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.claude-plugin', 'plugin.json'), 'utf8')).name

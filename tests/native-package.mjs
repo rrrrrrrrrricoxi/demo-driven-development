@@ -47,11 +47,13 @@ try {
     const out = exported('exact')
     assert.equal(git(['status', '--porcelain']), before)
     assert.equal(existsSync(join(out, 'plugin.json')), false)
+    assert.equal(existsSync(join(out, '.claude-plugin')), false)
+    assert.deepEqual(readFileSync(join(out, 'package.json')), readFileSync(join(SOURCE, 'package.json')))
     const native = read(join(out, '.codex-plugin/plugin.json'))
     assert.equal(native.version, VERSION)
     assert.equal(native.skills, './skills/')
     assert.equal(native.hooks, './hooks/codex-hooks.json')
-    const paths = git(['ls-files', 'hooks', 'skills', 'scripts', '.codex-plugin', '.claude-plugin']).split('\n')
+    const paths = git(['ls-files', 'hooks', 'skills', 'scripts', '.codex-plugin']).split('\n')
     for (const path of paths) assert.deepEqual(readFileSync(join(out, path)), readFileSync(join(SOURCE, path)), path)
     for (const path of ['snapshot.txt', 'substitution.txt', 'binary.dat']) assert.deepEqual(readFileSync(join(out, path)), readFileSync(join(SOURCE, path)))
     assert.equal(lstatSync(join(out, 'scripts/package-codex.mjs')).mode & 0o777, 0o755)
@@ -63,6 +65,8 @@ try {
     assert.equal(provenance.source.tree, git(['rev-parse', `${BASE}^{tree}`]))
     assert.equal(provenance.source.version, VERSION)
     assert.equal(provenance.publication, 'not checked')
+    assert.deepEqual(provenance.adaptations.filter((item) => item.operation === 'remove').map((item) => item.path),
+      ['plugin.json', ...git(['ls-files', '.claude-plugin']).split('\n').sort()])
     assert.equal(JSON.stringify(provenance).includes(WORK), false)
     assert.deepEqual(readFileSync(join(SOURCE, 'plugin.json')), Buffer.from(git(['show', `${BASE}:plugin.json`]) + '\n'))
   })
@@ -88,13 +92,16 @@ try {
     const original = read(join(SOURCE, '.agents/plugins/marketplace.json'))
     const actual = read(join(out, '.agents/plugins/marketplace.json'))
     assert.deepEqual(actual, { ...original, name: 'ddd-native-local' })
-    assert.equal(read(join(out, PROVENANCE)).adaptations[1].value, 'ddd-native-local')
+    assert.equal(read(join(out, PROVENANCE)).adaptations.find((item) => item.operation === 'set').value, 'ddd-native-local')
     checkCodexPackage({ dir: out, source: SOURCE })
     assert.equal(read(join(SOURCE, '.agents/plugins/marketplace.json')).name, original.name)
   })
   check('added, missing, modified, hook, skill, version, marketplace, provenance, and mode tampering fail', () => {
     const cases = [
       ['added', (out) => writeFileSync(join(out, 'extra.txt'), 'extra')],
+      ['claude-metadata', (out) => { mkdirSync(join(out, '.claude-plugin')); json(join(out, '.claude-plugin/plugin.json'), read(join(SOURCE, '.claude-plugin/plugin.json'))) }],
+      ['root-manifest', (out) => cpSync(join(SOURCE, 'plugin.json'), join(out, 'plugin.json'))],
+      ['package-version', (out) => { const path = join(out, 'package.json'), value = read(path); value.version = '99.0.0'; json(path, value) }],
       ['missing', (out) => rmSync(join(out, 'snapshot.txt'))],
       ['modified', (out) => writeFileSync(join(out, 'snapshot.txt'), 'tampered')],
       ['hook', (out) => writeFileSync(join(out, 'hooks/codex-hooks.json'), '{}')],
@@ -103,6 +110,7 @@ try {
       ['marketplace', (out) => { const path = join(out, '.agents/plugins/marketplace.json'), value = read(path); value.name = 'tampered'; json(path, value) }],
       ['provenance', (out) => { const path = join(out, PROVENANCE), value = read(path); value.source.tree = '0'.repeat(40); json(path, value) }],
       ['provenance-extra', (out) => { const path = join(out, PROVENANCE), value = read(path); value.untrusted = true; json(path, value) }],
+      ['provenance-removals', (out) => { const path = join(out, PROVENANCE), value = read(path); value.adaptations = value.adaptations.filter((item) => !item.path.startsWith('.claude-plugin/')); json(path, value) }],
       ['mode', (out) => chmodSync(join(out, 'scripts/package-codex.mjs'), 0o644)],
       ['empty-directory', (out) => mkdirSync(join(out, 'extra-directory'))],
       ['symlink', (out) => symlinkSync('snapshot.txt', join(out, 'link'))],

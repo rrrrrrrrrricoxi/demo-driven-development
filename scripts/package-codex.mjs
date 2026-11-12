@@ -91,6 +91,11 @@ function expected(source, ref, marketplace) {
   if (repository.protocol !== 'https:' || repository.username || repository.password || repository.search || repository.hash) fail('来源标识须是无凭据 HTTPS URL / Repository identity must be a credential-free HTTPS URL')
   const adaptations = [{ operation: 'remove', path: 'plugin.json', reason: 'Select .codex-plugin/plugin.json for native Codex hooks' }]
   files.delete('plugin.json')
+  // Claude 的发现与市场元数据不属于 Codex 发行包;逐文件记录,使快照差异可复核。
+  for (const path of [...files.keys()].filter((path) => path.startsWith('.claude-plugin/')).sort()) {
+    files.delete(path)
+    adaptations.push({ operation: 'remove', path, reason: 'Exclude Claude-specific plugin and marketplace metadata from the native Codex package' })
+  }
   if (marketplace !== undefined) {
     const path = '.agents/plugins/marketplace.json'
     const metadata = JSON.parse(files.get(path).data)

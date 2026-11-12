@@ -9,6 +9,13 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## 0.19.9 — 2026-11-12
+
+- Read core identity and version only from package.json; generation, audits, and version guards no longer require a harness manifest.
+- Exclude Claude metadata from Codex native packages and verify exported packages through a host-free CLI lifecycle.
+- Default initialization to portable mode. Explicit host adapters own hook registration; shared board discovery ignores host-specific environment variables.
+- Keep Pi runtime files outside demo discovery and document core, project-data, and host-adapter boundaries.
+
 ## 0.19.8 — 2026-11-12
 
 - Keep the current-resource button label short on referenced journeys; show the source link inside its menu and on the card so narrow screens retain the existing navigation width.

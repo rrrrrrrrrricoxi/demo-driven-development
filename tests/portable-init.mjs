@@ -13,7 +13,7 @@ const PLUGIN = join(WORK, "shared plugin's path $literal")
 const HOME = join(WORK, 'isolated home')
 mkdirSync(HOME)
 for (const dir of ['scripts', 'templates']) cpSync(join(REPO, dir), join(PLUGIN, dir), { recursive: true })
-cpSync(join(REPO, 'plugin.json'), join(PLUGIN, 'plugin.json'))
+cpSync(join(REPO, 'package.json'), join(PLUGIN, 'package.json'))
 // 删掉宿主入口:portable 若误调适配器,本测试必须失败。
 for (const name of ['stop-hook.mjs', 'codex-hook.mjs', 'pi-hook.mjs']) rmSync(join(PLUGIN, 'scripts', name), { force: true })
 const env = { ...process.env, HOME, CODEX_HOME: join(HOME, '.codex'), CLAUDE_PROJECT_DIR: '', DDD_PROJECT_DIR: '' }
@@ -35,7 +35,7 @@ function run(root, script, args, success = true) {
   return result.stdout + result.stderr
 }
 function init(root, cmd, args = [], success = true) {
-  return run(root, 'init.mjs', [cmd, '--runtime', 'portable', '--dir', root, '--lang', 'en', '--port', '19877', ...args], success)
+  return run(root, 'init.mjs', [cmd, '--dir', root, '--lang', 'en', '--port', '19877', ...args], success)
 }
 function git(root, ...args) {
   const result = spawnSync('git', args, { cwd: root, env, encoding: 'utf8' })
@@ -64,7 +64,7 @@ function snapshot(root) {
   return found
 }
 function noHosts(root) {
-  for (const rel of ['CLAUDE.md', 'AGENTS.md', '.claude', '.codex', '.agents']) {
+  for (const rel of ['CLAUDE.md', 'AGENTS.md', '.claude', '.codex', '.agents', '.pi']) {
     check(() => assert.equal(existsSync(join(root, rel)), false, rel))
   }
 }
@@ -97,6 +97,9 @@ try {
   const once = snapshot(root)
   init(root, 'apply', ['--yes'])
   check(() => assert.deepEqual(snapshot(root), once))
+  // 显式 portable 与无宿主默认值共享同一条路径。
+  init(root, 'apply', ['--runtime', 'portable', '--yes'])
+  check(() => assert.deepEqual(snapshot(root), once))
 
   // 既有宿主配置含旧 hook、禁用开关与私有规则:portable 连格式都不能重写。
   const configured = fixture('existing host files')
@@ -110,6 +113,8 @@ try {
     '.claude/cache/demo.html': '<html><title>host metadata</title></html>',
     '.codex/cache/demo.html': '<html><title>host metadata</title></html>',
     '.agents/cache/demo.html': '<html><title>host metadata</title></html>',
+    '.pi/settings.json': '{ "extensions": ["keep"] }\n',
+    '.pi/cache/demo.html': '<html><title>host metadata</title></html>',
   }
   for (const [rel, text] of Object.entries(hostFiles)) write(configured, rel, text)
   const hostBefore = snapshot(configured)
