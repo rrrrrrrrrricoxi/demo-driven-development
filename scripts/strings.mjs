@@ -32,6 +32,8 @@ const summaryFields = (rows) => rows.map((r) => `${r.id} ${r.fields.map((f) => `
 const zhPortCaveat = '端口探测只避得开「当下正被监听」的端口,避不开别的项目 config 里写了但没起的 —— 同机多项目端口需人工分配(设计 §5)。'
 
 const zh = {
+  cardCloseoutUnavailable: (id, audit) => `卡 ${id} 的收尾核对未完成:看板源资料无法审计。请查询源卡,再运行 \`${audit}\` 检查原因;不要把此提示当作写入失败或审计通过。`,
+  cardCloseout: (id, facts, cmd) => `本次写卡收尾(${id}):当前卡仍有以下待办。请在完成本任务前处理本卡,不要只转述提示。\n${facts}\n先读源卡: \`${cmd.show}\`。按来源核对后整理:普通长证据完整移入 detail(\`${cmd.detail} <原始证据>\`,再缩短原字段);多轮记录用 journey 分开现行方案与历史(\`${cmd.journey} <经核对的对象>\`);摘要保留产品决定、业务进度和最近变化,测试细节放 development/detail。保留原始记录、demo、链接和截图,未获确认的决定仍待决。\n整理后重跑源卡查询及 \`${cmd.audit}\`,核对本卡待办是否已清;审查源文件 diff,按项目权限与共享 Git 规则保存/提交自己范围内的变更。不能完成时报告卡号、剩余项与具体阻碍。不要替用户决定或改人工验收判定。`,
   journeySuggested: (rows) => `多轮记录整理提示:${rows.map((r) => `${r.id} ${r.field}(${r.n}字/${r.updates}条日期更新)`).join('; ')} 已有 demo 与较长的多轮记录。写卡会话应主动整理为 journey,用三行摘要说明产品决定、业务实现进度与最近变化,把现行方案和历史分开。保留旧 demo、链接、截图和原始记录;逐项核对决定,待答问题继续标为待答。此提示不推断业务决定、不迁移资料、不阻断写入。`,
   journeySummary: (rows) => `摘要复核提示:${summaryFields(rows)} 可能写入了验证汇报。写卡会话应复核并整理:三行摘要写产品决定、业务实现进度与最近变化;常规验证证据放 journey.development 或 detail。真实产品要求可保留。规则仅识别少量固定句式,可能漏报或误报;不改卡、不阻断。`,
   concurrentStopNotice: '共享看板模式:收工检查无法判定问题属于哪个会话,因此本轮仅提醒。显式 audit、合并检查和生成物保护仍然有效。',
@@ -68,8 +70,8 @@ const zh = {
     `⚠ 看板守卫:验收清单 ${list} 的 cards 引用了看板上不存在的卡号「${id}」—— 芯片会点不动,请核对卡号。`,
   // v0.17.0:验收反馈是当场记下的账,留在工作区里等于没留(换台机器就看不见了)。只提醒,不代提交。
   accFbUncommitted: (rows, total) =>
-    `验收反馈:${rows.map((r) => `#${r.pr} 新增 ${r.n} 条未提交(${r.who.join(' · ')})`).join(';')}` +
-    `${total > rows.length ? ` …等 ${total} 个 PR` : ''} —— 收工前提交 app/kanban/acceptance-feedback.jsonl。`,
+    `验收反馈:${rows.map((r) => `#${r.pr} 新增 ${r.n} 条 Git 未提交(${r.who.join(' · ')})`).join(';')}` +
+    `${total > rows.length ? ` …等 ${total} 个 PR` : ''} —— 这是 Git 留存待办,不表示验收未判或未通过。先核对该文件的 git diff HEAD,保留全部人工判定;按项目权限与共享 Git 规则提交授权范围内的反馈及关联截图,再复审。不要重写判定或为消除提示删除反馈。`,
   accFbPrunable: (n, days) =>
     `验收反馈截图:${n} 张对应的 PR 已合并满 ${days} 天,可清 —— \`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run\` 先看清单,去掉 --dry-run 才删(jsonl 一行不动)。`,
   richLongText: (worst, total) =>
@@ -177,7 +179,7 @@ const zh = {
     journeySummary: (e) => `摘要待写卡会话复核 ${summaryFields(e.rows)}${e.n > e.rows.length ? ` 等 ${e.n} 张` : ''}(验证证据放 journey.development/detail;真实产品要求可保留)`,
     longText: (e) => `正文过长没拆 detail ${e.n} 张(最长 ${e.worst})`,
     // 八类里只有这一类点的是 PR 不是卡:它关乎别人的数据,不点号判断不了该不该现在管
-    accFbUncommitted: (e) => `验收反馈没提交 ${e.n} 条(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
+    accFbUncommitted: (e) => `验收反馈 Git 未提交 ${e.n} 条(${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` 等 ${e.prTotal} 个` : ''})`,
     accFbPrunable: (e) => `可清的验收截图 ${e.n} 张`,
     settle: (e) => `PR 全合了还没收账 ${zhCards(e)}`,
     reopen: (e) => `已收但 PR 还开着 ${zhCards(e)}`,
@@ -601,6 +603,8 @@ const zh = {
 const enPortCaveat = 'Port probing only avoids ports that are being listened on right now — it cannot see ports another project wrote into its config but has not started. Multi-project machines need manual port allocation (design §5).'
 
 const en = {
+  cardCloseoutUnavailable: (id, audit) => `Closeout for ${id} could not be checked because board sources could not be audited. Query the source card and run \`${audit}\` to inspect the cause. This notice means neither that the write failed nor that the audit passed.`,
+  cardCloseout: (id, facts, cmd) => `Close out this card write (${id}): the target card still has the following work. Handle this card before completing the task; do not just repeat the notice.\n${facts}\nRead the source card: \`${cmd.show}\`. Check the evidence, then organize it: move complete long evidence into detail (\`${cmd.detail} <original evidence>\`) and shorten its original field; separate current design from iteration history with journey (\`${cmd.journey} <verified object>\`); keep product decisions, implementation progress, and recent changes in summaries, and verification details in development/detail. Keep original records, demos, links, and screenshots. Leave unconfirmed decisions pending.\nRerun the source query and \`${cmd.audit}\`; check that this card's findings are resolved. Review the source diff, then save/commit only your authorized scope under the project's shared Git rules. If work cannot finish, report the card, remaining items, and concrete blocker. Do not decide for the user or change human acceptance judgments.`,
   journeySuggested: (rows) => `Iteration history hint: ${rows.map((r) => `${r.id} ${r.field} (${r.n} characters/${r.updates} dated updates)`).join('; ')} has a demo and a long iteration history. The writing agent/session should organize it as a journey: summarize product decisions, implementation progress, and recent changes, and separate the current design from history. Keep old demos, links, screenshots, and original records. Check each decision; keep unanswered questions pending. This hint infers no business decisions, moves no evidence, and blocks no writes.`,
   journeySummary: (rows) => `Summary review hint: ${summaryFields(rows)} may contain verification reports. The writing agent/session should review and edit: keep product decisions, implementation progress, and recent changes in the three summaries; put routine verification evidence in journey.development or detail. Keep actual product requirements. Only a few fixed phrases are recognized; hints can miss reports or flag valid prose. No card is changed and nothing is blocked.`,
   concurrentStopNotice: 'Shared-board mode: Stop checks cannot identify which session owns a finding, so this stop is advisory. Explicit audit, merge checks, and generated-file protections remain active.',
@@ -633,8 +637,8 @@ const en = {
   accUnknownCard: (list, id) =>
     `⚠ Kanban guard: acceptance checklist ${list} references card id "${id}" in cards, but no such card exists on the board — the chip would not go anywhere. Check the id.`,
   accFbUncommitted: (rows, total) =>
-    `Acceptance feedback: ${rows.map((r) => `#${r.pr} has ${r.n} new uncommitted line(s) (${r.who.join(' · ')})`).join('; ')}` +
-    `${total > rows.length ? ` …and ${total} pull requests in total` : ''} — commit app/kanban/acceptance-feedback.jsonl before you stop.`,
+    `Acceptance feedback: ${rows.map((r) => `#${r.pr} has ${r.n} new line(s) not committed to Git (${r.who.join(' · ')})`).join('; ')}` +
+    `${total > rows.length ? ` …and ${total} pull requests in total` : ''} — this is Git persistence work, not a claim that acceptance is unjudged or failed. Check git diff HEAD for this file and preserve all human judgments. Commit authorized feedback and related screenshots under the project permissions and shared Git rules, then audit again. Do not rewrite judgments or delete feedback to clear the notice.`,
   accFbPrunable: (n, days) =>
     `Acceptance feedback shots: ${n} of them belong to pull requests merged more than ${days} days ago and can go — run \`node <plugin>/scripts/acc-feedback-prune.mjs --dry-run\` for the list, drop --dry-run to delete (the jsonl is never touched).`,
   richLongText: (worst, total) =>
@@ -723,7 +727,7 @@ const en = {
     longText: (e) => `card prose too long, no detail ${e.n} card(s) (longest ${e.worst})`,
     journeySuggested: (e) => `writing session to organize iteration history as journey ${e.rows.map((r) => `${r.id} ${r.field}`).join('; ')}${e.n > e.rows.length ? ` and ${e.n} cards in all` : ''} (keep original records)`,
     journeySummary: (e) => `writing session summary review ${summaryFields(e.rows)}${e.n > e.rows.length ? ` and ${e.n} cards in all` : ''} (verification evidence belongs in journey.development/detail; keep product requirements)`,
-    accFbUncommitted: (e) => `acceptance feedback not committed ${e.n} line(s) (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
+    accFbUncommitted: (e) => `acceptance feedback not committed to Git ${e.n} line(s) (${e.prs.map((p) => `#${p}`).join(' ')}${e.prTotal > e.prs.length ? ` and ${e.prTotal} in all` : ''})`,
     accFbPrunable: (e) => `acceptance shots that can go ${e.n}`,
     settle: (e) => `every pull request merged, card not settled ${enCards(e)}`,
     reopen: (e) => `settled while a pull request is still open ${enCards(e)}`,

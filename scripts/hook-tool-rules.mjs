@@ -4,12 +4,13 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detect } from './lib-detect.mjs'
 import { loadStrings } from './strings.mjs'
+import { cardCloseout } from './card-closeout.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
 
 // 成本守卫,不是安全边界:只认字面路径的直接读取。变量、别名、解释器和嵌套 shell
 // 不做猜测;精准 rg/grep 与确定性脚本照常运行。不要拿一个简化解析器冒充 shell。
 // 引号中的空格仍属于路径;分隔符切成独立命令。不执行展开或命令替换。
-function shellSegments(command) {
+function shellSegments(command, { rejectComments = false } = {}) {
   const segments = [], words = []
   let word = '', quote = '', escaped = false, hadWord = false
   const flush = () => { if (hadWord) words.push(word); word = ''; hadWord = false }
@@ -19,6 +20,8 @@ function shellSegments(command) {
     if (c === '\\' && quote !== "'") { escaped = true; continue }
     if (quote) { if (c === quote) quote = ''; else word += c; continue }
     if (c === "'" || c === '"') { quote = c; hadWord = true; continue }
+    // 写卡归属遇 shell 注释就交回 CLI;不能把注释中的 --dir 当成实际参数。
+    if (rejectComments && c === '#' && !hadWord) return []
     if (';|&\n'.includes(c)) { flush(); if (words.length) segments.push(words.splice(0)); continue }
     if (/\s/.test(c)) { flush(); continue }
     word += c; hadWord = true
@@ -127,4 +130,34 @@ export function remindPullRequest(request) {
   if (!kanban) return { kind: 'none' }
   const S = loadStrings(kanban)
   return { kind: 'none', additionalContext: /^gh pr merge\b/.test(cmd) ? S.ghprRemindMerge : S.ghprRemind }
+}
+
+// 只识别单条、字面 CLI 写入。复合 shell、动态路径和 card new 由 CLI 输出负责;
+// 不把命令中的正文/其它工具猜成写卡,也不按 session 标签认领别人的历史账。
+export function followUpCardWrite(request) {
+  if (request.event !== 'after-tool' || request.tool?.kind !== 'shell') return { kind: 'none' }
+  const segments = shellSegments(request.tool.command || '', { rejectComments: true })
+  if (segments.length !== 1) return { kind: 'none' }
+  const words = segments[0]
+  if (basename(words[0]) !== 'node' || basename(words[1] || '') !== 'ddd.mjs' || words[2] !== 'card'
+    || !['set', 'status', 'note', 'link', 'after'].includes(words[3]) || !/^[A-Za-z0-9_-]+$/.test(words[4] || '')
+    || words.some(word => /^--help(?:=|$)/.test(word)) || words.includes('--')) return { kind: 'none' }
+  if (words.slice(0, 5).some(word => /[$`]/.test(word))) return { kind: 'none' }
+  const baseCwd = request.tool.cwd || request.cwd
+  let cwd = baseCwd, explicitDir = false
+  for (let i = 5; i < words.length; i++) {
+    if (words[i] === '--dir') {
+      const dir = words[++i]
+      if (!dir || /[$`]/.test(dir)) return { kind: 'none' }
+      cwd = resolve(baseCwd, dir); explicitDir = true
+    } else if (words[i].startsWith('--dir=')) {
+      const dir = words[i].slice(6)
+      if (!dir || /[$`]/.test(dir)) return { kind: 'none' }
+      cwd = resolve(baseCwd, dir); explicitDir = true
+    }
+  }
+  const kanban = detect({ cwd, env: {} })
+  if (!kanban || (explicitDir && kanban !== cwd)) return { kind: 'none' }
+  const additionalContext = cardCloseout(kanban, words[4])
+  return additionalContext ? { kind: 'none', additionalContext } : { kind: 'none' }
 }

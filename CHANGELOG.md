@@ -9,6 +9,12 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.11] - 2026-11-13
+
+- Return scoped, actionable follow-up after card writes through both CLI output and model-visible hook context. Keep read commands and unrelated cards out of the follow-up.
+- Distinguish acceptance feedback waiting for a Git commit from incomplete human acceptance. Preserve existing judgments.
+- Define source review, preservation, scoped commits, and a final audit as the maintenance closeout workflow; retain nonblocking shared-board settlement.
+
 ## 0.19.10 — 2026-11-12
 
 - Reject empty or malformed required hook groups before packaging or release; an event name alone does not establish a working hook.

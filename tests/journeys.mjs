@@ -107,7 +107,7 @@ for (const lang of ['zh', 'en']) {
     const value = {...j, [field]: report}
     const saved = run('ddd.mjs', ['card', 'set', 'D102', 'journey', '--json', JSON.stringify(value)])
     check(saved.status === 0 && JSON.parse(saved.stdout).ok && saved.stderr.includes(`D102 journey.${field}`) && saved.stderr.includes('journey.development') && saved.stderr.includes('detail'), `${lang}: CLI saves ${field} and emits a targeted advisory on stderr`)
-    check(saved.stderr.startsWith(lang === 'en' ? 'Summary review hint:' : '摘要复核提示:'), `${lang}: CLI advisory follows the board language`)
+    check(saved.stderr.startsWith(lang === 'en' ? 'Close out this card write (D102):' : '本次写卡收尾(D102):') && saved.stderr.includes(lang === 'en' ? 'Summary review hint:' : '摘要复核提示:'), `${lang}: CLI advisory follows the board language`)
     check(JSON.parse(readFileSync(join(board, 'decisions-manifest.json'))).entries[0].journey[field] === report, `${lang}: CLI preserves ${field} verbatim`)
   }
   const saved = run('ddd.mjs', ['card', 'set', 'D102', 'journey', '--json', JSON.stringify({...j, ...evidence})]); assert.equal(saved.status, 0, saved.stderr)
@@ -166,7 +166,7 @@ for (const lang of ['zh', 'en']) {
   timelineBacklog.items = [{...legacy, note: dated(2)}]; write('backlog-manifest.json', timelineBacklog)
   const note = run('ddd.mjs', ['card', 'note', 'BL-C63', 'Current business question remains pending', '--json']); assert.equal(note.status, 0, note.stderr)
   const saved = JSON.parse(note.stdout)
-  check(saved.ok && note.stderr.includes('BL-C63 note') && note.stderr.startsWith(lang === 'en' ? 'Iteration history hint:' : '多轮记录整理提示:'), `${lang}: CLI note saves a third dated update and asks the writing session to organize it`)
+  check(saved.ok && note.stderr.includes('BL-C63 note') && note.stderr.startsWith(lang === 'en' ? 'Close out this card write (BL-C63):' : '本次写卡收尾(BL-C63):') && note.stderr.includes(lang === 'en' ? 'Iteration history hint:' : '多轮记录整理提示:'), `${lang}: CLI note saves a third dated update and asks the writing session to organize it`)
   check(saved.card.note === dated(2) + '\n\n' + saved.line && saved.card.journey === undefined && JSON.stringify(saved.card.links) === JSON.stringify(legacy.links) && JSON.stringify(saved.card.shots) === JSON.stringify(legacy.shots), `${lang}: note preserves earlier rounds, links, screenshots, and pending questions`)
   const setNote = run('ddd.mjs', ['card', 'set', 'BL-C63', 'note', JSON.stringify(dated(3)), '--json']); assert.equal(setNote.status, 0, setNote.stderr)
   check(setNote.stderr.includes('BL-C63 note') && JSON.parse(setNote.stdout).card.note === dated(3), `${lang}: CLI set note uses the same nonblocking suggestion`)
