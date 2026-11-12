@@ -23,6 +23,7 @@ import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { genStrings, journeyStrings, runtimeStrings } from './strings.mjs'
 import { declaredPrs, prsOfCard } from './prlink.mjs'
 import { resolveKanbanDir } from './kanban-dir.mjs'
+import { deferGeneration, reportGenerationDeferral } from './gen-deferral.mjs'
 import { beginConcurrentGeneration } from './gen-concurrent.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
@@ -38,7 +39,7 @@ import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFr
 // ---- 看板目录定位:--dir <kanbanDir> > $DDD_PROJECT_DIR/app/kanban > cwd/项目/Git 根探测----
 // v0.12.0 起抽进 kanban-dir.mjs,与 pr-sync.mjs 共用(两个脚本必须认同一个 --dir)。
 const REQUESTED_HERE = resolveKanbanDir()
-const GENERATION = await beginConcurrentGeneration(REQUESTED_HERE)
+const GENERATION = await beginConcurrentGeneration(REQUESTED_HERE).catch(reportGenerationDeferral)
 const HERE = GENERATION?.board || REQUESTED_HERE
 const { writeFileSync, copyFileSync, mkdirSync, rmSync } = GENERATION || {
   writeFileSync: directWrite, copyFileSync: directCopy, mkdirSync: directMkdir, rmSync: directRemove,
@@ -68,7 +69,7 @@ let cfg
 try { cfg = JSON.parse(readFileSync(join(HERE, 'kanban.config.json'), 'utf8')) }
 catch (e) { throw new Error(`读不到(cannot read)${join(HERE, 'kanban.config.json')}:${e.message}`) }
 // 入口探测可能撞上配置半写入/刚开启并发;不能在无锁路径继续写用户 demo。
-if (cfg.concurrentSessions === true && !GENERATION) throw new Error('[gen] 生成启动期间并发配置变化;保留现有文件,请重试 / Concurrent configuration changed while generation was starting; existing files are preserved, retry')
+if (cfg.concurrentSessions === true && !GENERATION) reportGenerationDeferral(deferGeneration(HERE, 'startup-config-race', cfg.lang === 'en' ? 'en' : 'zh'))
 const GS = genStrings(cfg.lang === 'en' ? 'en' : 'zh') // gen 硬失败文案表(zh/en;此行以上的硬失败发生在 lang 已知之前,双语合排)
 if ((cfg.schemaVersion ?? 1) !== 1) console.warn(`[gen] ⚠ 未知 schemaVersion=${cfg.schemaVersion},按 1 读`)
 if (!cfg.brand) throw new Error(GS.cfgMissingBrand())
@@ -6896,7 +6897,8 @@ for (const card of [...b.items, ...dm.entries].filter((c) => c.journey)) {
     appearance: { vars: MAIN_THEME_VARS, font: FONT_UI_TK, boot: DK_BOOT, css: DK_SCHEME_CSS, theme: THEME_STYLE, toggle: DK_TOGGLE_BTN, script: DK_TOGGLE_JS },
   })))
 }
-GENERATION?.finish(assertGeneratorVersion)
+try { GENERATION?.finish(assertGeneratorVersion) }
+catch (e) { reportGenerationDeferral(e) }
 // v0.17.11:收尾这一行的「可立即做」与守卫同一把尺 —— ready 且前置已清才算,还等着前置的
 // 另报一个数。原来它数的是全部 ready,与守卫那条积压提醒差着等前置的那几张:同一块板同一时刻
 // 两个数,读的人只能猜哪个作数。板上一条 after 都没有时 TAIL_WAIT 恒 0,这一行一字不变。

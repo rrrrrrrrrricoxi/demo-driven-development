@@ -9,6 +9,12 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.12] - 2026-11-13
+
+- Distinguish expected concurrent-generation deferrals from failures. Print concise diagnostics for deferrals while preserving unknown error details and nonzero CLI exits.
+- Retry a source-change deferral once within the Stop generation budget, using a fresh process and snapshot. Keep lock-timeout and persistent-change safeguards and recover through the stale marker.
+- Preserve active Codex caches around both marketplace refresh and installation; validate and restore them after each command.
+
 ## [0.19.11] - 2026-11-13
 
 - Return scoped, actionable follow-up after card writes through both CLI output and model-visible hook context. Keep read commands and unrelated cards out of the follow-up.

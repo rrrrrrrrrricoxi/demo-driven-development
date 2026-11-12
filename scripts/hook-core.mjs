@@ -1,5 +1,5 @@
 // Harness-neutral dispatcher. Callers own event normalization, authorization,
-// lifecycle retries, and translating results back to their harness.
+// lifecycle invocation, and translating results back to their harness.
 import { checkGeneratedRead, checkMerge, remindPullRequest, followUpCardWrite } from './hook-tool-rules.mjs'
 import { checkSettlement } from './hook-settle.mjs'
 

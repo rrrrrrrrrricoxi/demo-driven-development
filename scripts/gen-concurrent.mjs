@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { deferGeneration } from './gen-deferral.mjs'
 import { isRemoteShot, shotHref } from './accpre.mjs'
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -16,7 +17,7 @@ export const lockRoot = (board) => join(fs.realpathSync(board), '.ddd-gen-lock')
 // 每个竞争者拥有唯一目录,不存在「先检查旧锁再误删新锁」的换主窗口。
 // Lamport bakery:目录出现即 choosing,原子发布 ticket 后按 (ticket, id) 排队。
 // 只能回收同主机且 kill(pid,0) 明确 ESRCH 的记录;年龄从不证明进程已死。
-export async function acquireGenerationLock(board, { timeoutMs = 40000 } = {}) {
+export async function acquireGenerationLock(board, { timeoutMs = 40000, lang } = {}) {
   const root = lockRoot(board)
   fs.mkdirSync(root, { recursive: true })
   const id = `${Buffer.from(hostname()).toString('base64url')}.${process.pid}.${randomUUID()}`
@@ -25,7 +26,7 @@ export async function acquireGenerationLock(board, { timeoutMs = 40000 } = {}) {
   const release = () => fs.rmSync(own, { recursive: true, force: true })
   const deadline = Date.now() + timeoutMs
   const expired = () => {
-    if (Date.now() >= deadline) throw fail('等待并发生成超时;保留现有产物,稍后重试', 'Timed out waiting for concurrent generation; existing output is preserved, retry later')
+    if (Date.now() >= deadline) throw deferGeneration(board, 'lock-timeout', lang)
   }
   const ticket = (other) => {
     const path = join(root, other)
@@ -119,7 +120,7 @@ export async function beginConcurrentGeneration(board) {
   try { cfg = JSON.parse(fs.readFileSync(join(board, 'kanban.config.json'), 'utf8')) } catch { return null }
   if (cfg.concurrentSessions !== true) return null
   board = fs.realpathSync(board)
-  const release = await acquireGenerationLock(board)
+  const release = await acquireGenerationLock(board, { lang: cfg.lang === 'en' ? 'en' : 'zh' })
   let closed = false
   const cleanup = () => {
     if (closed) return
@@ -146,11 +147,13 @@ export async function beginConcurrentGeneration(board) {
     const stale = join(board, '.ddd-gen-stale')
     const check = () => {
       let current
-      try { current = fingerprint(board) } catch { /* 读到半写入的源文件同样必须延后。 */ }
+      try { current = fingerprint(board) } catch (e) {
+        // 半写入或已移走的输入需要延后;权限/IO 等真实故障不能伪装成并发编辑。
+        if (!(e instanceof SyntaxError) && !['ENOENT', 'ENOTDIR'].includes(e.code)) throw e
+      }
       if (current !== baseline) {
         // 保留 mtime 的编辑也会令旧 index 失效,必须让下一轮守卫有持久的重试信号。
-        fs.writeFileSync(stale, 'sources changed; retry\n')
-        throw fail('生成期间源文件变化;产物未完成发布,稍后重试', 'Sources changed during generation; output publication was deferred, retry later')
+        throw deferGeneration(board, 'sources-changed', cfg.lang === 'en' ? 'en' : 'zh')
       }
     }
     return {
