@@ -6380,9 +6380,9 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     ].join('\n'))
     const s1 = runStop(NEW_SCRIPTS, fx73.root)
     const msg1 = runAudit(kb).stdout // v0.17.5:谁写的几条在 audit 这边
-    ok(msg1.includes('#277 新增 3 条未提交') && msg1.includes('tester-a 2') && msg1.includes('tester-b 1'),
+    ok(msg1.includes('#277 新增 3 条 Git 未提交') && msg1.includes('tester-a 2') && msg1.includes('tester-b 1'),
       '还没提交的 jsonl:守卫一行说清哪个 PR、几条、谁写的', msg1.slice(0, 200))
-    ok(/验收反馈没提交 3 条\(#277\)/.test((JSON.parse(s1.stdout || '{}').systemMessage) || ''),
+    ok(/验收反馈 Git 未提交 3 条\(#277\)/.test((JSON.parse(s1.stdout || '{}').systemMessage) || ''),
       'v0.17.8:八类里只有这一类点的是 PR 号不是卡号 —— 它关乎别人的数据', s1.stdout.slice(0, 200))
     git('add', '-A'); git('commit', '-q', '-m', 'feedback')
     const s2 = runStop(NEW_SCRIPTS, fx73.root)
@@ -6391,8 +6391,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     writeFileSync(jsonlP, readFileSync(jsonlP, 'utf8') +
       '{"ts":"2026-09-10T13:00:00Z","pr":277,"item":"JJ3","who":"tester-a","rev":2,"verdict":"ok"}\n')
     const s3 = runStop(NEW_SCRIPTS, fx73.root)
-    ok(runAudit(kb).stdout.includes('#277 新增 1 条未提交') &&
-       /验收反馈没提交 1 条\(#277\)/.test((JSON.parse(s3.stdout || '{}').systemMessage) || ''),
+    ok(runAudit(kb).stdout.includes('#277 新增 1 条 Git 未提交') &&
+       /验收反馈 Git 未提交 1 条\(#277\)/.test((JSON.parse(s3.stdout || '{}').systemMessage) || ''),
       '已跟踪文件后来又添的行,照样数得出来(git diff 认增行)', s3.stdout.slice(0, 200))
     {
       const c5 = rd(cfgP)
@@ -6425,8 +6425,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
         '没有 git 的板:问不出「提交了没」,就一个字都不说(也不崩)', `${n1.status} ${n1.stdout.slice(0, 160)}`)
       execFileSync('git', ['init', '-q'], { cwd: ng.root })
       const n2 = runStop(NEW_SCRIPTS, ng.root)
-      ok(runAudit(ng.kb).stdout.includes('#277 新增 3 条未提交') &&
-         /验收反馈没提交 3 条\(#277\)/.test((JSON.parse(n2.stdout || '{}').systemMessage) || ''),
+      ok(runAudit(ng.kb).stdout.includes('#277 新增 3 条 Git 未提交') &&
+         /验收反馈 Git 未提交 3 条\(#277\)/.test((JSON.parse(n2.stdout || '{}').systemMessage) || ''),
         '同一块板 git init 之后立刻报得出来 —— 上面那句沉默是「问不出」,不是这盘摆坏了',
         (JSON.parse(n2.stdout || '{}').systemMessage || '').slice(0, 160))
     }
@@ -6471,8 +6471,8 @@ console.log('T73 验收反馈共享 acceptanceFeedback')
     const msg5 = runAudit(kb).stdout
     ok(msg5.includes('10 张') && msg5.includes('acc-feedback-prune.mjs'),
       '攒够 10 张可清的:守卫一行报数 + 那条命令(绝不自动删)', msg5.slice(0, 200))
-    ok(/验收反馈没提交 [^·\n]* · 可清的验收截图 10 张/.test((JSON.parse(s5.stdout || '{}').systemMessage) || ''),
-      'v0.17.8:可清截图那一条排在「验收反馈没提交」之后(同一条话里,以 · 相隔)', s5.stdout.slice(0, 200))
+    ok(/验收反馈 Git 未提交 [^·\n]* · 可清的验收截图 10 张/.test((JSON.parse(s5.stdout || '{}').systemMessage) || ''),
+      'v0.17.8:可清截图那一条排在「验收反馈 Git 未提交」之后(同一条话里,以 · 相隔)', s5.stdout.slice(0, 200))
     const jsonlBefore = readFileSync(jsonlP, 'utf8')
     const dry = spawnSync(process.execPath, [join(NEW_SCRIPTS, 'acc-feedback-prune.mjs'), '--dir', kb, '--dry-run'], { encoding: 'utf8' })
     ok(dry.status === 0 && count(dry.stdout, '将删 shots/acc-277') === 10 && dry.stdout.includes('一个字节没动'),
@@ -7069,7 +7069,7 @@ console.log('T77 收工提醒分级压成一行')
     .replaceAll('丢掉,合回 main 后守卫自会重渲。', '丢掉。')
   const BASE = { tier: '1', priority: 'high', area: 'x', source: 's', problem: 'p', approach: 'a' }
   // 八个人话标签按 CHORE_KEYS 的次序摆 —— 下面「只出现该类」与「次序固定」两组断言共读这一张表
-  const WORDS = ['正文过长没拆 detail', '验收反馈没提交', '可清的验收截图', 'PR 全合了还没收账',
+  const WORDS = ['正文过长没拆 detail', '验收反馈 Git 未提交', '可清的验收截图', 'PR 全合了还没收账',
     '已收但 PR 还开着', '暂不收账满 14 天', '前置已清可开工', '可立即做']
   const hit = (blk) => WORDS.filter((w) => blk.includes(w))
   // 这一段每次收工都印:0.17.6 起结尾只写 `ddd audit`(手机上一条绝对路径就占掉四行),
@@ -7128,7 +7128,7 @@ console.log('T77 收工提醒分级压成一行')
         cfg: { richText: true },
         items: [{ id: 'BL-1', status: 'ready', date: dayAgo(1), title: '老卡长正文', ...BASE, problem: '正'.repeat(900) }],
       })],
-      ['验收反馈没提交', '验收反馈没提交 3 条(#277)', board('fx77-fb', { cfg: { acceptanceFeedback: true }, fb: FB(3) })],
+      ['验收反馈 Git 未提交', '验收反馈 Git 未提交 3 条(#277)', board('fx77-fb', { cfg: { acceptanceFeedback: true }, fb: FB(3) })],
       ['可清的验收截图', '可清的验收截图 10 张', board('fx77-shots', {
         cfg: { acceptanceFeedback: true }, fb: FB(1), commit: true, shots: 10,
         rel: relOf([{ number: 226, state: 'merged', mergedAt: isoAgo(40), title: 'a' }]),
@@ -7189,7 +7189,7 @@ console.log('T77 收工提醒分级压成一行')
     const blk = choreOf(g)
     ok(blk === '看板守卫 8 条提醒(详情 ddd audit):' + [
       '正文过长没拆 detail 1 张(最长 BL-1)',
-      '验收反馈没提交 3 条(#277)',
+      '验收反馈 Git 未提交 3 条(#277)',
       '可清的验收截图 10 张',
       'PR 全合了还没收账 BL-S',
       '已收但 PR 还开着 BL-R',
@@ -9683,6 +9683,22 @@ console.log('T88 决策卡归档 decisionArchive')
   ok(denied?.block === true && /index.html/.test(denied.reason), 'Pi 读生成物返回否决而非 allow')
   ok(guard({ toolName: 'read', input: { path: 'app/kanban/manifest.json' } }, ctx) === undefined, 'Pi 读源文件不抢安全守卫的裁决')
   ok(!existsSync(join(fx.kb, 'index.html')), 'Pi 工具守卫不生成看板')
+}
+
+// 写卡 guard 必须把行动交给模型,不只放进收工 UI notice。
+{
+  const { runHook } = await import('../scripts/hook-core.mjs')
+  const fx = mkFixture('card-closeout-guard', {})
+  const file = join(fx.kb, 'backlog-manifest.json')
+  const manifest = JSON.parse(readFileSync(file, 'utf8'))
+  manifest.items = [{ id: 'BL-CLOSEOUT', status: 'ready', demo: 'demos/example.html', note: [1, 2, 3].map(n => `【2020-01-0${n} 更新】\n${'原始证据'.repeat(100)}`).join('\n') }]
+  writeFileSync(file, JSON.stringify(manifest))
+  const request = { event: 'after-tool', cwd: fx.root, tool: { kind: 'shell', command: 'node scripts/ddd.mjs card note BL-CLOSEOUT update' } }
+  const result = runHook(request)
+  ok(result.kind === 'none' && /BL-CLOSEOUT/.test(result.additionalContext || '') && /card show/.test(result.additionalContext || ''), '写卡 guard 将本卡事实与核对命令交给模型 additionalContext')
+  ok(!result.continue && !result.decision, '写卡跟进不触发收工续轮或全板阻断')
+  const read = runHook({ ...request, tool: { kind: 'shell', command: 'node scripts/ddd.mjs card show BL-CLOSEOUT' } })
+  ok(!read.additionalContext && !read.notice, '只读查卡不领取收尾工作')
 }
 
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
