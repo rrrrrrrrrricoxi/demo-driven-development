@@ -29,10 +29,11 @@ import { closeSync, existsSync, openSync, readFileSync, rmSync, statSync, writeF
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
-import { journeyError } from './journey.mjs'
 import { journeySummaryFields, journeySuggested } from './journey-summary.mjs'
+import { contentUpdatedAtError, currentRecordDependents, currentRecordsStrings, resolveCurrentRecords } from './current-records.mjs'
 import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
 import { parsePr } from './prlink.mjs'
@@ -53,7 +54,7 @@ if (ARGV[0] === 'pr-sync') {
 // ---- 旗子 ----------------------------------------------------------------
 const VALUE_FLAGS = new Set(['dir', 'out', 'from', 'line', 'session', 'title', 'status', 'since', 'tier', 'rm',
   'result', 'note', 'env', 'by', 'round', 'at'])
-const BOOL_FLAGS = new Set(['json', 'help', 'no-note', 'clear', 'list', 'new-round'])
+const BOOL_FLAGS = new Set(['json', 'help', 'no-note', 'clear', 'list', 'new-round', 'resolved'])
 // 成组可重复的旗子(v0.17.16,acc precheck):--shot 一张图,紧跟的 --caption 给它配说明。收成 flags.shots 有序数组。
 const SHOT_FLAGS = new Set(['shot', 'caption'])
 const die = (msg) => { console.error(msg); process.exit(1) }
@@ -111,6 +112,7 @@ const readJsonAt = (p, what) => {
   catch (e) { die(S.readFailed(what, e.message)) }
 }
 const CFG = readJsonAt(join(KANBAN, 'kanban.config.json'), 'kanban.config.json')
+const CURRENT_S = currentRecordsStrings(CFG.lang)
 let CARDS_DIR
 try { CARDS_DIR = cardsDirOf(CFG) } catch (e) { die(e.message) }
 const KIND_OF = { backlog: CARD_KINDS[0], decision: CARD_KINDS[1], decisions: CARD_KINDS[1] }
@@ -158,7 +160,7 @@ const K_LONG = ['question', 'decision', 'problem', 'approach', 'note', 'notes', 
 const K_TAIL = ['links', 'shots', 'pr']
 const K_FLAT = [
   ...K_FRONT,
-  'status', 'tier', 'area', 'priority', 'line', 'session', 'date', 'blockedOn', 'after', 'source',
+  'status', 'tier', 'area', 'priority', 'line', 'session', 'date', 'contentUpdatedAt', 'blockedOn', 'after', 'source',
   'demo', 'route', 'routeLive', 'designDoc', 'repro', 'settleHold', 'settleHoldAt', 'order',
   ...K_LONG, ...K_TAIL,
 ]
@@ -178,12 +180,17 @@ function normalizeCard(card, origKeys) {
 }
 
 /** 落盘:拆分模式写那一张卡文件,未拆模式整文件重写(与 PR-E 的 join 同形制) */
-function writeCard(store, row, card) {
-  const next = normalizeCard(card, row.keys)
+function writeCard(store, row, card, { explicitContentUpdatedAt = false } = {}) {
+  const atError = contentUpdatedAtError(card, CFG.lang)
+  if (atError) die(atError)
+  if (isDeepStrictEqual(card, row.card)) return row.card
+  const dependents = currentRecordDependents(allCards().map((r) => r.card), card.id)
+  const next = normalizeCard(explicitContentUpdatedAt ? card : { ...card, contentUpdatedAt: new Date().toISOString() }, row.keys)
   try {
     if (store.split) atomicWrite(row.file, cardText(next))
     else { store.head[store.k.key][row.i] = next; atomicWrite(store.headPath, jsonText(store.head)) }
   } catch (e) { die(S.writeFailed(row.where, e.message)) }
+  if (dependents.length) console.error(CURRENT_S.dependents(card.id, dependents))
   return next
 }
 
@@ -246,7 +253,7 @@ function checkPr(value) {
   for (const v of Array.isArray(value) ? value : [value]) if (!parsePr(v, repo)) die(S.prBad(JSON.stringify(v)))
 }
 
-const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order', 'journey']
+const FIELDS_COMMON = ['id', 'title', 'status', 'line', 'session', 'date', 'contentUpdatedAt', 'source', 'links', 'shots', 'pr', 'detail', 'settleHold', 'settleHoldAt', 'demo', 'repro', 'walkthroughs', 'after', 'order', 'journey']
 const KNOWN_FIELDS = {
   items: [...FIELDS_COMMON, 'tier', 'area', 'priority', 'blockedOn', 'problem', 'approach', 'note', 'code', 'initKind'],
   entries: [...FIELDS_COMMON, 'code', 'question', 'decision', 'designDoc', 'designSec', 'route', 'routeLive', 'demoNote', 'demoOrigin', 'iters', 'refines', 'closedKind'],
@@ -287,7 +294,16 @@ function checkField(store, field, value, id = '') {
   if (field === 'session') checkTokens(value, sessionIds(), S.sessionBad)
   if (field === 'pr') checkPr(value)
   if (field === 'after') checkAfter(id, value)
-  if (field === 'journey') { const err = journeyError({ id, journey: value }, CFG.lang); if (err) die(err) }
+  if (field === 'contentUpdatedAt') { const err = contentUpdatedAtError({ id, contentUpdatedAt: value }, CFG.lang); if (err) die(err) }
+  if (field === 'journey' && id) checkCurrentRecords({ ...findCard(id).row.card, journey: value })
+}
+
+/** 写 journey 前验证整张引用图;仅在内存替换待写卡,出错时不落任何文件。 */
+function checkCurrentRecords(candidate) {
+  const cards = allCards().map((r) => r.card)
+  const id = String(candidate.id)
+  const next = cards.some((c) => String(c.id) === id) ? cards.map((c) => String(c.id) === id ? candidate : c) : [...cards, candidate]
+  try { resolveCurrentRecords(next, CFG.lang) } catch (e) { die(e.message) }
 }
 
 // ---- 命令 ----------------------------------------------------------------
@@ -312,6 +328,7 @@ function cmdNew() {
   }
   const base = k.key === 'items' ? backlogTemplate(store) : decisionTemplate(head)
   const card = { ...base, ...extra }
+  if (card.contentUpdatedAt === undefined) card.contentUpdatedAt = new Date().toISOString()
   delete card.order // order 是拆分记的原下标,手工新卡不写(gen 排完即删,缺席就按 id 排在最后)
   // --from 带进来一个 settleHold 时同样记起算日(与 card set 同一条规矩,别让新卡漏掉钟)
   if (String(card.settleHold || '').trim() && !card.settleHoldAt) card.settleHoldAt = TODAY
@@ -325,6 +342,7 @@ function cmdNew() {
     if (!store.split) {
       if (ids.includes(id)) continue
       const next = normalizeCard(withId(card, id), [])
+      if (next.journey !== undefined) checkCurrentRecords(next)
       head[k.key].push(next)
       try { atomicWrite(store.headPath, jsonText(head)) } catch (e) { die(S.writeFailed(k.manifest, e.message)) }
       made = { id, file: k.manifest, card: next }
@@ -335,6 +353,7 @@ function cmdNew() {
     // 「不是合法 JSON」硬失败、守卫跟着阻断收工,而人根本不知道该去哪找这个文件。
     const path = join(store.dir, `${id}.json`)
     const next = normalizeCard(withId(card, id), [])
+    if (next.journey !== undefined) checkCurrentRecords(next)
     const text = cardText(next)
     let fd
     try { fd = openSync(path, 'wx') }
@@ -477,7 +496,7 @@ function cmdSet() {
     if (String(value).trim()) patch.settleHoldAt = TODAY
     else delete patch.settleHoldAt
   }
-  const card = writeCard(store, row, patch)
+  const card = writeCard(store, row, patch, { explicitContentUpdatedAt: field === 'contentUpdatedAt' })
   say({ ok: true, id, field, value, file: row.where, card }, S.setDone(id, field, typeof value === 'string' ? value : JSON.stringify(value), row.where))
   if (field === 'journey') warnJourneySummary(card)
   if (['note', 'notes', 'decision', 'demoNote', 'demo', 'links', 'status'].includes(field)) warnJourneySuggested(card)
@@ -492,7 +511,7 @@ function cmdStatus() {
   const card = { ...row.card, status: next }
   // 决策卡没有时间线字段(gen 不渲染 note/notes),这时候只改 status —— 不硬塞一个没人读的字段
   const nf = NOTE_FIELD[store.k.key]
-  const noted = Boolean(nf) && !flags['no-note']
+  const noted = Boolean(nf) && !flags['no-note'] && from !== next
   if (noted) card[nf] = appendTimeline(card[nf], `【${TODAY}】status → ${next}`)
   const written = writeCard(store, row, card)
   say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : '', !nf))
@@ -591,10 +610,15 @@ function cmdShow() {
   const id = pos[2]
   if (!id) die(S.showUsage())
   const { store, row } = findCard(id)
-  if (flags.json) { console.log(JSON.stringify(row.card, null, 2)); return }
-  console.log(S.showHead(String(row.card.id), KIND_NAME[store.k.key], row.where))
-  const dep = afterOf(row.card)
-  for (const [key, value] of Object.entries(row.card)) {
+  let card = row.card
+  if (flags.resolved) {
+    try { card = resolveCurrentRecords(allCards().map((r) => r.card), CFG.lang).find((c) => String(c.id) === id) }
+    catch (e) { die(e.message) }
+  } else if (card.journey?.currentFrom !== undefined) console.error(CURRENT_S.show(id, card.journey.currentFrom))
+  if (flags.json) { console.log(JSON.stringify(card, null, 2)); return }
+  console.log(S.showHead(String(card.id), KIND_NAME[store.k.key], row.where))
+  const dep = afterOf(card)
+  for (const [key, value] of Object.entries(card)) {
     if (key === 'id') continue
     const text = typeof value === 'string' ? value : JSON.stringify(value)
     console.log(`  ${key}: ${String(text).replace(/\n/g, '\n    ')}`)

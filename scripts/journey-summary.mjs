@@ -14,6 +14,8 @@ const REPORTS = [
 
 /** Limited hints for the writing session. Never validate, rewrite, or move evidence. */
 export function journeySummaryFields(card) {
+  // 引用卡没有独立摘要副本;复核提示只发给维护现行资料的来源卡。
+  if (card?.journey?.currentFrom !== undefined) return []
   return ['decision', 'progress', 'recent'].filter((field) => {
     const value = card?.journey?.[field]
     return typeof value === 'string' && value.split(/[，,;；。.!?！？\n]/).some((clause) => REPORTS.some((report) => report.test(clause.trim())))

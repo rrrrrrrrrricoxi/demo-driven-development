@@ -30,7 +30,9 @@ import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, s
 import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { accFeedback } from './accfb.mjs'
 import { isIso, isRemoteShot, readPrecheck, shotHref } from './accpre.mjs'
-import { journeyError, journeyPath, journeySummary, JOURNEY_SUMMARY_CSS, renderJourney } from './journey.mjs'
+import { journeyError, journeyPath, journeySummary, currentResources, currentSourceLink, contentUpdate, JOURNEY_SUMMARY_CSS, renderJourney } from './journey.mjs'
+import { resolveCurrentRecords } from './current-records.mjs'
+import { currentRenderStrings } from './current-render-strings.mjs'
 import { DEPS_UNLOCK_SHOW, afterOf, afterStates, auditAfter, clearedAt, depCtxFrom, depItemText, openCount, reverseAfter } from './deps.mjs'
 
 // ---- 看板目录定位:--dir <kanbanDir> > $CLAUDE_PROJECT_DIR/app/kanban > cwd(若含 kanban.config.json)----
@@ -125,11 +127,31 @@ if (CARDS_DIR) {
 for (const card of [...b.items, ...dm.entries]) {
   const err = journeyError(card, cfg.lang); if (err) throw new Error(err)
 }
+// 解析仅作用于本次生成的内存视图;源文件保留引用与各卡历史。
+const SOURCE_CARDS = [...b.items, ...dm.entries]
+const EFFECTIVE_CARDS = resolveCurrentRecords(SOURCE_CARDS, cfg.lang)
+b.items = EFFECTIVE_CARDS.slice(0, b.items.length)
+dm.entries = EFFECTIVE_CARDS.slice(b.items.length)
 // ———— 每卡更新日期(v0.14.0,仅 cardsDir 开)————
 // 口径在 cards.mjs(v0.15.14 起守卫的挂账到期提醒读同一份):一条 git log 批量取,
 // git 失败 / 文件还没提交 → 文件 mtime → 空。取的是已提交的事实,同一 commit 下同输出。
 const CARD_UPDATED = CARDS_DIR ? cardUpdatedMap(HERE, CARDS_DIR, CARD_SRC) : new Map()
 const cardUpd = (id) => CARD_UPDATED.get(id) || ''
+// 新内容时间启用时,提交时间只取 Git 事实,不能把 mtime 标作提交。
+const CARD_COMMITTED = new Map()
+const datedCards = EFFECTIVE_CARDS.filter((card) => contentUpdate(card, cfg.lang))
+if (datedCards.length && CARDS_DIR) {
+  try {
+    const paths = new Map([...CARD_SRC].map(([id, path]) => [path.split('/').slice(-2).join('/'), id]))
+    const log = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', CARDS_DIR], { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
+    let day = ''
+    for (const line of log.split('\n').map((s) => s.trim()).filter(Boolean)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
+      const id = paths.get(line.split('/').slice(-2).join('/'))
+      if (id && day && !CARD_COMMITTED.has(id)) CARD_COMMITTED.set(id, day)
+    }
+  } catch { /* 无提交信息就不显示提交日期。 */ }
+}
 // instance.ghRepo/branch 三 manifest 各存一份(现状,避免双真源迁移);不一致仅提醒,不阻断
 {
   const three = [['manifest', m], ['backlog-manifest', b], ['decisions-manifest', dm]]
@@ -659,11 +681,11 @@ function safeHref(href) {
 // 卡片的 shots、验收条目的证据图、`ddd acc precheck --shot` 的写回校验共用这一把尺)。
 
 // 卡片 link(相对 kanban/)→ 渲染页 / GitHub blob / 原样。
-function cardLink(href) {
+function cardLink(href, withQuery = false) {
   const raw = String(href || '')
   if (/^https?:/i.test(raw)) return { href: raw, ext: true }
   let frag = '', path = raw
-  const hi = raw.indexOf('#')
+  const hi = withQuery ? raw.search(/[?#]/) : raw.indexOf('#')
   if (hi >= 0) { frag = raw.slice(hi); path = raw.slice(0, hi) }
   const repoPath = resolveRepoPath(KANBAN_REL, path)
   if (RENDERED[repoPath]) return { href: 'refs/' + RENDERED[repoPath] + frag }
@@ -675,6 +697,7 @@ const linkA = (l) => {
   const rs = respLinkParts(l) // v0.13.0:本仓 PR 链接补真实状态(无 release-manifest 时恒 null,零差异)
   return `<a href="${esc(r.href)}"${r.ext ? ' target="_blank" rel="noopener"' : ''}>↗ ${rs ? rs.title : esc(l.title)}${rs ? rs.suffix : ''}</a>`
 }
+const currentLinkA = (l) => linkA({ ...l, href: cardLink(l.href, true).href })
 
 // ============================================================================
 //  PR 关联 + 验收清单(v0.12.0)
@@ -1639,7 +1662,11 @@ const rtagsHtml = (tags) => {
   return `<span class="rtags">${pills.slice(0, RTAGS_SHOW).join('')}${all.filter(rtagHidden).join('')}</span><i class="rtagmore" title="${fold.map(rtagText).join(' · ')}">+${fold.length}</i>`
 }
 // upd(v0.14.0,仅 cardsDir 开)= 卡文件最后改动日;date 是建卡日,两个说的不是一件事,并排放
-const rowHead = ({ id, badge, title, tags = [], line = '', date = '', upd = '' }) => `
+const cardDateProps = (card) => {
+  const content = contentUpdate(card, cfg.lang)
+  return { content, upd: content ? CARD_COMMITTED.get(card.id) || '' : cardUpd(card.id) }
+}
+const rowHead = ({ id, badge, title, tags = [], line = '', date = '', upd = '', content = null }) => `
     <div class="rhead">
       <span class="tid">${esc(id)}</span>
       ${badge}
@@ -1647,7 +1674,7 @@ const rowHead = ({ id, badge, title, tags = [], line = '', date = '', upd = '' }
       ${rtagsHtml(tags)}
       <span class="rspacer"></span>
       ${lineTag(line)}
-      ${date ? `<span class="cdate">${esc(date.slice(5))}</span>` : ''}${upd ? `<span class="udate" title="卡文件最后改动 ${esc(upd)}">更新 ${esc(upd.slice(5))}</span>` : ''}
+      ${date ? `<span class="cdate">${esc(date.slice(5))}</span>` : ''}${content ? `<span class="udate content-updated" title="${esc(content.title)}">${esc(currentRenderStrings(cfg.lang).content)} ${esc(content.at.slice(5, 10))}</span>` : ''}${upd ? content ? `<span class="udate" title="${esc(currentRenderStrings(cfg.lang).commit)} ${esc(upd)}">${esc(currentRenderStrings(cfg.lang).commit)} ${esc(upd.slice(5))}</span>` : `<span class="udate" title="卡文件最后改动 ${esc(upd)}">更新 ${esc(upd.slice(5))}</span>` : ''}
       <span class="rtoggle" aria-hidden="true">▾</span>
     </div>`
 
@@ -1927,7 +1954,7 @@ const blCard = (it, i) => `
       ],
       line: blLine(it),
       date: it.date,
-      upd: cardUpd(it.id),
+      ...cardDateProps(it),
     })}
     <div class="rbody">
       <div class="blbadges">
@@ -1943,7 +1970,7 @@ const blCard = (it, i) => `
       </dl>
       ${!it.journey && it.note ? `<${NOTES_TAG} class="notes">${rt(it.note)}</${NOTES_TAG}>` : ''}
       ${wtBlock(it.walkthroughs)}
-      ${it.journey ? `<div class="row links"><a class="demolink" href="${esc(journeyPath(it.id))}">▶ ${esc(journeyStrings(cfg.lang).open)}</a>${(it.journey.current.links || []).map(linkA).join('')}</div>` : it.links?.length ? `<div class="row links">${it.links.map(linkA).join('')}</div>` : ''}${detailBlock(it)}
+      ${it.journey ? `<div class="row links"><a class="demolink" href="${esc(journeyPath(it.id))}">▶ ${esc(journeyStrings(cfg.lang).open)}</a>${currentResources(it, (h) => cardLink(h, true).href, cfg.lang).slice(1).map(currentLinkA).join('')}${currentSourceLink(it, cfg.lang)}</div>` : it.links?.length ? `<div class="row links">${it.links.map(linkA).join('')}</div>` : ''}${detailBlock(it)}
     </div>
   </article>`
 
@@ -2079,7 +2106,7 @@ const decCard = (e) => {
       tags,
       line: decLine(e),
       date: e.date,
-      upd: cardUpd(e.id),
+      ...cardDateProps(e),
     })}
     <div class="rbody">
       <dl${e.journey ? ' class="journey-summary"' : ''}>
@@ -2095,9 +2122,9 @@ const decCard = (e) => {
       ${wtBlock(e.walkthroughs)}
       <div class="row links">
         ${e.journey ? `<a class="demolink" href="${esc(journeyPath(e.id))}">▶ ${esc(journeyStrings(cfg.lang).open)}</a>` : e.demo ? `<a class="demolink" href="${esc(safeHref(e.demo))}">▶ 打开 demo</a>` : ''}
-        ${e.designDoc ? linkA({ title: '设计文档', href: e.designDoc }) : ''}
+        ${!e.journey && e.designDoc ? linkA({ title: '设计文档', href: e.designDoc }) : ''}
         ${e.route && e.routeLive ? `<a href="${esc(safeHref(liveUrl(e.route)))}" target="_blank" rel="noopener">→ 去 live 页</a>` : ''}
-        ${(e.journey ? e.journey.current.links || [] : e.links || []).map(linkA).join('')}
+        ${e.journey ? currentResources(e, (h) => cardLink(h, true).href, cfg.lang).slice(1).map(currentLinkA).join('') : (e.links || []).map(linkA).join('')}${e.journey ? currentSourceLink(e, cfg.lang) : ''}
       </div>${detailBlock(e)}
     </div>
   </article>`
@@ -6877,7 +6904,7 @@ for (const card of [...b.items, ...dm.entries].filter((c) => c.journey)) {
   const acceptance = ACC_LISTS.filter((l) => l.nums.some((n) => prs.has(n)) || (l.cards || []).includes(card.id))
     .map((l) => ({ title: l.title || l.nums.map((n) => '#' + n).join('/'), href: '#acc-' + l.nums[0] }))
   writeFileSync(join(HERE, journeyPath(card.id)), darkenDoc(renderJourney(card, {
-    lang: cfg.lang, version: GEN_VER, resolveLink: (h) => cardLink(h).href,
+    lang: cfg.lang, version: GEN_VER, resolveLink: (h) => cardLink(h, true).href,
     shots: shotsBlock(card.shots, journeyStrings(cfg.lang).screenshots), acceptance,
     appearance: { vars: MAIN_THEME_VARS, font: FONT_UI_TK, boot: DK_BOOT, css: DK_SCHEME_CSS, theme: THEME_STYLE, toggle: DK_TOGGLE_BTN, script: DK_TOGGLE_JS },
   })))

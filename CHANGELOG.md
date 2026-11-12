@@ -9,6 +9,13 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## [0.19.7] - 2026-11-12
+
+- Let related cards explicitly reference one current journey while preserving their own history, evidence, and acceptance records.
+- Record content changes through the CLI and distinguish content update dates from Git commit dates.
+- Deduplicate current navigation resources, retain explicit document and preview roles, and hide only marked embedded back navigation.
+- Ground each iteration in the existing user task and verify the complete path from the board to the current review state.
+
 ## [0.19.6] - 2026-11-11
 
 - Publish a generated `codex-native` Git branch from tested main commits so Codex can install native hooks directly from GitHub without a local marketplace.

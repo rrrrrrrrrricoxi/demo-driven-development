@@ -279,7 +279,8 @@ const zh = {
       清没清由看板自己推:卡收到终态、PR 合进主线、版本 tag 出现在 release-manifest 里。
       卡号必须在板上、不许自指、不许成环(这三样 CLI 当场拒写,gen 也会硬报错)。
       「等人 / 等外部」那种没有机器判据的理由,照旧写 blockedOn 那句自由文本。
-  card show <id> [--json]
+  card show <id> [--resolved] [--json]
+      默认保留卡片原始字段；--resolved 显式读取 journey.currentFrom 来源的现行资料。
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
   card history <id>                 这张卡文件的 git 历史(未拆成一卡一文件时不可用)
 
@@ -405,7 +406,7 @@ const zh = {
     afterDone: (id, list, file) => `ddd card after:${id} 的前置 = ${list.join(' · ') || '(空)'} → ${file}`,
     afterRmDone: (id, ref, list) => `ddd card after --rm:${id} 去掉了「${ref}」,剩下 ${list.join(' · ') || '(空)'}`,
     afterShow: (rows) => `  after(前置): ${rows.join(' · ')}`,
-    showUsage: () => 'ddd card show:写法 card show <id> [--json]。',
+    showUsage: () => 'ddd card show:写法 card show <id> [--resolved] [--json]。',
     showHead: (id, kind, file) => `${id}  (${kind === 'backlog' ? 'backlog' : '决策'}卡 · ${file})`,
     listEmpty: () => 'ddd card list:这组筛选下一张卡都没有。',
     listHead: () => '卡号          状态      线别  session   建卡日      标题',
@@ -831,7 +832,8 @@ Cards:
       pull request merged, or the tag turned up in release-manifest.json. A card ref must
       exist on the board; self-references and cycles are refused here and fail gen too.
       For "waiting on a person / something outside" — no machine test — keep using blockedOn.
-  card show <id> [--json]
+  card show <id> [--resolved] [--json]
+      Show the stored card by default; --resolved reads current records through journey.currentFrom.
   card list [--status s] [--line X] [--session Y] [--since YYYY-MM-DD] [--json]
   card history <id>                 git history of that card's file (needs one file per card)
 
@@ -966,7 +968,7 @@ kanban.config.json). This command never commits — git add the card files yours
     afterRmDone: (id, ref, list) => `ddd card after --rm: dropped "${ref}" from ${id}; left with ${list.join(' · ') || '(none)'}`,
     // 标签不与上一行那个原样打印的字段名撞:同名两行、值还不一样,读起来像脚本打重了
     afterShow: (rows) => `  after (state): ${rows.join(' · ')}`,
-    showUsage: () => 'ddd card show: card show <id> [--json].',
+    showUsage: () => 'ddd card show: card show <id> [--resolved] [--json].',
     showHead: (id, kind, file) => `${id}  (${kind} card · ${file})`,
     listEmpty: () => 'ddd card list: no card matches those filters.',
     listHead: () => 'id          status    lane  session   created     title',
@@ -1278,4 +1280,47 @@ export function journeyStrings(lang) {
     source: '现行方案、阶段历史与开发记录；原始 demo 与证据继续保留。',
     invalid: (id, field) => `卡 ${id} 的 journey.${field} 非法;形制见 README 的 journey 契约。`,
   }
+}
+
+
+// 显式现行资料引用与内容更新时间。
+const CURRENT_RECORDS_TABLES = {
+  zh: {
+    invalid: (id, field) => `卡 ${id} 的 ${field} 无效。`,
+    mixed: (id) => `卡 ${id} 的 journey.currentFrom 不能与 decision、progress、recent、current 同时声明；请只在来源卡维护现行资料。`,
+    missing: (id, target) => `卡 ${id} 的 journey.currentFrom 引用了不存在的卡 ${target}。`,
+    self: (id) => `卡 ${id} 的 journey.currentFrom 不能引用自身。`,
+    cycle: (ids) => `journey.currentFrom 存在循环引用：${ids.join(' → ')}。`,
+    noJourney: (id, target) => `卡 ${id} 的 journey.currentFrom 来源卡 ${target} 没有 journey。`,
+    show: (id, target) => `${id} 的现行资料引用 ${target}；使用 card show ${id} --resolved 查看解析后的现行资料。`,
+    dependents: (id, ids) => `${ids.join('、')} 自动引用 ${id} 的现行资料；无需在这些卡上重写副本。`,
+  },
+  en: {
+    invalid: (id, field) => `Card ${id} has invalid ${field}.`,
+    mixed: (id) => `Card ${id}: journey.currentFrom cannot also declare decision, progress, recent, or current; maintain current records on the source card.`,
+    missing: (id, target) => `Card ${id}: journey.currentFrom refers to missing card ${target}.`,
+    self: (id) => `Card ${id}: journey.currentFrom cannot refer to itself.`,
+    cycle: (ids) => `journey.currentFrom has a reference cycle: ${ids.join(' → ')}.`,
+    noJourney: (id, target) => `Card ${id}: journey.currentFrom source card ${target} has no journey.`,
+    show: (id, target) => `${id} uses current records from ${target}; use card show ${id} --resolved to view the resolved current records.`,
+    dependents: (id, ids) => `${ids.join(', ')} automatically use current records from ${id}; no copies need to be rewritten on those cards.`,
+  },
+}
+export const currentRecordsStrings = (lang) => CURRENT_RECORDS_TABLES[lang === 'en' ? 'en' : 'zh']
+
+// 现行资料入口与内容日期共用文案。
+export const currentRenderStrings = (lang) => lang === 'en' ? {
+  source: (id) => `Current records from ${id}`,
+  designDoc: 'Design document',
+  content: 'Content updated',
+  commit: 'Committed',
+  ownDate: (id, at) => `${id} content updated ${at}`,
+  sourceDate: (id, at) => `Current records from ${id}; content updated ${at}`,
+} : {
+  source: (id) => `现行资料来自 ${id}`,
+  designDoc: '设计文档',
+  content: '内容更新',
+  commit: '提交',
+  ownDate: (id, at) => `${id} 内容更新 ${at}`,
+  sourceDate: (id, at) => `现行资料来自 ${id}；内容更新 ${at}`,
 }
