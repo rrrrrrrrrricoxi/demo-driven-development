@@ -19,6 +19,7 @@
 // 照旧留在 stop-hook.mjs 里,按坏了级全文照出。
 import { journeyError } from './journey.mjs'
 import { journeySummaryFields, journeySuggested, LONG_TEXT_LIMIT } from './journey-summary.mjs'
+import { contentUpdatedAtError, resolveCurrentRecords } from './current-records.mjs'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -569,10 +570,16 @@ export function auditOrphans(ctx, S) {
  */
 export function auditJourneys(ctx) {
   const out = []
+  const cards = []
   for (const [file, key, sub] of CARD_SOURCES.filter((row) => row[2])) for (const c of ctx.rawCardsOf(file, key, sub)) {
+    cards.push(c)
     const err = journeyError(c, ctx.cfg.lang)
     if (err) out.push({ key: 'journeyInvalid', level: 'broken', n: 1, text: err })
+    const atError = contentUpdatedAtError(c, ctx.cfg.lang)
+    if (atError) out.push({ key: 'contentUpdatedAtInvalid', level: 'broken', n: 1, text: atError })
   }
+  try { resolveCurrentRecords(cards, ctx.cfg.lang) }
+  catch (e) { if (!out.some((entry) => entry.text === e.message)) out.push({ key: 'journeyInvalid', level: 'broken', n: 1, text: e.message }) }
   return out
 }
 

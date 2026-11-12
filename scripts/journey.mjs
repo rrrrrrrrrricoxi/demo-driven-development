@@ -1,8 +1,11 @@
 // 可选多轮导航。摘要只在卡面出现;资料保留在稳定入口,不改旧 demo。
 import { journeyStrings } from './strings.mjs'
+import { currentRenderStrings } from './current-render-strings.mjs'
 const object = (v) => v && typeof v === 'object' && !Array.isArray(v)
 const text = (v) => typeof v === 'string' && v.trim().length > 0
 const esc = (s) => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
+// 绝对 URL 必须能独立解析;相对路径、query 和 hash 使用看板基址。
+const parseJourneyUrl = (value) => new URL(value, /^[a-z][a-z0-9+.-]*:/i.test(value) ? undefined : 'https://board.invalid/')
 export const journeyPath = (id) => `journeys/${id}.html`
 export function journeyError(card, lang) {
   if (card.journey === undefined) return ''
@@ -10,8 +13,15 @@ export function journeyError(card, lang) {
   const bad = (field) => S.invalid(card.id, field)
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(card.id))) return bad('id')
   if (!object(j)) return bad('journey')
-  for (const k of ['decision', 'progress', 'recent']) if (!text(j[k])) return bad(k)
-  const url = (v) => text(v) && !/[\u0000-\u0020\u007f\\]/.test(v) && !v.startsWith('//') && (!/^[a-z][a-z0-9+.-]*:/i.test(v) || /^https?:/i.test(v))
+  const referenced = j.currentFrom !== undefined
+  if (referenced) {
+    if (!text(j.currentFrom) || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(j.currentFrom)) return bad('currentFrom')
+    for (const k of ['decision', 'progress', 'recent', 'current']) if (j[k] !== undefined) return bad(k)
+  } else for (const k of ['decision', 'progress', 'recent']) if (!text(j[k])) return bad(k)
+  const url = (v) => {
+    if (!text(v) || /[\u0000-\u0020\u007f\\]/.test(v) || v.startsWith('//') || (/^[a-z][a-z0-9+.-]*:/i.test(v) && !/^https?:\/\//i.test(v))) return false
+    try { parseJourneyUrl(v); return true } catch { return false }
+  }
   const row = (v, where, required) => {
     if (!object(v) || !text(v.title)) return bad(where + '.title')
     if ((required || v.href !== undefined) && !url(v.href)) return bad(where + '.href')
@@ -19,10 +29,14 @@ export function journeyError(card, lang) {
     if (v.date && !/^\d{4}-\d{2}-\d{2}$/.test(v.date)) return bad(where + '.date')
     return ''
   }
-  let err = row(j.current, 'current', true); if (err) return err
-  if (j.current.links !== undefined) {
+  if (!referenced && card.designDoc && !url(card.designDoc)) return bad('designDoc')
+  let err = referenced ? '' : row(j.current, 'current', true); if (err) return err
+  if (!referenced && j.current.links !== undefined) {
     if (!Array.isArray(j.current.links)) return bad('current.links')
-    for (const [i, l] of j.current.links.entries()) { err = row(l, `current.links[${i}]`, true); if (err) return err }
+    for (const [i, l] of j.current.links.entries()) {
+      err = row(l, `current.links[${i}]`, true); if (err) return err
+      if (l.role !== undefined && !['demo', 'document', 'preview'].includes(l.role)) return bad(`current.links[${i}].role`)
+    }
   }
   for (const key of ['history', 'development']) {
     if (!Array.isArray(j[key])) return bad(key)
@@ -42,6 +56,28 @@ export function journeySummary(card, lang) {
   const S = journeyStrings(lang), j = card.journey
   return ['decision', 'progress', 'recent'].map((k) => `<div class="journey-summary-row"><dt>${esc(S[k])}</dt><dd class="x">${esc(j[k])}</dd></div>`).join('')
 }
+export function currentSourceLink(card, lang, fromJourney = false) {
+  const id = card.journey?.currentSource?.id
+  return id ? `<a class="current-source" href="${fromJourney ? '' : 'journeys/'}${esc(id)}.html">${esc(currentRenderStrings(lang).source(id))}</a>` : ''
+}
+// 比较 journey 页面最终可点击 URL;query 与 hash 都是资源身份的一部分。
+export function currentResources(card, resolveLink = (s) => s, lang) {
+  const main = card.journey.current
+  const rows = [main, ...(main.links || []), ...(!card.journey.currentFrom && card.designDoc ? [{ title: currentRenderStrings(lang).designDoc, href: card.designDoc, role: 'document' }] : [])]
+  const seen = new Set()
+  return rows.filter((row) => {
+    const key = parseJourneyUrl(journeyHref(resolveLink(row.href))).href
+    if (seen.has(key)) return false
+    seen.add(key); return true
+  })
+}
+export function contentUpdate(card, lang) {
+  const S = currentRenderStrings(lang), source = card.journey?.currentSource
+  const own = card.contentUpdatedAt, inherited = source?.contentUpdatedAt
+  if (!own && !inherited) return null
+  if (inherited && (!own || Date.parse(inherited) > Date.parse(own))) return { at: inherited, title: S.sourceDate(source.id, inherited) }
+  return { at: own, title: S.ownDate(card.id, own) }
+}
 // 每组自成一行,覆盖旧卡面两字宽的 float 规则;仅启用 journey 的看板注入。
 export const JOURNEY_SUMMARY_CSS = `
   dl.journey-summary { display: grid; gap: 8px; }
@@ -60,14 +96,15 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
   const href = (s) => esc(journeyHref(resolveLink(s)))
   const link = (l) => `<a href="${href(l.href)}">${esc(l.title)}</a>`
   const row = (l) => `<article class="record">${l.date ? `<time>${esc(l.date)}</time>` : ''}<h3>${esc(l.title)}</h3>${l.summary ? `<p>${esc(l.summary)}</p>` : ''}${l.href ? `<div class="acts">${link(l)}</div>` : ''}</article>`
-  const currentLinks = j.current.links || []
-  const demoLinks = currentLinks.filter((l) => isJourneyDemo(resolveLink(l.href)))
-  const documents = currentLinks.filter((l) => !isJourneyDemo(resolveLink(l.href)))
+  const currentLinks = currentResources(card, resolveLink, lang).slice(1)
+  const embed = (l) => !['document', 'preview'].includes(l.role) && isJourneyDemo(resolveLink(l.href))
+  const demoLinks = currentLinks.filter(embed)
+  const documents = currentLinks.filter((l) => !embed(l))
   const designs = [j.current, ...demoLinks]
   const designId = (i) => i ? 'current-' + i : 'current'
   const originalText = (v) => typeof v === 'string' ? v : Array.isArray(v) ? v.map(originalText).join('\n') : JSON.stringify(v, null, 2)
   const original = ['repro', 'source', 'question', 'decision', 'demoNote', 'problem', 'approach', 'note', 'detail'].filter((k) => card[k]).map((k) => `<dt>${esc(k)}</dt><dd>${esc(originalText(card[k]))}</dd>`).join('')
-  const legacy = [...(card.demo ? [{ title: S.originalDemo, href: card.demo }] : []), ...(card.links || [])]
+  const legacy = [...(card.demo ? [{ title: S.originalDemo, href: card.demo }] : []), ...(j.currentFrom && card.designDoc ? [{ title: currentRenderStrings(lang).designDoc, href: card.designDoc }] : []), ...(card.links || [])]
   const rebase = (html) => html.replace(/\b(href|src)="([^"]*)"/g, (_, key, value) => `${key}="${journeyHref(value)}"`)
   const recordNav = (items) => `<nav class="record-nav" aria-label="${esc(S.navigation)}">${items.map(([id, title]) => `<a href="#${id}">${esc(title)}</a>`).join('')}</nav>`
   return `<!doctype html>
@@ -137,8 +174,8 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
   ${JOURNEY_SUMMARY_CSS}${appearance.css || ''}
 </style>${appearance.theme || ''}</head><body>
 <!-- ddd-gen v${esc(version)} -->
-<header class="backbar"><a href="../index.html#${esc(card.id)}">← ${esc(S.board)}</a><span class="ctx">${esc(card.id)} · ${esc(card.title)}</span><nav class="journey-nav" aria-label="${esc(S.navigation)}"><a href="#current" aria-current="page">${esc(S.current)}</a><a href="#history">${esc(S.history)}</a><a href="#development">${esc(S.development)}</a></nav><div class="acts journey-tools"><details class="journey-current-links"><summary>${esc(S.currentResources)}</summary><div class="resource-menu"><h2>${esc(j.current.title)}</h2>${j.current.summary ? `<p>${esc(j.current.summary)}</p>` : ''}<div class="acts">${designs.map((l, i) => `<a href="#${designId(i)}">${esc(l.title)}</a>`).join('')}${documents.map(link).join('')}</div><details class="journey-status"><summary>${esc(S.overview)}</summary><dl class="journey-summary">${journeySummary(card, lang)}</dl></details><div class="acts"><a href="${href(j.current.href)}" target="_blank" rel="noopener">${esc(S.open)}</a></div></div></details><a class="pri standalone-demo" href="${href(j.current.href)}" target="_blank" rel="noopener">${esc(S.open)}</a>${appearance.toggle || ''}</div></header>
-<main>${designs.map((l, i) => `<section id="${designId(i)}" class="current-design"${i ? ' hidden' : ''}>${isJourneyDemo(resolveLink(l.href)) ? `<div class="demo-viewport"><iframe class="demo-frame" src="${href(l.href)}" title="${esc(l.title)}" loading="${i ? 'lazy' : 'eager'}"></iframe></div>` : `<div class="record-content"><h1>${esc(l.title)}</h1>${l.summary ? `<p>${esc(l.summary)}</p>` : ''}<div class="acts">${link(l)}</div></div>`}</section>`).join('')}
+<header class="backbar"><a href="../index.html#${esc(card.id)}">← ${esc(S.board)}</a><span class="ctx">${esc(card.id)} · ${esc(card.title)}</span><nav class="journey-nav" aria-label="${esc(S.navigation)}"><a href="#current" aria-current="page">${esc(S.current)}</a><a href="#history">${esc(S.history)}</a><a href="#development">${esc(S.development)}</a></nav><div class="acts journey-tools"><details class="journey-current-links"><summary>${esc(j.currentSource ? currentRenderStrings(lang).source(j.currentSource.id) : S.currentResources)}</summary><div class="resource-menu">${j.currentSource ? `<p>${currentSourceLink(card, lang, true)}</p>` : ''}<h2>${esc(j.current.title)}</h2>${j.current.summary ? `<p>${esc(j.current.summary)}</p>` : ''}<div class="acts">${designs.map((l, i) => `<a href="#${designId(i)}">${esc(l.title)}</a>`).join('')}${documents.map(link).join('')}</div><details class="journey-status"><summary>${esc(S.overview)}</summary><dl class="journey-summary">${journeySummary(card, lang)}</dl></details><div class="acts"><a href="${href(j.current.href)}" target="_blank" rel="noopener">${esc(S.open)}</a></div></div></details><a class="pri standalone-demo" href="${href(j.current.href)}" target="_blank" rel="noopener">${esc(S.open)}</a>${appearance.toggle || ''}</div></header>
+<main>${designs.map((l, i) => `<section id="${designId(i)}" class="current-design"${i ? ' hidden' : ''}>${embed(l) ? `<div class="demo-viewport"><iframe class="demo-frame" src="${href(l.href)}" title="${esc(l.title)}" loading="${i ? 'lazy' : 'eager'}"></iframe></div>` : `<div class="record-content"><h1>${esc(l.title)}</h1>${l.summary ? `<p>${esc(l.summary)}</p>` : ''}<div class="acts">${link(l)}</div></div>`}</section>`).join('')}
 <section id="history" class="record-view" hidden>${recordNav([['history', S.history], ['history-resources', S.resources]])}<div class="record-content"><h1>${esc(S.history)}</h1><details id="history-records"><summary>${esc(S.history)} · ${j.history.length}</summary>${j.history.map(row).join('')}</details><details id="history-resources"><summary>${esc(S.resources)} · ${legacy.length}</summary><div class="acts">${legacy.map(link).join('')}</div><dl>${rebase(shots)}</dl></details><footer>${esc(S.source)}</footer></div></section>
 <section id="development" class="record-view" hidden>${recordNav([['development', S.development], ...(acceptance.length ? [['development-acceptance', S.acceptance]] : []), ...(original ? [['development-original', S.originalRecords]] : [])])}<div class="record-content"><h1>${esc(S.development)}</h1>${j.development.map(row).join('')}${acceptance.length ? `<h2 id="development-acceptance">${esc(S.acceptance)}</h2><div class="acts">${acceptance.map(link).join('')}</div>` : ''}${original ? `<details id="development-original" class="original-records"><summary>${esc(S.originalRecords)}</summary><dl>${original}</dl></details>` : ''}<footer>${esc(S.source)}</footer></div></section></main>
 <script>
@@ -170,10 +207,20 @@ export function renderJourney(card, { lang, version, resolveLink, shots = '', ac
           var doc = frame.contentDocument
           if (!doc) return
           var board = new URL(document.querySelector('.backbar > a').href)
-          var bars = Array.from(doc.querySelectorAll('#ddd-backnav,nav'))
+          function pureBacknav(node) {
+            if (node.querySelector('button,input,select,textarea,form,details,[role="button"]')) return false
+            var anchors = node.matches('a') ? [node] : Array.from(node.querySelectorAll('a'))
+            return anchors.length > 0 && anchors.every(function (a) {
+              var url = new URL(a.href)
+              return url.origin === board.origin && url.pathname === board.pathname
+            })
+          }
+          var bars = Array.from(doc.querySelectorAll('#ddd-backnav'))
+          // 只有明确标记的纯返回区可隐藏;功能 header 的其余控件保持可用。
+          doc.querySelectorAll('[data-ddd-backnav]').forEach(function (node) { if (pureBacknav(node)) node.style.display = 'none' })
           var bar = bars.find(function (nav) {
             var style = frame.contentWindow.getComputedStyle(nav), bounds = nav.getBoundingClientRect()
-            return style.position === 'fixed' && bounds.top === 0 && bounds.height > 0 && bounds.height <= 64 && Array.from(nav.querySelectorAll('a')).some(function (a) { return new URL(a.href).pathname === board.pathname })
+            return pureBacknav(nav) && style.position === 'fixed' && bounds.top === 0 && bounds.height > 0 && bounds.height <= 64
           })
           if (bar) {
             // 裁去旧返回栏的高度,保持内页原始 viewport 与固定控件坐标。

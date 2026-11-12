@@ -64,6 +64,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import { isContentUpdatedAt } from '../scripts/current-records.mjs'
 
 const HERE_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE_DIR, '..')
@@ -1632,7 +1633,7 @@ console.log('T37 进度响应渲染')
   ok(g2.status === 0 && !/待收账/.test(g2.stdout), '没有 release-manifest 时守卫这一段整个不跑')
 }
 
-// ============ T38 pr-sync --settle(假 gh;默认只打印,--write 只动两个字段)============
+// ============ T38 pr-sync --settle(假 gh;默认只打印,--write 记录实际内容改写时刻)============
 console.log('T38 pr-sync --settle')
 {
   const fx38 = mkFixture('fx38', { 's.html': demoHtml('s') })
@@ -1692,12 +1693,17 @@ esac
   want.items[0].note = `【2026-07-01】立卡\n\n【${today} 收账】PR#11 已合(自动)`
   want.items[2].status = 'done'
   want.items[2].note = `【${today} 收账】PR#10 已合(自动)`
+  const writtenAt = rd(blP).items[0].contentUpdatedAt
+  ok(isContentUpdatedAt(writtenAt) && rd(blP).items[2].contentUpdatedAt === writtenAt, '实际收账的卡记录同一次改写时刻')
+  want.items[0].contentUpdatedAt = writtenAt
+  want.items[2].contentUpdatedAt = writtenAt
   ok(readFileSync(blP, 'utf8') === JSON.stringify(want, null, 2) + '\n',
-    '--write 只改目标卡的 status 与 note 尾行,其它字节不动、末尾换行不变')
+    '--write 只改目标卡的 status、note 尾行和内容时间,其它字节不动、末尾换行不变')
   const decWant = JSON.parse(decText)
   decWant.entries[0].status = 'live'
+  decWant.entries[0].contentUpdatedAt = writtenAt
   ok(readFileSync(decP, 'utf8') === JSON.stringify(decWant, null, 2) + '\n',
-    '决策卡只改 status:gen 不渲染决策卡的 note,不硬塞一个没人读的字段')
+    '决策卡改 status 与内容时间:不硬塞看板不渲染的 note')
   ok(rd(blP).items[1].status === 'done' && !rd(blP).items[1].note, 'PR 还开着的卡没被碰')
   const rAgain = runSync(['--settle'])
   ok(/没有待收账|nothing to settle/.test(rAgain.stdout), '收完账再跑:清单空了')
@@ -2577,6 +2583,8 @@ esac
   const want = JSON.parse(blText)
   want.items[0].status = 'done'
   want.items[0].note = `【${today} 收账】PR#11 已合(自动)`
+  want.items[0].contentUpdatedAt = rd(blP).items[0].contentUpdatedAt
+  ok(isContentUpdatedAt(want.items[0].contentUpdatedAt), '--only 收账只给点名卡记录内容时间')
   ok(readFileSync(blP, 'utf8') === JSON.stringify(want, null, 2) + '\n',
     '只有点名的那张卡被改,BL-2 / BL-3 一个字节都没动')
   ok(sha(decP) === decBefore, '决策卡整份没被碰(它那张也 hold 着)')
@@ -2932,6 +2940,8 @@ esac
   const want = JSON.parse(blText)
   want.status = 'done'
   want.note = `【2026-07-01】立卡\n\n【${today} 收账】PR#11 已合(自动)`
+  want.contentUpdatedAt = rd(blCard).contentUpdatedAt
+  ok(isContentUpdatedAt(want.contentUpdatedAt) && rd(decCard).contentUpdatedAt === want.contentUpdatedAt, '拆分卡按实际收账记录内容时间')
   ok(readFileSync(blCard, 'utf8') === JSON.stringify(want, null, 2) + '\n', '收账写的是那一张卡文件本身,形制不变(order 也还在)')
   ok(rd(decCard).status === 'live' && rd(decCard).order !== undefined, '决策卡同样按文件收账,order 字段没被 pr-sync 吃掉')
   const after = runGen(NEW_SCRIPTS, kb)
@@ -2972,7 +2982,7 @@ console.log('T50 写操作 CLI ddd.mjs')
     ok(made && made.status === 'ready' && made.tier === '1' && made.priority === 'med' && made.date && /^\d{4}-\d{2}-\d{2}$/.test(made.date),
       '新卡落进 items 数组,status 取 statuses 第一个、日期是今天')
     ok(/^<.*>$/.test(made.problem) && /^<.*>$/.test(made.approach), '正文字段是 <…> 占位,等着人填')
-    ok(Object.keys(made).join(',') === 'id,title,status,tier,priority,line,session,date,problem,approach,note,links',
+    ok(Object.keys(made).join(',') === 'id,title,status,tier,priority,line,session,date,contentUpdatedAt,problem,approach,note,links',
       `键序规范:id/title 在前、长文居中、links 收尾(实得 ${Object.keys(made).join(',')})`)
     ok(readFileSync(blP, 'utf8') === JSON.stringify(rd(blP), null, 2) + '\n', '未拆模式整文件重写仍是 2 空格 + 末尾换行')
     ok(runGen(NEW_SCRIPTS, kb).status === 0, 'CLI 建的卡 gen 认(tier / priority / status 都在合法集里)')
@@ -5180,7 +5190,7 @@ console.log('T69 前置依赖 after')
     runCli(kb2, ['card', 'after', 'BL-1', '#230'])
     const a2 = runCli(kb2, ['card', 'after', 'BL-1', 'BL-2', 'v0.0.1'])
     ok(a2.status === 0 && afterOfCard('BL-1').join(',') === 'BL-2,#230,v0.0.1', '再追加:已有的去重,新的落到末尾')
-    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('source,after,problem'),
+    ok(Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(',').includes('source,contentUpdatedAt,after,problem'),
       'after 插在扁平档末尾 —— 第一个长文字段之前(normalizeCard 按 band 插,不按 K_FLAT 的邻居)',
       Object.keys(rd(bl2).items.find((i) => i.id === 'BL-1')).join(','))
     const a3 = runCli(kb2, ['card', 'after', 'BL-1', '--rm', '#230'])
@@ -9589,3 +9599,6 @@ console.log('T88 决策卡归档 decisionArchive')
 console.log(`\n===== 结果:${pass} pass / ${fail} fail =====`)
 if (fail) { console.error(`现场保留:${WORK}`); process.exit(1) }
 rmSync(WORK, { recursive: true, force: true })
+
+// 回归真实生成的内嵌返回栏脚本与现行资源渲染。
+await import('./current-render.mjs')

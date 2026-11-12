@@ -19,10 +19,11 @@
 //
 // --settle(v0.13.0,定稿 §2.2-4):同步之后列出「关联 PR 都合了、卡还没收到终态」的卡与建议 status。
 // 默认只打印;--write 才改 —— 「PR 合了」≠「卡可以收」(一张卡跨三个 PR、一个 PR 只落一半都常见),
-// 所以机器判断 + 提示 + 一键收账,不做静默改写。--write 只动两个字段:
+// 所以机器判断 + 提示 + 一键收账,不做静默改写。--write 修改:
 //   status → 终态(backlog / 进度卡 done,决策卡 live)
 //   时间线字段(items 的 note、tasks 的 notes)末尾追加一行「【日期 收账】PR#N 已合(自动)」
 //     决策卡没有时间线字段(gen 不渲染 note),不硬塞一个没人读的字段进去,只改 status。
+//   contentUpdatedAt → 本次实际改写卡片的 ISO 时刻;不改写的卡保留原时间。
 // 改写前先验一遍「原文 === JSON.stringify(解析结果, null, 2) + 换行」:对不上就整份跳过,
 // 免得一次收账把别人手写的排版整份重排(那种 diff 没人敢看)。落盘走 tmp + rename。
 //
@@ -40,6 +41,7 @@ import { prsOfCard } from './prlink.mjs'
 import { cmpAt } from './relstage.mjs'
 import { KIND_TERMINAL, settleHold, settleNoteLine, settleOf } from './settle.mjs'
 import { cardsDirOf, NOTE_FIELD, scanCardDir, sortCards } from './cards.mjs'
+import { contentUpdatedAtError } from './current-records.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KANBAN = resolveKanbanDir()
@@ -86,7 +88,8 @@ if (!REPO) die(S.noRepo())
 // 配了 cardsDir:backlog/decisions 的卡各自一个文件(instance 仍在头文件里,上面那段不受影响);
 // 没配:照旧从头文件的数组里读。下面的「PR → 卡」反查与 --settle 只认这一张表。
 let CARDS_DIR
-try { CARDS_DIR = cardsDirOf(readJson(join(KANBAN, 'kanban.config.json')) || {}) } catch (e) { die(e.message) }
+const CFG = readJson(join(KANBAN, 'kanban.config.json')) || {}
+try { CARDS_DIR = cardsDirOf(CFG) } catch (e) { die(e.message) }
 const SUB_OF = { items: 'backlog', entries: 'decisions' }
 const CARD_ROWS = [] // { f: 相对看板目录的文件, key: 数组名('' = 整个文件就是这张卡), kind, card }
 for (const x of MANIFESTS) {
@@ -219,6 +222,18 @@ for (const r of out.releases) {
 
 out.syncedAt = new Date().toISOString()
 
+// 先验拟写卡的人工时间,再写同步结果;非法日期不能在收账时被自动覆盖成「现在」。
+if (WROTE_ASKED && !DRY) {
+  const relPr = new Map(out.prs.map((p) => [p.number, p]))
+  for (const r of CARD_ROWS) {
+    const card = r.card
+    if (!card?.id || (ONLY && !ONLY.includes(String(card.id))) || settleHold(card) ||
+      settleOf(card, prsOfCard(card, REPO), relPr, REPO).kind !== 'settle') continue
+    const err = contentUpdatedAtError(card, CFG.lang)
+    if (err) die(err)
+  }
+}
+
 if (prTruncated) console.error(S.prTruncated(ghPrs.length, 'limit'))
 if (relTruncated) console.error(S.relTruncated(ghRels.length, 'release-limit'))
 
@@ -273,7 +288,7 @@ if (!WROTE_ASKED || DRY) {
   process.exit(0)
 }
 
-// ---- --settle --write:只改这两个字段,其它字节不动 ----
+// ---- --settle --write:只改 status、时间线和内容时间,其它卡不动 ----
 const d = new Date()
 const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const atomicWrite = (p, text) => { // 同目录 tmp + rename:半截文件永远不会出现在 manifest 的位置上
@@ -283,6 +298,7 @@ const atomicWrite = (p, text) => { // 同目录 tmp + rename:半截文件永远�
 }
 let settled = 0
 const touched = []
+const writes = []
 for (const f of [...new Set(rows.map((r) => r.f))]) {
   const path = join(KANBAN, f)
   const text = readFileSync(path, 'utf8')
@@ -291,7 +307,9 @@ for (const f of [...new Set(rows.map((r) => r.f))]) {
   for (const r of rows.filter((x) => x.f === f)) {
     // key = '' 是一卡一文件:整个文件就是这张卡,不必在数组里找
     const card = r.key ? (data[r.key] || []).find((c) => c && String(c.id) === r.id) : (String(data.id) === r.id ? data : null)
-    if (!card) continue
+    if (!card || card.status === r.to) continue
+    const err = contentUpdatedAtError(card, CFG.lang)
+    if (err) die(err)
     card.status = r.to
     const nf = NOTE_FIELD[r.kind]
     if (nf) {
@@ -299,9 +317,13 @@ for (const f of [...new Set(rows.map((r) => r.f))]) {
       const cur = String(card[nf] || '')
       card[nf] = cur ? `${cur}\n\n${line}` : line
     }
+    card.contentUpdatedAt = d.toISOString()
     settled++
   }
-  atomicWrite(path, JSON.stringify(data, null, 2) + '\n')
+  const next = JSON.stringify(data, null, 2) + '\n'
+  if (next === text) continue
+  writes.push({ path, text: next })
   touched.push(f)
 }
+for (const write of writes) atomicWrite(write.path, write.text)
 console.log(S.settleWrote(settled, touched.join(', ')))
