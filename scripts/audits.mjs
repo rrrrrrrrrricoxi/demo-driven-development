@@ -17,7 +17,7 @@
 // 「产物版本戳更新 / plugin 安装异常 / 非主线不重渲 / 无戳自愈 / gen 跑失败」那几条不在这份模块里:
 // 它们不是审计结论,是「要不要重生成」那一步的副产品(audit 只读、从不 gen,根本算不出它们),
 // 照旧留在 stop-hook.mjs 里,按坏了级全文照出。
-import { journeyError } from './journey.mjs'
+import { journeyError } from './journey-model.mjs'
 import { journeySummaryFields, journeySuggested, LONG_TEXT_LIMIT } from './journey-summary.mjs'
 import { contentUpdatedAtError, resolveCurrentRecords } from './current-records.mjs'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'

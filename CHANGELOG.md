@@ -9,6 +9,14 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## 0.19.10 — 2026-11-12
+
+- Reject empty or malformed required hook groups before packaging or release; an event name alone does not establish a working hook.
+- Include journey pages in card split/join integrity checks so changes to current plans and history cannot escape the byte comparison.
+- Separate runtime identity diagnostics from board messages, package validation from release commands, and journey rules from HTML rendering. Preserve existing public exports.
+- Share the card commit-date query while retaining the distinct file-time fallback for update dates.
+- Consolidate initialization's card allocation and Git staging policy, remove unused state, and reuse the settlement configuration already loaded for the same check.
+
 ## 0.19.9 — 2026-11-12
 
 - Read core identity and version only from package.json; generation, audits, and version guards no longer require a harness manifest.

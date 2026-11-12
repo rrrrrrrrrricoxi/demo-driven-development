@@ -27,7 +27,7 @@ import { beginConcurrentGeneration } from './gen-concurrent.mjs'
 import { relIndex, stageOf } from './relstage.mjs'
 import { lite, litePreview } from './lite.mjs'
 import { SETTLE_HOLD_DAYS, TERMINAL, dormantDate, settleHold, settleHoldSince, settleOf, staleLink } from './settle.mjs'
-import { CARD_KINDS, boardRepo, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
+import { CARD_KINDS, boardRepo, cardCommittedMap, cardUpdatedMap, cardsDirOf, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { accFeedback } from './accfb.mjs'
 import { isIso, isRemoteShot, readPrecheck, shotHref } from './accpre.mjs'
 import { journeyError, journeyPath, journeySummary, currentResources, currentSourceLink, contentUpdate, JOURNEY_SUMMARY_CSS, renderJourney } from './journey.mjs'
@@ -135,23 +135,10 @@ dm.entries = EFFECTIVE_CARDS.slice(b.items.length)
 // ———— 每卡更新日期(v0.14.0,仅 cardsDir 开)————
 // 口径在 cards.mjs(v0.15.14 起守卫的挂账到期提醒读同一份):一条 git log 批量取,
 // git 失败 / 文件还没提交 → 文件 mtime → 空。取的是已提交的事实,同一 commit 下同输出。
-const CARD_UPDATED = CARDS_DIR ? cardUpdatedMap(HERE, CARDS_DIR, CARD_SRC) : new Map()
+// 提交日期不退 mtime;旧「最后改动日」复用同次查询,再补 mtime。
+const CARD_COMMITTED = CARDS_DIR ? cardCommittedMap(HERE, CARDS_DIR, CARD_SRC) : new Map()
+const CARD_UPDATED = CARDS_DIR ? cardUpdatedMap(HERE, CARDS_DIR, CARD_SRC, CARD_COMMITTED) : new Map()
 const cardUpd = (id) => CARD_UPDATED.get(id) || ''
-// 新内容时间启用时,提交时间只取 Git 事实,不能把 mtime 标作提交。
-const CARD_COMMITTED = new Map()
-const datedCards = EFFECTIVE_CARDS.filter((card) => contentUpdate(card, cfg.lang))
-if (datedCards.length && CARDS_DIR) {
-  try {
-    const paths = new Map([...CARD_SRC].map(([id, path]) => [path.split('/').slice(-2).join('/'), id]))
-    const log = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', CARDS_DIR], { cwd: HERE, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).toString()
-    let day = ''
-    for (const line of log.split('\n').map((s) => s.trim()).filter(Boolean)) {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(line)) { day = line; continue }
-      const id = paths.get(line.split('/').slice(-2).join('/'))
-      if (id && day && !CARD_COMMITTED.has(id)) CARD_COMMITTED.set(id, day)
-    }
-  } catch { /* 无提交信息就不显示提交日期。 */ }
-}
 // instance.ghRepo/branch 三 manifest 各存一份(现状,避免双真源迁移);不一致仅提醒,不阻断
 {
   const three = [['manifest', m], ['backlog-manifest', b], ['decisions-manifest', dm]]

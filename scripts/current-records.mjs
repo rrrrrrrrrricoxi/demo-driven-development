@@ -1,5 +1,5 @@
 // 共用现行资料只解析显式卡号引用,不从状态、正文或 PR 推断产品结论。
-import { journeyError } from './journey.mjs'
+import { journeyError } from './journey-model.mjs'
 import { currentRecordsStrings } from './strings.mjs'
 export { currentRecordsStrings } from './strings.mjs'
 
@@ -36,12 +36,9 @@ export function resolveCurrentRecords(cards, lang) {
     if (object(j) && own(j, 'currentFrom')) {
       if (typeof j.currentFrom !== 'string' || !j.currentFrom.trim() || j.currentFrom !== j.currentFrom.trim()) throw new Error(S.invalid(card.id, 'journey.currentFrom'))
       if (CURRENT_FIELDS.some((field) => own(j, field))) throw new Error(S.mixed(card.id))
-      const err = journeyError(card, lang)
-      if (err) throw new Error(err)
-    } else {
-      const err = journeyError(card, lang)
-      if (err) throw new Error(err)
     }
+    const err = journeyError(card, lang)
+    if (err) throw new Error(err)
   }
   const resolved = new Map(), visiting = []
   const visit = (card) => {

@@ -1,11 +1,11 @@
-// 版本戳共用件(gen.mjs / stop-hook.mjs / retire-stale-caches.mjs 共用,零依赖)。
+// 版本戳共用件(gen.mjs / stop-hook.mjs / retire-stale-caches.mjs 共用)。
 // 背景(盖板事故):长寿旧版 session 的 Stop hook 会拿旧 gen 反复盖板;mtime 新鲜度分不出「谁写的」——
 // 旧 gen 盖完板产物反而最新。版本戳补上这一维:index.html 第二行 <!-- ddd-gen vX.Y.Z --> 由
 // gen 烙下,守卫据此判「产物比我新还是比我旧」,自愈旧 gen 覆盖、拒绝降级覆盖。
 import { closeSync, openSync, readFileSync, readSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runtimeStrings } from './strings.mjs'
+import { runtimeStrings } from './runtime-strings.mjs'
 
 /**
  * 运行包版本只认根 package.json 的 name/version,不读宿主 manifest,不退回宿主元数据。

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { validatePackage } from './release.mjs'
+import { validatePackage } from './package-manifest.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const PROVENANCE = 'codex-package-provenance.json'
