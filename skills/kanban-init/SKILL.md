@@ -10,7 +10,7 @@ description: Initialize or migrate the demo-driven kanban in a project. Use for 
 
 ## 前置:确定插件或源码路径
 
-宿主支持 plugin 时,按其安装说明添加 marketplace 并启用 `demo-driven-development`。没有原生插件适配的宿主可使用已核对来源的源码 checkout,将其根目录作为 `<plugin>`,选择 `--runtime portable`;该模式只初始化共享看板,不安装或修改宿主 hooks、skills、配置。Claude Code 的命令见 [hosts.md](../../docs/hosts.md#claude-code);Codex CLI 的 Git marketplace 命令见 [hosts.md](../../docs/hosts.md#codex)。
+宿主支持 plugin 时,按其安装说明添加 marketplace 并启用 `demo-driven-development`。没有原生插件适配的宿主可使用已核对来源的源码 checkout,将其根目录作为 `<plugin>`,使用缺省的 `portable` 模式(也可显式传 `--runtime portable`);该模式只初始化共享看板,不安装或修改宿主 hooks、skills、配置。Pi 使用独立 extension 接入,不是 init runtime;其加载与验证见 [pi.md](../../docs/pi.md)。Claude Code 的命令见 [hosts.md](../../docs/hosts.md#claude-code);Codex CLI 的 Git marketplace 命令见 [hosts.md](../../docs/hosts.md#codex)。
 
 ## 三段式:scan → plan → 人审 → apply
 
@@ -20,11 +20,11 @@ node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand X [--runtime cl
 node <plugin>/scripts/init.mjs apply --dir <projectRoot> <同 plan 参数> [--yes] [--no-commit]
 ```
 
-`--runtime` defaults to `claude`. Codex, `both`, and `portable` default to no commit; Claude commits only when the target was initially clean. Use `--no-commit` to leave apply changes uncommitted. Codex hook mode defaults to `project`, which writes portable project hook entries with absolute plugin paths. Use `--codex-hooks plugin` with `--runtime codex` when the installed plugin should supply hooks; this avoids duplicate project hook entries. Codex hook definitions require user review and trust before they run. Preserve an existing `features.hooks = false` setting and report that hooks are disabled.
+`--runtime` 缺省为 `portable`:保留宿主文件,不改暂存区或提交,末尾跑 gen 与共享 audit。只有显式选择 `claude`、`codex` 或 `both` 才写对应宿主的配置与说明。Codex 与 `both` 也不自动提交;Claude 仅在目标起初干净时自动提交,`--no-commit` 可关闭。Codex hook 模式缺省为 `project`,写入含安装目录绝对路径的项目 hook;该路径不能随 clone 跨机器使用。原生 plugin 安装应选择 `--runtime codex --codex-hooks plugin`,使用插件自带 hooks 并移除 init 自己的项目 hooks,避免重复。用户自定义或混合 hook 组保留,需通过 `/hooks` 核查是否重复。Codex hook 定义仍需用户审阅和信任;保留已有 `features.hooks = false`,并报告 hooks 已关闭。
 
 1. **scan(只读盘点)**:场景判定 + 散落 demo 摘要(文件名 / `<title>` / 大小 / git 状态 / 资产引用,**不含正文**)+ 旧装痕迹(manifest、机制件、settings 旧 hook 注册)。散落候选三过滤:`_` 前缀 = 探针/草稿、含 package.json 的子目录 = 应用源码、manifest / config 已提及 = 已覆盖数据(守卫同口径——挪走反而弄断链接;config.docs 登记的 `type:"html"` 指南同此)。
 2. **plan(只读计划)**:列出将建文件、所选宿主的读保护和项目说明、归拢清单(git 策略逐文件)、接管动作、遗留卡预分配 id。**把 plan 原样给人审,拿到确认才 apply。**
-3. **apply(动手,幂等)**:全程持 `app/kanban/.init-lock`(守卫见锁放行本轮);先写卡后 mv(孤儿窗口压为零);末尾自跑 gen + 所选宿主守卫冒烟(portable 跑共享 audit,不运行宿主 hook);git 只 add 本次触碰路径。是否提交按 runtime 默认值或 `--no-commit` 执行。重跑 apply = 零变更。
+3. **apply(动手,幂等)**:全程持 `app/kanban/.init-lock`(守卫见锁放行本轮);先写卡后 mv(孤儿窗口压为零);末尾自跑 gen + 所选宿主守卫冒烟(portable 跑共享 audit,不运行宿主 hook);仅允许自动提交的 Claude 路径会 add 本次触碰路径,其他路径保留暂存区。是否提交按 runtime 默认值或 `--no-commit` 执行。重跑 apply = 零变更。
 
 ## 三种进场景
 
@@ -36,7 +36,7 @@ node <plugin>/scripts/init.mjs apply --dir <projectRoot> <同 plan 参数> [--ye
 
 **旧版安装(legacy,机制接管)**:有 manifest/机制件/demos、无 config(= 项目里手工长出的旧看板)。apply = ①生成 config——docs 从旧 gen.mjs 的 REF_DOCS 机械翻译提取,`--brand` 按旧板实况给(要线别 UI 则接管后手工在 config 补 `lanes` 对象,见「线别」节);②按所选 runtime 补齐读保护与说明。Claude runtime 会摘除旧 `claude-stop-hook` /「看板提醒」标记,保留其他设置;③旧机制件(gen/守卫/serve)**不删除**——自动落「割接清理」+「backnav 换章」两张 backlog 卡,退役与换章由人在割接后单独 PR。**数据合同:四 manifest 只允许 backlog 追加(卡 + `tiers."0"` 词汇),demos 与其余 manifest 逐字节不动。**`tiers."0"` 只是初始兜底词汇,不是新卡的默认档 —— `card new` 建卡的默认 tier 取现有非 done 卡里出现最多的那档,板上还没有别的 tier 时才会落到它。
 
-已初始化(有 config)时重跑 apply = 幂等补齐机制件 + 归拢新散落,是「升级 plugin 后重跑 init」的安全日常操作。
+已初始化(有 config)时重跑 apply = 幂等补齐机制件 + 归拢新散落,是「升级 plugin 后重跑 init」的安全日常操作。刷新宿主接入时仍须传所选 `--runtime` 与 Codex hook 模式;不传 runtime 只执行 portable,不会从已有宿主配置猜测接入方式。
 
 v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片第二行)与 `order`(阅读动线序号,点开计已读);顶层可选 `docSegments`(category→地基/流程/操作/存档 段名覆盖映射,缺省映射见 templates/kanban.config.json 的 $comment)。都可后补,缺省不渲染对应 UI。
 
@@ -90,7 +90,7 @@ v0.2 起 config.docs[] 支持可选 `desc`(一句话定位,文档库 Hub 卡片�
 
 ## 版本戳与旧版退役(v0.6.0)
 
-gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「旧版 session 盖板」、拒绝降级覆盖;背景与设计见 stop-hook.mjs / lib-version.mjs 头注释)。两条随之更新的口径:
+共享版本取自 `package.json`,不依赖宿主 manifest。gen 在 index.html 第二行烙 `<!-- ddd-gen vX.Y.Z -->`(守卫据此自愈「旧版 session 盖板」、拒绝降级覆盖;背景与设计见 stop-hook.mjs / lib-version.mjs 头注释)。两条随之更新的口径:
 
 - **等价验收**:升版后戳行是**预期的唯一一行 index.html diff**;cmp/shasum 前先归一化(`sed '/<!-- ddd-gen v/d'`),归一化后仍须逐字节一致。
 - **Claude Code only — 退役旧缓存**:升级 Claude plugin 后,在新起的 Claude Code session 里运行 `node <plugin>/scripts/retire-stale-caches.mjs`(先 dry-run,确认后再加 `--yes`)。此脚本只管理 Claude Code 的插件缓存与长会话;不要从 Codex 调用它。它给被取代的旧版本缓存写拒执行 shim,防止旧 Claude session 用旧 gen 反复盖板;会自动跳过仍被项目注册在用的版本(除非显式传 `--include-registered`)与软链目录,dry-run 会列出版本和活会话标记。

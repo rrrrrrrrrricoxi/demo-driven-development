@@ -7,7 +7,9 @@ description: Guide feature work in a project with the demo-driven kanban. Distin
 
 固化 demo 驱动工作节奏:**机制归 plugin、数据归项目**。仅当项目已装看板(存在 `app/kanban/kanban.config.json`)时适用。plugin 脚本使用 `node <plugin>/scripts/...`;从当前 skill 路径 `<plugin>/skills/ddd-workflow/SKILL.md` 可解析 plugin 根目录,不要依赖某个宿主提供的 plugin-root 环境变量。
 
-改进 DDD 机制本身时,先用源码 manifest 的 repository 与运行包 provenance 定位来源 commit,在源仓库 feature 分支实现和验证;不手改已安装缓存或项目内生成的运行包。通用规则留在共享核心,宿主差异放适配器,项目业务数据留在项目。按用户授权完成上游 PR/CI 同步,并分别报告源码 commit、上游链接、合并/发布状态与现场安装版本,不要把「本地已修」当成「上游已更新」。源码与打包流程见 plugin 根 `CONTRIBUTING.md`、`RELEASING.md`;接入新宿主时读 `docs/hook-core.md`。
+改进 DDD 机制本身时,先用源码 `package.json` 与运行包 provenance 定位仓库和来源 commit,在源仓库 feature 分支实现和验证;不手改已安装缓存或项目内生成的运行包。通用规则留在共享核心,宿主差异放适配器,项目业务数据留在项目。按用户授权完成上游 PR/CI 同步,并分别报告源码 commit、上游链接、合并/发布状态与现场安装版本,不要把「本地已修」当成「上游已更新」。源码与打包流程见 plugin 根 `CONTRIBUTING.md`、`RELEASING.md`;接入新宿主时读 `docs/hook-core.md`。
+
+自动守卫取决于已启用的宿主适配器。Claude/Codex Stop 可重生成;Pi extension 的收工检查只读;portable 不注册生命周期检查。使用 Pi 或 portable 时,在项目主线协调写入后显式运行 `node <plugin>/scripts/gen.mjs --dir <kanbanDir>`,再运行 `node <plugin>/scripts/ddd.mjs audit --dir <kanbanDir> --json` 并检查 findings。缺少自动 hook 不免除共享规则;具体接入能力与边界见 `docs/hosts.md`。
 
 ## 第 0 步:场景自检(动手前先答,两问)
 
@@ -36,7 +38,7 @@ description: Guide feature work in a project with the demo-driven kanban. Distin
 
 **为什么不再手改 JSON**:①卡号原来靠各会话自己算「最大号 +1」,同一晚两条线撞号只是时间问题 —— CLI 用 `openSync(path,'wx')` 独占创建把号预留下来,抢输的那个自己退到下一号;②手写会漏末尾换行、写错 status / 日期形制 / 线别拼错,gen 要么硬失败要么静默渲染成别的样子,CLI 当场拒(`order` 一律不许改:它是拆卡时记下的原数组下标,gen 读回时按它再按 id 排、排完就删;面上 Backlog / 决策两个 pane 是按卡日期新→旧排的,不看它 —— 跟着数组走的是截图廊的组序与深链表的键序);③板拆成一卡一文件之后,写一张卡只动那一张卡的文件,别的会话在途的卡不会被整份重写带走。
 
-**退路**:CLI 说不清的(一次重排一整段结构、批量改、要写它还不认识的形制)直接编辑卡文件 / manifest —— 形制照旧是 2 空格缩进 + 末尾换行,改完让守卫重跑 gen。CLI 从不 commit,`git add` 那几个文件仍是自己的事。
+**退路**:CLI 说不清的(一次重排一整段结构、批量改、要写它还不认识的形制)直接编辑卡文件 / manifest —— 形制照旧是 2 空格缩进 + 末尾换行,改完按当前适配器能力自动或显式重跑 gen。CLI 从不 commit,`git add` 那几个文件仍是自己的事。
 
 ## 流程:①设计 + demo → ★评审 → ②代码 → ③验证 → ④PR
 
@@ -62,7 +64,7 @@ description: Guide feature work in a project with the demo-driven kanban. Distin
    - 正文认轻 markdown:`**粗体**`、`` `代码` ``、空行分段、`- ` 与 `1.` 列表、`①…⑩` 列表。**不认**标题、表格、链接语法(链接走 `links[]`)与 HTML。
    - 某个字段过了 800 字而卡上没有 `detail`,守卫会在收工时点名 —— 那是「该拆了」的信号,不是错误。**刚立的卡这一条是阻断**(v0.16.2):卡文件还没提交进 `HEAD`(未拆卡的板退「`date` 是今天」),守卫会拦下收工,点名卡号 / 字段 / 字数并给出 `ddd.mjs card set <卡号> detail "…"`。拦的是时机不是严厉程度 —— 正文刚写出来还在手边,当场拆最省事;等它进了历史,改的就是别人也在读的卡了,所以已提交的老卡照旧只出一行提醒。
 2. **★评审**:人审设计 + demo,拍板后才动代码。别默默替用户拍板。
-3. **代码**:实现落地;卡改完(`ddd.mjs card …`)不必手动跑 gen,收工守卫会重生成看板。
+3. **代码**:实现落地;卡改完(`ddd.mjs card …`)后,启用了自动生成的 Claude/Codex Stop 会更新看板;Pi/portable 按前述命令显式生成与审计。
 4. **验证**:定义成功标准并跑到验证(测试 / 构建 / 手工 smoke);"写完了"≠"验证过了"。
    **要人实测的,清单写进 `acceptance-manifest.json`,不再手搭 HTML 页**(v0.12.0,板上开了 `acceptanceTab` 时):一份清单挂一个或多个 PR,`current` 指向正在测的那个;条目写「做什么 / 预期 / 不对的样子 / 为什么」,数据块用 `rows` 二维数组。人在页面上勾,勾完点「复制勾选结果」,把那段 JSON 贴回清单的 `result` —— 勾选结果这才进 git,而不是留在某一台浏览器里。清单正文改了就把 `revision` 加一(旧勾选当场作废)。
    **板上开了 `acceptanceFeedback` 时(v0.17.0;v0.17.1 判定即勾选),判定本身就是那一下勾**:验收行左栏是 `✓ / ✕` 两枚钮,点一下即写,再点同一枚 = 撤回(追加一条,不抹账);行右下角「＋ 备注 / 图」写一句或贴张图,几秒内两台浏览器互相看得到(真源是 `acceptance-feedback.jsonl`,随 git 走)。进度与「复制结果」都按自己的判定算 —— 收工前记得把那份 jsonl 一起提交。

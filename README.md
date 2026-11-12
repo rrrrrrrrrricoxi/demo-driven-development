@@ -1,6 +1,6 @@
 # demo-driven-development
 
-A Claude Code and Codex plugin, with an opt-in Pi extension, that turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
+A shared workflow and board engine with Claude Code and Codex plugin adapters and an opt-in Pi extension. It turns UI/UX decisions into things you can look at before you commit code: one self-contained HTML demo per decision, a kanban that tracks every decision to its demo, and guard hooks that keep the two consistent.
 
 ## The idea
 
@@ -19,7 +19,7 @@ This plugin packages the SEE-IT half as a workflow:
 - Two skills. `ddd-workflow` is the day-to-day rhythm: scene-fit check, demo, human review, then code, verify, PR. `kanban-init` scaffolds a new board, merges scattered demos into one, or takes over a legacy hand-rolled board.
 - Host adapters run the Stop guard and `gh pr` reminder. The Codex adapter handles Stop, PreToolUse, and PostToolUse events; its hook definitions use Codex's current tool names. Both adapters check whether the project actually uses this plugin before doing anything. The opt-in Pi extension uses native tool events and read-only settlement; it never automatically generates a board.
 - `gen.mjs` builds the kanban (`index.html`) from four fixed manifest JSONs (iterations, backlog, decisions, decision path), plus the acceptance and release manifests when those tabs are switched on. It also renders project markdown into board-local pages and injects a back-navigation bar into each demo.
-- `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data.
+- `init.mjs` runs a deterministic scan, prints a plan for human review, and applies it without overwriting project data. Its default `portable` runtime creates board data without changing host configuration.
 - `ddd.mjs` is the write side: create a card, change a field, append a note, attach a link, read the board, export it (see "Card CLI").
 - `retire-stale-caches.mjs` defuses superseded plugin versions that long-lived sessions are still pinned to (see "Upgrading").
 - `board-branch-check.mjs` says when a branch is carrying board changes that belong on the mainline (see "The board is only edited on the mainline").
@@ -60,7 +60,7 @@ codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-deve
 codex plugin add demo-driven-development@demo-driven-development
 ```
 
-The `codex-native` branch is generated from tested `main` commits and records the exact source commit. It supplies the native manifest required for hook discovery; shared development stays on `main`.
+The `codex-native` branch is generated from tested `main` commits and records the exact source commit. It supplies the native manifest required for hook discovery and omits the root Agent Plugin and Claude-specific manifests; shared development stays on `main`. The shared engine reads its version from `package.json`, so it does not need Claude metadata.
 
 Codex asks you to review and trust bundled hooks before they run. Open `/hooks` to review them. Plugin installation does not auto-trust hooks. See [host integration notes](docs/hosts.md#codex) before initializing a project.
 
@@ -79,12 +79,14 @@ Keep existing safety extensions enabled. This command does not install configura
 
 ```
 node <plugin>/scripts/init.mjs scan  --dir <projectRoot>
-node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand MyApp --runtime codex --codex-hooks plugin
-node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand MyApp --runtime codex --codex-hooks plugin --yes --no-commit
+node <plugin>/scripts/init.mjs plan  --dir <projectRoot> --brand MyApp
+node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand MyApp --yes
 python3 app/kanban/serve.py        # then open the printed port
 ```
 
-`apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), adds the selected host's read guard, and appends host-specific project instructions. The default runtime is `claude`; use `--runtime codex` or `--runtime both` to select Codex or both hosts. This quick start uses bundled hooks from the native Codex plugin, avoiding duplicate project hooks. For project-local hooks, use `--codex-hooks project`; the absolute hook path is machine-specific, so rerun init with `--runtime codex --codex-hooks project` after cloning to another machine, switching hosts, or changing the plugin path. `--no-commit` leaves the changes uncommitted. Re-running it is a no-op. For projects that already have scattered demos or an older hand-rolled board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. Details live in `skills/kanban-init/SKILL.md` and [host integration notes](docs/hosts.md).
+`apply` seeds the board skeleton (config, empty manifests, `demos/`, a file server), generates it, and runs the shared audit. The default runtime is `portable`: it preserves host files and leaves changes unstaged and uncommitted. It does not activate lifecycle checks. Run `ddd.mjs audit` and `gen.mjs` explicitly when using the board without an adapter.
+
+Select `--runtime claude`, `--runtime codex`, or `--runtime both` explicitly to add host instructions and configuration. For a native Codex plugin installation, add `--codex-hooks plugin` to use its bundled hooks and remove init-owned project hooks. Project hook mode records machine-specific absolute paths; rerun init after moving the installation or cloning onto another machine. Explicit Claude mode can commit in an initially clean target; `--no-commit` disables that behavior. Re-running apply with the same options is a no-op. For scattered demos or a legacy board, `scan` detects the situation and `plan` shows the merge or takeover before you confirm it. See `skills/kanban-init/SKILL.md` and [host integration notes](docs/hosts.md).
 
 ## How the guard works
 
@@ -106,11 +108,11 @@ A Claude Code hook process is bound to the plugin version its session started wi
 
 ## Upgrading
 
-The plugin version on `main` only moves up. A downgrade would freeze every stamped board, so never merge a lower version.
+The canonical version in `package.json` on `main` only moves up. Release checks require host manifests to match it. A downgrade would freeze every stamped board, so never merge a lower version.
 
 After an upgrade, the first regeneration changes exactly one line of `index.html` (the stamp). Byte-equivalence checks normalize it first: `sed '/<!-- ddd-gen v/d'`.
 
-Long-lived sessions keep whatever plugin version they started with. After upgrading, run `node <plugin>/scripts/retire-stale-caches.mjs` (dry-run by default, `--yes` to apply). It shims superseded cache versions so old sessions get a restart notice instead of silently overwriting your board with stale output. The script skips versions that are still registered as some project's current install.
+Long-lived Claude Code sessions keep whatever plugin version they started with. After upgrading that adapter, run `node <plugin>/scripts/retire-stale-caches.mjs` (dry-run by default, `--yes` to apply). It shims superseded cache versions so old sessions get a restart notice instead of silently overwriting your board with stale output. The script skips versions that are still registered as some project's current install.
 
 Release history is in [CHANGELOG.md](CHANGELOG.md); the process for cutting a release is in [RELEASING.md](RELEASING.md).
 
