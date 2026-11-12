@@ -7,12 +7,32 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
-import { loadStrings } from './strings.mjs'
+import { loadStrings, runtimeStrings } from './strings.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
+import { GENERATION_DEFERRED } from './gen-deferral.mjs'
 import { journeyPath } from './journey-model.mjs'
 import { CARD_SOURCES, CARD_FILE_KEYS, auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
 
+// 从本次 settlement 开始最多使用 55 秒,给 60 秒宿主期限留出输出余量。
+// 重试必须重启进程,重新取锁和读取输入;不复用第一次的 pending 或指纹。
+export function runSettlementGeneration(gen, board, { concurrent, deadline, run = spawnSync, now = Date.now }) {
+  let response
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const started = now()
+    const remaining = deadline - started
+    if (remaining <= 0) return response || { status: null, error: new Error(`${runtimeStrings('zh').genBudgetExhausted} / ${runtimeStrings('en').genBudgetExhausted}`) }
+    response = run(process.execPath, [gen, '--dir', board], {
+      cwd: board, stdio: ['ignore', 'ignore', 'pipe'], timeout: remaining, killSignal: 'SIGKILL',
+    })
+    // 锁超时、启动配置竞态与真实故障都不自动重试。至少保留一次已观测耗时与 1 秒余量。
+    const retryBudget = Math.max(1000, now() - started + 250)
+    if (!concurrent || response.error || response.signal || response.status !== GENERATION_DEFERRED['sources-changed'] || deadline - now() < retryBudget) break
+  }
+  return response
+}
+
 export function checkSettlement(request, { regenerate = false } = {}) {
+  const generationDeadline = Date.now() + 55000
   const KANBAN = detect({ cwd: request.cwd, env: {} })
   if (!KANBAN || existsSync(join(KANBAN, '.init-lock'))) return { kind: 'none' }
   const S = loadStrings(KANBAN)
@@ -90,13 +110,14 @@ export function checkSettlement(request, { regenerate = false } = {}) {
       // 重渲」时出:产物不过期的分支收工,守卫照旧一个字不说。人手跑 gen.mjs 不受此限(明确意图)。
       notices.push(S.genOffMain(BRANCH.cur, BRANCH.main, BRANCH.detached))
     } else if (wouldRegen && regenerate === true) {
-      const r = spawnSync(process.execPath, [GEN, '--dir', KANBAN], { cwd: KANBAN, stdio: ['ignore', 'ignore', 'pipe'] })
-      const err = (r.stderr || r.error?.message || '').toString()
+      const r = runSettlementGeneration(GEN, KANBAN, { concurrent: CONCURRENT, deadline: generationDeadline })
+      const err = [r.stderr?.toString(), r.error?.message].filter(Boolean).join('\n')
       if (r.status !== 0) {
         // 失败可能来自另一会话尚未写完的输入;共享模式不得把整板故障归给当前会话。
         if (CONCURRENT) {
           genFailed = true
-          notices.push(S.concurrentGenFail(err.slice(0, 800)))
+          const deferred = !r.error && !r.signal && Object.values(GENERATION_DEFERRED).includes(r.status)
+          notices.push(deferred ? S.concurrentGenDeferred : S.concurrentGenFail(err.slice(0, 800)))
         } else {
           // gen 只报得出第一个坏卡,已攒下的 notice(坏卡清单等)一并喂回去,免得一个一个试
           const parts = [S.genFail(err.slice(0, 800)), ...notices]

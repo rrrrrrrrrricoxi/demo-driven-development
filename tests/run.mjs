@@ -487,6 +487,36 @@ console.log('T15 veto 态孤儿审计照跑')
   ok(shared.status === 0 && !shared.stdout.includes('"decision":"block"'), '共享看板孤儿只提醒,不拦另一会话收工')
   ok(shared.stdout.includes('orphan.html') && shared.stdout.includes('9.9.9'), '共享模式保留孤儿与版本诊断')
   ok(sha(idxP) === h0, '共享模式也不能用旧版覆盖新产物')
+  const sharedDefer = mkFixture('fx15-shared-defer', {})
+  const deferCfg = join(sharedDefer.kb, 'kanban.config.json')
+  writeFileSync(deferCfg, JSON.stringify({ ...JSON.parse(readFileSync(deferCfg, 'utf8')), concurrentSessions: true }))
+  const preload = join(WORK, 'fx15-defer.cjs'), attempts = join(WORK, 'fx15-defer-attempts')
+  writeFileSync(preload, `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const read = fs.readFileSync; let entered = false;
+fs.readFileSync = function(path, ...args) {
+  const result = read.call(this, path, ...args);
+  const caller = new Error().stack.split('\\n')[2] || '';
+  if (!entered && String(path).endsWith('/manifest.json') && /scripts\\/gen.mjs:/.test(caller)) {
+    entered = true;
+    fs.appendFileSync(process.env.TEST_ATTEMPTS, 'attempt\\n');
+    fs.writeFileSync(path, result + ' ');
+  }
+  return result;
+};
+syncBuiltinESMExports();
+`)
+  const deferred = runStop(NEW_SCRIPTS, sharedDefer.root, { env: {
+    NODE_OPTIONS: `--require="${preload}"`, TEST_ATTEMPTS: attempts,
+  } })
+  ok(deferred.status === 0 && !deferred.stdout.includes('"decision":"block"'), '持续源变化只暂缓,不阻断共享会话')
+  ok(readFileSync(attempts, 'utf8').trim().split('\n').length === 2, '同次 Stop 恰好两次全新 gen,不无限重试')
+  ok(/下一次 Stop/.test(deferred.stdout) && !/Error:|node:internal|\\n\s+at /.test(deferred.stdout), '暂缓通知说明下次 Stop 可恢复,不带失败堆栈')
+  ok(existsSync(join(sharedDefer.kb, '.ddd-gen-stale')), '最终暂缓留下持久重试标记')
+  const recovered = runStop(NEW_SCRIPTS, sharedDefer.root)
+  ok(recovered.status === 0 && !existsSync(join(sharedDefer.kb, '.ddd-gen-stale')), '输入稳定后的 Stop 清除暂缓标记')
+
 }
 
 // ============ T16 同版双块:手工件优先于默认块 ============

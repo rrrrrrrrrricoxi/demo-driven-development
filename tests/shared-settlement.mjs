@@ -7,6 +7,10 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { localDate } from '../scripts/cards.mjs'
 import { runHook } from '../scripts/hook-core.mjs'
+import { runSettlementGeneration } from '../scripts/hook-settle.mjs'
+import { GENERATION_DEFERRED } from '../scripts/gen-deferral.mjs'
+import { lockRoot } from '../scripts/gen-concurrent.mjs'
+import { hostname } from 'node:os'
 import { loadStrings } from '../scripts/strings.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -48,6 +52,43 @@ function stop(root, session) {
     child.stdin.end(JSON.stringify({ cwd: root, session_id: session }))
   })
 }
+// 每个 gen 子进程都写独立事件;源变化发生在 renderer 读入之后,不依赖调度时序。
+const preload = join(work, 'mutate-generation.cjs')
+writeFileSync(preload, `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const { join } = require('node:path');
+const read = fs.readFileSync;
+const isGen = process.argv[1]?.endsWith('/gen.mjs');
+let entered = false;
+if (isGen) {
+  fs.appendFileSync(process.env.TEST_ATTEMPTS, 'attempt\\n');
+  if (process.env.TEST_CHANGE === 'lock-timeout') {
+    const now = Date.now; let tick = 0; Date.now = () => now() + (++tick * 40001);
+  }
+}
+fs.readFileSync = function(path, ...args) {
+  const result = read.call(this, path, ...args);
+  const caller = new Error().stack.split('\\n')[2] || '';
+  if (isGen && !entered && String(path).endsWith('/manifest.json') && /scripts\\/gen.mjs:/.test(caller)) {
+    entered = true;
+    const attempts = read(process.env.TEST_ATTEMPTS, 'utf8').trim().split('\\n').length;
+    if (process.env.TEST_CHANGE === 'always' || (process.env.TEST_CHANGE === 'once' && attempts === 1)) {
+      const data = JSON.parse(result); data.instance.name = 'EDIT-' + attempts;
+      fs.writeFileSync(path, JSON.stringify(data));
+    }
+    if (process.env.TEST_CHANGE === 'permission') throw Object.assign(new Error('TEST EACCES generation'), { code: 'EACCES' });
+  }
+  return result;
+};
+syncBuiltinESMExports();
+`)
+const hookWithMutation = (f, adapter, mutation, attempts) => spawnSync(process.execPath,
+  [join(repo, 'scripts', adapter), ...(adapter === 'codex-hook.mjs' ? ['stop'] : [])], {
+    cwd: f.root, encoding: 'utf8', input: JSON.stringify({ cwd: f.root }),
+    env: { ...env, NODE_OPTIONS: `--require="${preload}"`, TEST_CHANGE: mutation, TEST_ATTEMPTS: attempts },
+  })
+const attemptsOf = (path) => readFileSync(path, 'utf8').trim().split('\n').length
 let checks = 0
 async function check(name, fn) { await fn(); checks++; console.log(`✓ ${name}`) }
 try {
@@ -138,6 +179,74 @@ try {
     assert.equal(settle(f.root, { regenerate: true }).kind, 'none')
     assert.equal(readFileSync(index, 'utf8'), current)
     assert.equal(readFileSync(marker, 'utf8'), 'retry when concurrent mode resumes\n')
+  })
+  await check('Claude and Codex Stop retry one source change and defer after exactly two changes', () => {
+    for (const adapter of ['codex-hook.mjs', 'stop-hook.mjs']) for (const lang of ['en', 'zh']) for (const mutation of ['once', 'always']) {
+      const f = fixture(`${adapter} ${lang} ${mutation}`, { lang }), attempts = join(f.root, 'attempts')
+      const out = hookWithMutation(f, adapter, mutation, attempts)
+      assert.equal(out.status, 0, out.stderr)
+      assert.equal(attemptsOf(attempts), 2)
+      const payload = out.stdout ? JSON.parse(out.stdout) : {}
+      assert.equal(payload.decision, undefined)
+      assert.doesNotMatch(out.stdout + out.stderr, /\n\s+at |Error:|node:internal/)
+      assert.equal(readdirSync(lockRoot(f.kb)).length, 0)
+      if (mutation === 'once') {
+        assert.equal(existsSync(join(f.kb, '.ddd-gen-stale')), false)
+        assert.ok(existsSync(join(f.kb, 'index.html')))
+        assert.doesNotMatch(out.stdout, /generation deferred|生成暂缓|generation failed|生成失败/)
+      } else {
+        assert.ok(existsSync(join(f.kb, '.ddd-gen-stale')))
+        assert.ok(out.stdout.includes(loadStrings(f.kb).concurrentGenDeferred))
+        const recovery = script(f.root, 'gen.mjs', ['--dir', f.kb])
+        assert.equal(recovery.status, 0, recovery.stderr)
+        assert.equal(existsSync(join(f.kb, '.ddd-gen-stale')), false)
+      }
+    }
+  })
+  await check('lock timeout and permission failures run once and remain distinct', () => {
+    for (const mutation of ['lock-timeout', 'permission', 'syntax']) {
+      const f = fixture(mutation), attempts = join(f.root, 'attempts')
+      if (mutation === 'syntax') writeFileSync(join(f.kb, 'backlog-manifest.json'), '{')
+      let owner
+      if (mutation === 'lock-timeout') {
+        owner = join(lockRoot(f.kb), `${Buffer.from(hostname()).toString('base64url')}.${process.pid}.live`)
+        mkdirSync(owner, { recursive: true }); writeFileSync(join(owner, 'ticket'), '1')
+      }
+      const out = hookWithMutation(f, 'codex-hook.mjs', mutation, attempts)
+      assert.equal(out.status, 0, out.stderr)
+      assert.equal(attemptsOf(attempts), 1)
+      if (owner) {
+        assert.ok(out.stdout.includes(loadStrings(f.kb).concurrentGenDeferred))
+        assert.equal(readdirSync(lockRoot(f.kb)).length, 1)
+        rmSync(owner, { recursive: true })
+      } else {
+        assert.match(out.stdout, mutation === 'permission' ? /TEST EACCES generation/ : /SyntaxError/)
+        assert.doesNotMatch(out.stdout, /generation deferred/)
+        assert.equal(readdirSync(lockRoot(f.kb)).length, 0)
+      }
+    }
+  })
+  await check('generation retries share the remaining budget and never retry other failures', () => {
+    const source = GENERATION_DEFERRED['sources-changed']
+    for (const [statuses, concurrent, expected] of [
+      [[source, 0], true, 2], [[source, source], true, 2], [[source, 0], false, 1],
+      [[GENERATION_DEFERRED['lock-timeout'], 0], true, 1],
+      [[GENERATION_DEFERRED['startup-config-race'], 0], true, 1], [[1, 0], true, 1],
+    ]) {
+      let clock = 0; const calls = []
+      runSettlementGeneration('gen', 'board', { concurrent, deadline: 55000, now: () => clock,
+        run: (_, __, options) => { calls.push(options); clock += 1000; return { status: statuses[calls.length - 1] } },
+      })
+      assert.equal(calls.length, expected)
+      assert.equal(calls[0].timeout, 55000)
+      if (expected === 2) assert.equal(calls[1].timeout, 54000)
+      assert.ok(calls.every((call) => call.killSignal === 'SIGKILL'))
+    }
+    let clock = 0, calls = 0
+    runSettlementGeneration('gen', 'board', { concurrent: true, deadline: 55000, now: () => clock,
+      run: () => { calls++; clock = 54000; return { status: source } },
+    })
+    assert.equal(calls, 1, 'insufficient remaining budget defers without a second process')
   })
   console.log(`Shared settlement: ${checks} checks passed`)
 } finally { rmSync(work, { recursive: true, force: true }) }

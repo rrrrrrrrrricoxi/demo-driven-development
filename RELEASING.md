@@ -71,7 +71,16 @@ different ref must follow the [migration steps](docs/hosts.md#codex) first:
 codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native
 ```
 
-Then refresh the Git marketplace and install the current package:
+Before refreshing an existing installation, preserve exact copies of every
+cache version still used by an active Codex session. Both marketplace refresh
+and plugin installation can remove older cache directories. After **each**
+command, even if it fails, restore any removed active cache byte-for-byte and
+verify its file contents, modes, and hook entry before proceeding. Retain these
+caches until no session uses them. This restores existing hook definitions; it
+does not change their trust state.
+
+Then refresh the Git marketplace and install the current package, applying the
+cache restoration and verification step after each command:
 
 ```
 codex plugin marketplace upgrade demo-driven-development
@@ -79,11 +88,8 @@ codex plugin add demo-driven-development@demo-driven-development
 ```
 
 Review changed hooks through Codex `/hooks`; a plugin update does not grant
-hook trust. A user must review and approve any requested hook trust. When
-updating the plugin during an active Codex session, preserve an exact copy of
-the currently loaded cache before `codex plugin add`. If the update removes
-that cache, restore it byte-for-byte, verify its hook entry, and retain it
-until no session uses it. Start a fresh session to load the updated skills.
+hook trust. A user must review and approve any requested hook trust. Start a
+fresh session to load the updated skills.
 Source-checkout users update their checkout and rerun init with the selected
 runtime. Codex project hook mode refreshes its own absolute paths and preserves
 unrelated hooks; `--runtime portable` initializes only shared board resources. Codex
