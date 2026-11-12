@@ -188,6 +188,30 @@ try {
   init(scattered, 'apply', ['--yes'])
   check(() => assert.deepEqual(snapshot(scattered), scatteredOnce))
 
+  // 同轮归拢与旧装接管都往 backlog 追加:第二次写须基于第一轮现读结果分配 id。
+  const combined = fixture('merge and legacy together')
+  init(combined, 'apply', ['--brand', 'COMBINED', '--yes'])
+  const combinedBacklogPath = 'app/kanban/backlog-manifest.json'
+  const existingBacklog = JSON.parse(read(combined, combinedBacklogPath))
+  existingBacklog.tiers['0'] = 'Keep custom tier'
+  existingBacklog.items.push({ id: 'BL-7', title: 'Keep existing item', tier: 0, priority: 'low', status: 'deferred', links: [{ title: 'Existing demo', href: 'demos/existing.html' }] })
+  write(combined, combinedBacklogPath, JSON.stringify(existingBacklog, null, 2) + '\n')
+  write(combined, 'app/kanban/gen.mjs', '// preserve legacy generator\n')
+  write(combined, 'app/kanban/demos/existing.html', '<html><title>Existing</title><body>keep demo</body></html>')
+  write(combined, 'draft/combined.html', '<html><title>Combined</title><body>demo</body></html>')
+  write(combined, 'README.md', '[Demo](draft/combined.html)\n')
+  init(combined, 'apply', ['--yes'])
+  const combinedBacklog = JSON.parse(read(combined, combinedBacklogPath))
+  check(() => assert.deepEqual(combinedBacklog.items[0], existingBacklog.items[0]))
+  check(() => assert.equal(combinedBacklog.tiers['0'], existingBacklog.tiers['0']))
+  check(() => assert.deepEqual(combinedBacklog.items.slice(1).map((item) => item.initKind), ['broken-links', 'legacy-retire', 'legacy-backnav']))
+  check(() => assert.equal(new Set(combinedBacklog.items.map((item) => item.id)).size, combinedBacklog.items.length))
+  check(() => assert.equal(existsSync(join(combined, 'draft/combined.html')), false))
+  check(() => assert.ok(existsSync(join(combined, 'app/kanban/demos/combined.html'))))
+  const combinedOnce = snapshot(combined)
+  init(combined, 'apply', ['--yes'])
+  check(() => assert.deepEqual(snapshot(combined), combinedOnce))
+
   // 共用安全门仍有效:必要选项、既有锁、版本防退与阻断审计。
   const missingBrand = fixture('missing brand')
   init(missingBrand, 'apply', ['--yes'], false)

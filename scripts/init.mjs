@@ -49,7 +49,7 @@
 // 报告/plan 文案走 scripts/strings.mjs 双语表:lang 取 --lang,其次已存在 config.lang,缺省 zh
 // (CLI 解析错误发生在 lang 解析之前,保持 zh)。manifest 卡内容是数据不进表,恒 zh。
 import {
-  chmodSync, copyFileSync, existsSync, mkdirSync,
+  chmodSync, existsSync, mkdirSync,
   readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -74,6 +74,7 @@ let S = pickStrings('zh') // main() 里按 --lang / config.lang 重选
 const fail = (msg) => { console.error(`[init] ✗ ${msg}`); process.exit(1) }
 // portable 没有隐含宿主;后续新增运行时也不能通过「非另一宿主」误入配置分支。
 const selectedRuntimes = (runtime) => runtime === 'portable' ? [] : runtime === 'both' ? ['claude', 'codex'] : [runtime]
+const shouldPreserveIndex = (opt, gi) => opt.noCommit || opt.runtime !== 'claude' || !!gi.dirty
 function printRuntime(stage, runtime) {
   console.log(S.init.runtime(stage, runtime))
   if (runtime === 'portable') console.log(S.init.portableScope(stage))
@@ -761,7 +762,7 @@ function buildMergePlan(root, st, det, gi, opt) {
 }
 
 // ---- 旧装接管计划(设计 §7 merge 表后半:机制接管,数据只允许 backlog 追加) ----
-function buildLegacyPlan(root, st, opt) {
+function buildLegacyPlan(st, opt) {
   const blPath = join(st.kanban, 'backlog-manifest.json')
   const lg = { hooks: st.legacyHooks, mech: st.legacyMech, cards: [], blPath, blMtime: null, docs: null }
   let items = []
@@ -891,7 +892,7 @@ async function buildPlan(root, st, gi, opt, det) {
 
   // 旧装接管:摘旧 hook 注册 + 遗留卡;config 缺失时 docs 从旧 gen.mjs 提取
   if (st.legacyMech.length || st.legacyHooks.found.length) {
-    plan.legacy = buildLegacyPlan(root, st, opt)
+    plan.legacy = buildLegacyPlan(st, opt)
     if (!st.hasConfig) plan.legacy.docs = extractLegacyDocs(st.kanban)
   }
 
@@ -933,7 +934,9 @@ function printPlan(root, st, gi, plan, opt) {
   if (plan.mergeDeferred) console.log(S.init.planMergeDeferred)
   if (plan.legacy) printLegacyPlan(plan.legacy, st.hasConfig)
   if (plan.merge) printMergePlan(plan.merge, opt)
-  console.log(gi.isRepo ? (opt.noCommit || opt.runtime !== 'claude' ? S.init.planNoCommit : gi.dirty ? S.init.planDirtyNoCommit : S.init.planGitRepo) : S.init.planGitNone)
+  if (!gi.isRepo) console.log(S.init.planGitNone)
+  else if (!shouldPreserveIndex(opt, gi)) console.log(S.init.planGitRepo)
+  else console.log(gi.dirty && !opt.noCommit && opt.runtime === 'claude' ? S.init.planDirtyNoCommit : S.init.planNoCommit)
   console.log(opt.runtime === 'portable' ? S.init.planPortableSmoke : S.init.planSmoke)
 }
 
@@ -982,7 +985,18 @@ function updateManifest(path, expectMtime, label, mutate) {
   if (n) writeFileSync(path, JSON.stringify(json, null, 2) + '\n')
   return n
 }
-function doMerge(root, gi, mg, touched, opt) {
+// 归拢与旧装接管共用追加规则;调用处保留现读/mtime 检查和各自的报告。
+function appendInitCards(bl, cards) {
+  bl.items ||= []
+  const need = cards.filter((c) => !bl.items.some((it) => it.initKind === c.initKind))
+  if (!need.length) return 0
+  bl.tiers ||= {}
+  if (!('0' in bl.tiers)) bl.tiers['0'] = 'init 遗留' // gen 硬校验 tier 需在词表
+  const nextBl = idAllocator(bl.items.map((it) => it.id), 'BL-')
+  for (const c of need) bl.items.push({ ...c, id: nextBl() })
+  return need.length
+}
+function doMerge(root, gi, mg, touched, keepIndex) {
   // ① 存根卡 → decisions-manifest(已有卡跳过;code=id)
   const nStubs = updateManifest(mg.dmPath, mg.dmMtime, 'decisions-manifest.json', (dm) => {
     dm.entries ||= []
@@ -999,16 +1013,7 @@ function doMerge(root, gi, mg, touched, opt) {
   if (nStubs) { touched.push('app/kanban/decisions-manifest.json'); console.log(S.init.applyStubs(nStubs, mg.stubStatus)) }
 
   // ② 遗留待办 → backlog 卡(断链一张、同名冲突各一张;initKind 判重,幂等)
-  const nCards = updateManifest(mg.blPath, mg.blMtime, 'backlog-manifest.json', (bl) => {
-    bl.items ||= []
-    const need = mg.cards.filter((c) => !bl.items.some((it) => it.initKind === c.initKind))
-    if (!need.length) return 0
-    bl.tiers ||= {}
-    if (!('0' in bl.tiers)) bl.tiers['0'] = 'init 遗留' // gen 硬校验 tier 需在词表;最小词汇追加(归拢/接管共用)
-    const nextBl = idAllocator(bl.items.map((it) => it.id), 'BL-')
-    for (const c of need) bl.items.push({ ...c, id: nextBl() })
-    return need.length
-  })
+  const nCards = updateManifest(mg.blPath, mg.blMtime, 'backlog-manifest.json', (bl) => appendInitCards(bl, mg.cards))
   if (nCards) { touched.push('app/kanban/backlog-manifest.json'); console.log(S.init.applyLeftoverCards(nCards)) }
 
   // ③ 文件归拢(卡已就位):git 策略逐文件
@@ -1016,7 +1021,6 @@ function doMerge(root, gi, mg, touched, opt) {
     const toAbs = join(root, toRel)
     if (!existsSync(fromAbs)) { console.log(S.init.applyGone(fromRel)); return }
     mkdirSync(dirname(toAbs), { recursive: true })
-    const keepIndex = opt.noCommit || opt.runtime !== 'claude' || gi.dirty
     if (gitSt === 'tracked' && !keepIndex) {
       execFileSync('git', ['mv', '--', fromAbs, toAbs], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] })
       touched.push(fromRel) // rename 的删除侧也要进 commit pathspec
@@ -1041,7 +1045,6 @@ function doMerge(root, gi, mg, touched, opt) {
   }
   // ④ --remember:--exclude 里真命中候选的模式记入 config.skipScattered(长期豁免;
   //    此后 scan 标注[配置跳过]不再当候选;仅追加去重,config 其余键原样)
-  let nRemember = 0
   if (mg.remember && mg.sel.hitPats.length) {
     const cfgPath = join(root, 'app', 'kanban', 'kanban.config.json')
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
@@ -1051,28 +1054,17 @@ function doMerge(root, gi, mg, touched, opt) {
       cfg.skipScattered.push(...add)
       writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
       touched.push('app/kanban/kanban.config.json')
-      nRemember = add.length
       console.log(S.init.applyRemember(add.length, add))
     }
   }
   if (mg.brokenLinks.length) console.log(S.init.applyBroken(mg.brokenLinks.length))
-  return nStubs + nCards + mg.moves.length + mg.conflicts.length + mg.assets.length + nRemember
 }
 
 // ---- 旧装接管执行(apply 内、持锁中调用;数据只追加 backlog,机制注册摘除,旧件不删) ----
-function doLegacy(root, lg, touched) {
+function doLegacy(lg, touched) {
   // ① 接管遗留 → backlog 卡(initKind 判重,幂等;与归拢同一词表/同一乐观锁口径)
   if (lg.cards.length) {
-    const n = updateManifest(lg.blPath, lg.blMtime, 'backlog-manifest.json', (bl) => {
-      bl.items ||= []
-      const need = lg.cards.filter((c) => !bl.items.some((it) => it.initKind === c.initKind))
-      if (!need.length) return 0
-      bl.tiers ||= {}
-      if (!('0' in bl.tiers)) bl.tiers['0'] = 'init 遗留'
-      const nextBl = idAllocator(bl.items.map((it) => it.id), 'BL-')
-      for (const c of need) bl.items.push({ ...c, id: nextBl() })
-      return need.length
-    })
+    const n = updateManifest(lg.blPath, lg.blMtime, 'backlog-manifest.json', (bl) => appendInitCards(bl, lg.cards))
     if (n) { touched.push('app/kanban/backlog-manifest.json'); console.log(S.init.applyLegacyCards(n)) }
   }
   // ② settings.json 摘除旧 kanban hook 注册(只认两枚标记;deny/其他键原样)
@@ -1106,6 +1098,7 @@ async function doApply(root, st, gi, opt, plan) {
   // 确认期间宿主可能改了配置:写入前重新读取,绝不把 plan 的旧快照盖回去。
   if (plan.codex) plan.codex = buildCodexPlan(root, opt)
   if (gi.isRepo) gi.dirty ||= !!git(root, ['status', '--porcelain'])
+  const keepIndex = shouldPreserveIndex(opt, gi)
   const touched = [] // repo 相对路径;git 只 add 这些(多会话脏工作树,绝不 add -A)
   const createdKanban = !st.hasConfig // greenfield:整个 app/kanban 树都是本次产物(含 gen 生成物)
   const vars = { BRAND: plan.brand, BRANCH: gi.branch, GH_REPO: gi.ghRepo, APP_BASE: '', DEMO_BASE: '' }
@@ -1201,10 +1194,10 @@ async function doApply(root, st, gi, opt, plan) {
     }
 
     // -- 3.5 散落归拢(先写卡后 mv;守卫见 .init-lock 放行本轮) --
-    if (plan.merge) doMerge(root, gi, plan.merge, touched, opt)
+    if (plan.merge) doMerge(root, gi, plan.merge, touched, keepIndex)
 
     // -- 3.6 旧装接管(遗留卡 + 摘旧 hook 注册;旧机制件不删) --
-    if (plan.legacy) doLegacy(root, plan.legacy, touched)
+    if (plan.legacy) doLegacy(plan.legacy, touched)
 
     // -- 4a. gen 冒烟(仍持锁:gen 写 app/kanban 生成物,属本次变更;首次失败不留给守卫) --
     try {
@@ -1246,7 +1239,7 @@ async function doApply(root, st, gi, opt, plan) {
   }
 
   // -- 5. git:只 add 触碰路径,commit 也限定 pathspec(不卷别的会话的暂存区) --
-  if (gi.isRepo && (opt.noCommit || opt.runtime !== 'claude' || gi.dirty)) {
+  if (gi.isRepo && keepIndex) {
     console.log(gi.dirty && !opt.noCommit && opt.runtime === 'claude' ? S.init.applyDirtyNoCommit : S.init.applyNoCommit)
   } else if (gi.isRepo) {
     // 归拢时 gen 生成物/卡/demo 全在 app/kanban 下,整目录纳入 pathspec(同 greenfield)

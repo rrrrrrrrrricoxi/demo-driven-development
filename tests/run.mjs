@@ -336,6 +336,32 @@ console.log('T6 无戳永动刹车')
   ok(refused.status !== 0 && sha(idxP) === before && refused.stderr.includes('拒绝用旧版覆盖新产物'), '独立核心仍按 package.json 版本拒降级并保留产物')
 }
 
+// ============ T6a 版本工具不依赖看板规则或宿主模块 ============
+console.log('T6a 独立版本工具')
+{
+  const det = join(WORK, 'version-only'), scripts = join(det, 'scripts')
+  mkdirSync(scripts, { recursive: true })
+  for (const file of ['lib-version.mjs', 'runtime-strings.mjs']) cpSync(join(NEW_SCRIPTS, file), join(scripts, file))
+  const runtime = { name: 'demo-driven-development', version: MY_VER }, packagePath = join(det, 'package.json')
+  writeFileSync(packagePath, JSON.stringify(runtime))
+  writeFileSync(join(det, 'index.html'), `<!doctype html>\n<!-- ddd-gen v${MY_VER} -->\n`)
+  const probe = () => spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { readPluginVersion, readStamp, cmpVer } from './scripts/lib-version.mjs'; console.log(JSON.stringify({ version: readPluginVersion(), stamp: readStamp('./index.html'), cmp: cmpVer('0.10', '0.9') }))`,
+  ], { cwd: det, encoding: 'utf8' })
+  const valid = probe()
+  ok(valid.status === 0 && valid.stdout.trim() === JSON.stringify({ version: MY_VER, stamp: MY_VER, cmp: 1 }) && valid.stderr === '',
+    '仅两个底层模块 + package.json 即可读取版本、戳并比较版本', valid.stderr || valid.stdout)
+  for (const invalid of [undefined, '{', JSON.stringify({ ...runtime, name: 'other' }), JSON.stringify({ ...runtime, version: '1.0.0-rc1' })]) {
+    if (invalid === undefined) rmSync(packagePath)
+    else writeFileSync(packagePath, invalid)
+    const r = probe()
+    ok(r.status === 0 && r.stdout.includes('"version":null') && r.stderr.includes(packagePath) && r.stderr.includes('重新构建') && r.stderr.includes('Rebuild or reinstall'),
+      `独立版本工具的身份错误仍返回 null 并给出双语修复说明:${invalid ?? 'missing'}`, r.stderr || r.stdout)
+  }
+  const { runtimeStrings } = await import('../scripts/runtime-strings.mjs')
+  ok((await import('../scripts/strings.mjs')).runtimeStrings === runtimeStrings, 'strings 保留同一个 runtimeStrings 公共导出')
+}
+
 // ============ T6b 核心目录探测只认 DDD 显式上下文与 cwd/Git ============
 console.log('T6b 核心目录不受宿主环境重定向')
 {
@@ -3921,6 +3947,11 @@ console.log('T60 验收/发布进度进 parts')
     runGen(NEW_SCRIPTS, fx60.kb)
     ok(!existsSync(part('acceptance.html')) && existsSync(part('release.html')) && existsSync(part('backlog.html')),
       '关掉验收 tab:parts/acceptance.html 清除,另几个 part 不受影响')
+    const future = new Date(Date.now() + 60000)
+    utimesSync(idxP, future, future)
+    const beforeStop = statSync(idxP).mtimeMs, rs = runStop(NEW_SCRIPTS, fx60.root)
+    ok(rs.status === 0 && statSync(idxP).mtimeMs === beforeStop && !existsSync(part('acceptance.html')),
+      '验收 tab 关闭时缺少对应 part 不触发守卫重生成', rs.stderr)
     cfg.acceptanceTab = true
     wr(cfgP, cfg)
     runGen(NEW_SCRIPTS, fx60.kb)
@@ -3930,6 +3961,11 @@ console.log('T60 验收/发布进度进 parts')
   runGen(NEW_SCRIPTS, fx60.kb)
   ok(!existsSync(join(fx60.kb, 'parts')), '关回 lazyTabs:五个 part 全清,目录一并清除')
   ok(sha(idxP) === flatSha, '关回后 index 与单文件基线逐字节相同')
+  const future = new Date(Date.now() + 60000)
+  utimesSync(idxP, future, future)
+  const beforeStop = statSync(idxP).mtimeMs, rs = runStop(NEW_SCRIPTS, fx60.root)
+  ok(rs.status === 0 && statSync(idxP).mtimeMs === beforeStop && !existsSync(join(fx60.kb, 'parts')),
+    'lazyTabs 关闭时缺少全部 parts 不触发守卫重生成', rs.stderr)
 }
 
 // ============ T61 时间线 hover peek(自绘卡顶掉原生 title;releaseTab 关档照旧四拍冻结)============

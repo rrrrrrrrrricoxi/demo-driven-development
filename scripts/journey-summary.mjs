@@ -1,6 +1,6 @@
 // Advisory only: recognize a few verification-report clauses, not product meaning.
 // Keep whole-clause anchors: quoting a test result as a product capability is valid.
-import { isJourneyDemo } from './journey.mjs'
+import { isJourneyDemo } from './journey-model.mjs'
 import { TERMINAL } from './settle.mjs'
 
 export const LONG_TEXT_LIMIT = 800
