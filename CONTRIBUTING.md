@@ -7,7 +7,7 @@
 - Keep shared core behavior independent of any one harness. A harness adapter maps the core to that host's lifecycle and capabilities. For an unknown host, use portable init and CLI workflows or define an explicit adapter interface; do not claim that every host is supported or verified.
 - Build project runtime packages from an explicit source commit. Do not edit installed caches or copied runtime packages by hand. Local validation may use an unpublished branch, but record its source commit, which snapshot is included, and each adaptation in package provenance. The native exporter excludes uncommitted and untracked changes. Do not describe an unpublished package as a release.
 - One feature per branch, one branch per PR.
-- The version stamp makes downgrades destructive, so `plugin.json` on `main` only moves up. Bump the version in your PR whenever runtime behavior changes, and never merge a lower one.
+- The version stamp makes downgrades destructive, so the canonical version in `package.json` on `main` only moves up. Bump it and the synchronized adapter manifests in your PR whenever runtime behavior changes, and never merge a lower one.
 - `npm test` must pass; CI runs it on every PR. If you touch the guard, the generator's backnav logic, or the version-stamp code, add assertions to `tests/run.mjs`.
 - `node scripts/release.mjs --check` must pass; CI checks package manifests, skills, marketplaces, and bundled hook resources.
 - Byte freeze applies to optional features: with the feature unconfigured, generated output must be byte-identical to the previous release. Normalize the stamp line first (`sed '/<!-- ddd-gen v/d'`), then compare.

@@ -2,32 +2,33 @@
 // 背景(盖板事故):长寿旧版 session 的 Stop hook 会拿旧 gen 反复盖板;mtime 新鲜度分不出「谁写的」——
 // 旧 gen 盖完板产物反而最新。版本戳补上这一维:index.html 第二行 <!-- ddd-gen vX.Y.Z --> 由
 // gen 烙下,守卫据此判「产物比我新还是比我旧」,自愈旧 gen 覆盖、拒绝降级覆盖。
-import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runtimeStrings } from './strings.mjs'
 
 /**
- * 本 plugin 版本(根 plugin.json 为真源,旧安装退到 .claude-plugin/plugin.json)。两个 manifest
- * 同在时必须同版,不能让不同宿主烙不同的戳。读不到或**非纯数字点分**返回 null——
+ * 运行包版本只认根 package.json 的 name/version,不读宿主 manifest,不退回宿主元数据。
+ * 发版检查负责同步各宿主 manifest;运行时只需 scripts + package.json。读不到或身份不对返回 null。
+ * 版本必须是纯数字点分——
  * 版本文法必须闭环:readStamp 只认 [0-9.],若放行 0.7.0-rc1 这类版本,烙出的戳读回是 null →
  * 「戳缺失→重跑」变永动;cmpVer 也会全程 NaN 让拒降级/退役静默失效。调用方自行决定降级或硬失败。
  */
 export function readPluginVersion(root = join(dirname(fileURLToPath(import.meta.url)), '..'), { onDiagnostic = console.error } = {}) {
+  const path = join(root, 'package.json')
+  const invalid = (reason) => {
+    const zh = runtimeStrings('zh'), en = runtimeStrings('en')
+    onDiagnostic(`[lib-version] ${zh.invalid(path, zh[reason])} / ${en.invalid(path, en[reason])}`)
+    return null
+  }
+  let metadata
   try {
-    const portable = join(root, 'plugin.json')
-    const legacy = join(root, '.claude-plugin', 'plugin.json')
-    const p = existsSync(portable) ? portable : legacy
-    const v = JSON.parse(readFileSync(p, 'utf8')).version
-    if (typeof v !== 'string' || !/^\d+(\.\d+)*$/.test(v)) {
-      if (v) onDiagnostic(`[lib-version] ⚠ plugin.json version「${v}」非纯数字点分(勿用 -rc/-beta 后缀),视同读不到——戳体系要求版本文法闭环`)
-      return null
-    }
-    if (p === portable && existsSync(legacy) && JSON.parse(readFileSync(legacy, 'utf8')).version !== v) {
-      onDiagnostic('[lib-version] plugin.json 与 Claude manifest 版本不一致 / Plugin manifest versions disagree')
-      return null
-    }
-    return v
-  } catch { return null }
+    metadata = JSON.parse(readFileSync(path, 'utf8'))
+  } catch { return invalid('unreadable') }
+  if (metadata?.name !== 'demo-driven-development') return invalid('name')
+  const v = metadata.version
+  if (typeof v !== 'string' || !/^\d+(\.\d+)*$/.test(v)) return invalid('version')
+  return v
 }
 
 /**

@@ -15,7 +15,9 @@ claimed compatible. Path normalization targets POSIX hosts; Windows/PowerShell
 and arbitrary custom-tool execution semantics are not covered.
 
 This is an extension adapter, not a Pi installer or an end-to-end unattended
-workflow. `init.mjs` still accepts only `claude`, `codex`, and `both`.
+workflow. `init.mjs` defaults to `portable` for host-neutral board setup and also
+accepts explicit `claude`, `codex`, and `both` modes. It has no `pi` mode; load
+the extension separately after initializing the board.
 
 ## Activation and rollback
 

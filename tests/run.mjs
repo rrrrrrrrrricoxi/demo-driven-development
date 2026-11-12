@@ -58,19 +58,20 @@
 //   与 0.17.9 三层冻结:没开 releaseTab 的板整份逐字节相同、开了的板差异只落在这两处、
 //   ≤ 6 并发时老新 relgeom 逐字段相同)等。
 // 「旧 gen 盖板」用合成的过期块(ddd-backnav v2 = 当前 marker 的旧版本)就地复现,不依赖外部标本。
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { isContentUpdatedAt } from '../scripts/current-records.mjs'
+import { readPluginVersion } from '../scripts/lib-version.mjs'
 
 const HERE_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE_DIR, '..')
 const NEW_SCRIPTS = join(REPO, 'scripts')
 const WORK = mkdtempSync(join(tmpdir(), 'ddd-tests-'))
-const MY_VER = JSON.parse(readFileSync(join(REPO, '.claude-plugin/plugin.json'), 'utf8')).version
+const MY_VER = readPluginVersion()
 
 let pass = 0, fail = 0
 const ok = (cond, name, detail = '') => {
@@ -293,14 +294,67 @@ console.log('T5 拒降级')
   ok(rf.status === 0 && readFileSync(idxP, 'utf8').includes(`<!-- ddd-gen v${MY_VER} -->`), 'human-only 越过旗生效并回烙当前戳')
 }
 
-// ============ T6 gen 脱离 plugin 目录 → 硬失败(无戳永动刹车) ============
+// ============ T6 gen 缺运行包身份 → 硬失败;核心包不需宿主元数据 ============
 console.log('T6 无戳永动刹车')
 {
   const det = join(WORK, 'detached')
   mkdirSync(det, { recursive: true })
-  cpSync(NEW_SCRIPTS, join(det, 'scripts'), { recursive: true }) // 不带 ../.claude-plugin
+  cpSync(NEW_SCRIPTS, join(det, 'scripts'), { recursive: true })
+  const runtime = { name: 'demo-driven-development', version: MY_VER }
+  const diagnostics = [], readVersion = () => readPluginVersion(det, { onDiagnostic: (message) => diagnostics.push(message) })
+  // 有完整宿主 manifest 也不得填补运行包身份。
+  for (const folder of ['.claude-plugin', '.codex-plugin']) {
+    mkdirSync(join(det, folder))
+    writeFileSync(join(det, folder, 'plugin.json'), JSON.stringify(runtime))
+  }
+  writeFileSync(join(det, 'plugin.json'), JSON.stringify(runtime))
   const r = runGen(join(det, 'scripts'), fx1.kb)
-  ok(r.status !== 0 && r.stderr.includes('plugin.json'), '读不到 plugin.json → 硬失败(保证跑过必留戳)')
+  ok(r.status !== 0 && r.stderr.includes('package.json') && r.stderr.includes('rebuild or reinstall'), '缺 package.json → 可行动的双语硬失败,不退回宿主 manifest')
+  ok(readVersion() === null, '共享版本读取不退回宿主 manifest')
+  for (const invalid of ['{', 'null', JSON.stringify({ version: MY_VER }), JSON.stringify({ ...runtime, name: 'another-package' }), ...['', '0.7.0-rc1', '1..2', 1, null].map((version) => JSON.stringify({ ...runtime, version }))]) {
+    writeFileSync(join(det, 'package.json'), invalid)
+    ok(readVersion() === null, `无效运行包身份被拒:${invalid}`)
+  }
+  ok(diagnostics.every((text) => text.includes('package.json') && text.includes('重新构建') && text.includes('Rebuild or reinstall')), '每种身份错误都有双语路径与修复说明')
+  const retire = spawnSync(process.execPath, [join(det, 'scripts/retire-stale-caches.mjs'), '--cache-root', join(WORK, 'unused-cache')], { encoding: 'utf8' })
+  ok(retire.status !== 0 && retire.stderr.includes('package.json') && retire.stderr.includes('Rebuild or reinstall') && !retire.stderr.includes('.claude-plugin/plugin.json'), 'Claude 缓存退役入口复用运行包身份错误说明')
+  for (const path of ['plugin.json', '.claude-plugin', '.codex-plugin']) rmSync(join(det, path), { recursive: true })
+  writeFileSync(join(det, 'package.json'), JSON.stringify(runtime))
+  const fx6 = mkFixture('fx6', { 'core.html': demoHtml('core') })
+  const bare = runGen(join(det, 'scripts'), fx6.kb)
+  const idxP = join(fx6.kb, 'index.html')
+  ok(bare.status === 0 && readFileSync(idxP, 'utf8').includes(`<!-- ddd-gen v${MY_VER} -->`), '仅 scripts + package.json 的核心包可生成并烙戳', bare.stderr)
+  // 任何可选宿主 manifest 的损坏或不同版本都不能改变运行时版本。
+  writeFileSync(join(det, 'plugin.json'), '{')
+  for (const folder of ['.claude-plugin', '.codex-plugin']) {
+    mkdirSync(join(det, folder))
+    writeFileSync(join(det, folder, 'plugin.json'), JSON.stringify({ ...runtime, version: '99.0.0' }))
+  }
+  ok(readVersion() === MY_VER && runGen(join(det, 'scripts'), fx6.kb).status === 0, '损坏或不同版的宿主 manifest 不影响核心运行')
+  writeFileSync(idxP, readFileSync(idxP, 'utf8').replace(`<!-- ddd-gen v${MY_VER} -->`, '<!-- ddd-gen v99.0.0 -->'))
+  const before = sha(idxP), refused = runGen(join(det, 'scripts'), fx6.kb)
+  ok(refused.status !== 0 && sha(idxP) === before && refused.stderr.includes('拒绝用旧版覆盖新产物'), '独立核心仍按 package.json 版本拒降级并保留产物')
+}
+
+// ============ T6b 核心目录探测只认 DDD 显式上下文与 cwd/Git ============
+console.log('T6b 核心目录不受宿主环境重定向')
+{
+  const current = mkFixture('fx6-current', {}), other = mkFixture('fx6-other', {})
+  const nested = join(current.root, 'nested')
+  mkdirSync(nested)
+  const probe = (cwd, env = {}, args = []) => spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { resolveKanbanDir } from ${JSON.stringify(new URL('../scripts/kanban-dir.mjs', import.meta.url).href)}; console.log(resolveKanbanDir(${JSON.stringify(args)}))`,
+  ], { cwd, encoding: 'utf8', env: { ...process.env, DDD_PROJECT_DIR: '', CLAUDE_PROJECT_DIR: other.root, CLAUDE_PLUGIN_ROOT: other.root, CODEX_HOME: other.root, ...env } })
+  const local = probe(nested)
+  ok(local.status === 0 && local.stdout.trim() === realpathSync(current.kb), '宿主变量不改变核心 cwd/Git 探测', local.stderr || local.stdout)
+  const board = probe(current.kb)
+  ok(board.status === 0 && board.stdout.trim() === realpathSync(current.kb), '看板目录入口不受宿主变量影响', board.stderr || board.stdout)
+  const explicit = probe(nested, { DDD_PROJECT_DIR: other.root })
+  ok(explicit.status === 0 && explicit.stdout.trim() === other.kb, 'DDD_PROJECT_DIR 显式选择项目', explicit.stderr)
+  const arg = probe(nested, { DDD_PROJECT_DIR: other.root }, ['--dir', current.kb])
+  ok(arg.status === 0 && arg.stdout.trim() === current.kb, '--dir 优先于 DDD_PROJECT_DIR', arg.stderr)
+  const missing = probe(WORK)
+  ok(missing.status !== 0 && missing.stderr.includes('DDD_PROJECT_DIR'), 'cwd 无板时明确报错,不退回宿主项目变量')
 }
 
 // ============ T7 全新项目 ============
@@ -322,12 +376,12 @@ console.log('T8 byte-freeze 归一化')
   const pcopy = join(WORK, 'plugin-copy')
   mkdirSync(pcopy, { recursive: true })
   cpSync(NEW_SCRIPTS, join(pcopy, 'scripts'), { recursive: true })
-  cpSync(join(REPO, '.claude-plugin'), join(pcopy, '.claude-plugin'), { recursive: true })
+  writeFileSync(join(pcopy, 'package.json'), JSON.stringify({ name: 'demo-driven-development', version: MY_VER }))
   const fx8 = mkFixture('fx8', { 'g.html': demoHtml('g') })
   runGen(join(pcopy, 'scripts'), fx8.kb)
   const A = readFileSync(join(fx8.kb, 'index.html'), 'utf8')
-  const pj = join(pcopy, '.claude-plugin/plugin.json')
-  writeFileSync(pj, readFileSync(pj, 'utf8').replace(`"version": "${MY_VER}"`, '"version": "99.0.0"'))
+  const pj = join(pcopy, 'package.json')
+  writeFileSync(pj, JSON.stringify({ name: 'demo-driven-development', version: '99.0.0' }))
   const r = runGen(join(pcopy, 'scripts'), fx8.kb)
   ok(r.status === 0, '升版重生成 exit 0', r.stderr)
   const B = readFileSync(join(fx8.kb, 'index.html'), 'utf8')
@@ -359,9 +413,8 @@ console.log('T13 版本文法闭环')
   const prc = join(WORK, 'plugin-rc')
   mkdirSync(prc, { recursive: true })
   cpSync(NEW_SCRIPTS, join(prc, 'scripts'), { recursive: true })
-  cpSync(join(REPO, '.claude-plugin'), join(prc, '.claude-plugin'), { recursive: true })
-  const pj = join(prc, '.claude-plugin/plugin.json')
-  writeFileSync(pj, readFileSync(pj, 'utf8').replace(`"version": "${MY_VER}"`, '"version": "0.7.0-rc1"'))
+  const pj = join(prc, 'package.json')
+  writeFileSync(pj, JSON.stringify({ name: 'demo-driven-development', version: '0.7.0-rc1' }))
   const fx13 = mkFixture('fx13', { 'k.html': demoHtml('k') })
   const rg = spawnSync(process.execPath, [join(prc, 'scripts/gen.mjs'), '--dir', fx13.kb], { encoding: 'utf8' })
   ok(rg.status !== 0 && rg.stderr.includes('纯数字点分'), 'rc 版本 → gen 硬失败(不烙不可读回的戳)')
@@ -6777,7 +6830,7 @@ console.log('T76 生成物只在主线上生成 / 合并前硬闸')
     const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' })
     g('init', '-q', '.'); g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
     g('commit', '-q', '--allow-empty', '-m', 'root')
-    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), ...extra, '--dir', join(repo, 'pkg')],
+    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), '--runtime', 'claude', ...extra, '--dir', join(repo, 'pkg')],
       { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS } })
     const p1 = runInit('plan', '--brand', 'XT', '--port', '8999')
     ok(/pkg\/app\/kanban\/index\.html\s+-diff merge=ours linguist-generated=true/.test(p1.stdout) &&
@@ -7840,7 +7893,7 @@ console.log('T78 验收名册与口令')
     g('config', 'user.email', 't@example.com'); g('config', 'user.name', 'T')
     g('add', '-A'); g('commit', '-q', '-m', 'init')
     const cP = join(fx.kb, 'kanban.config.json')
-    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), ...extra, '--dir', fx.root],
+    const runInit = (...extra) => spawnSync(process.execPath, [join(NEW_SCRIPTS, 'init.mjs'), '--runtime', 'claude', ...extra, '--dir', fx.root],
       { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: NO_INSTALLS } })
     const c = JSON.parse(readFileSync(cP, 'utf8'))
     c.acceptanceFeedback = true // 只开这一个:init 那条提醒只看它,验收清单不必在场

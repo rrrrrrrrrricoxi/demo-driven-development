@@ -4,7 +4,7 @@ How a new version is cut. Everything here runs from a clean checkout of `main`.
 
 ## Steps
 
-1. Bump the canonical `version` in root `plugin.json` and keep `package.json`,
+1. Bump the canonical `version` in root `package.json` and keep `plugin.json`,
    `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json` on that same
    version. Only ever move it up (see [Monotonic versions](#monotonic-versions)).
 2. In `CHANGELOG.md`, move the items under `## [Unreleased]` into a new
@@ -108,12 +108,14 @@ node scripts/package-codex.mjs --check <new-external-directory> --expect-commit 
 
 The native exporter does not install or trust hooks. Its recorded provenance is
 not a signature and does not establish that a commit has been pushed or released.
-Check the GitHub PR or release separately. Exported packages retain the canonical
-manifest in the source repository; only the native output omits it.
+Check the GitHub PR or release separately. The native package preserves
+`package.json`, which supplies the core runtime identity and version. It omits
+root `plugin.json` and `.claude-plugin/` metadata; the canonical source retains
+those adapter descriptors. Each omission appears in the package provenance.
 
 ## Older active sessions
 
-Since 0.16.2 that no longer has to be followed by a session restart for the
+For Claude Code, since 0.16.2 an update no longer requires a session restart for the
 Stop hook's sake: a session still running the old hook sees that the board's
 output is stamped newer than itself, finds the new install in
 `installed_plugins.json`, and hands the whole hook over to it, saying so in one

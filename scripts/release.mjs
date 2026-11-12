@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 发版入口不依赖宿主 CLI。根 manifest 是版本真源;各宿主声明必须同版,避免不同宿主写不同的戳。
+// 发版入口不依赖宿主 CLI。package.json 是版本真源;各宿主声明必须同版,避免不同宿主写不同的戳。
 // --check 只验包;--dry-run 另验干净主线与单调版本;--tag/--push 才明确写入 Git。
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -20,15 +20,16 @@ function packagePath(root, path) {
 }
 
 export function validatePackage(root = ROOT) {
-  const canonical = json(root, 'plugin.json')
+  const canonical = json(root, 'package.json')
+  const descriptor = json(root, 'plugin.json')
   if (!/^\d+\.\d+\.\d+$/.test(canonical.version || '')) fail('发版版本须是 X.Y.Z / Release version must be X.Y.Z')
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(canonical.name || '')) fail('插件名非法 / Invalid plugin name')
-  for (const path of ['package.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json']) {
+  for (const path of ['plugin.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json']) {
     const other = json(root, path)
     if (other.name !== canonical.name || other.version !== canonical.version) fail(`版本或名称不一致 / Manifest identity mismatch: ${path}`)
   }
   const codex = json(root, '.codex-plugin/plugin.json')
-  const nativeHooks = canonical.extensions?.['com.openai']?.hooks
+  const nativeHooks = descriptor.extensions?.['com.openai']?.hooks
   if (nativeHooks !== codex.hooks) fail('Codex hook 声明不一致 / Codex hook declarations disagree')
   packagePath(root, codex.skills)
   for (const path of [nativeHooks, './hooks/hooks.json']) {

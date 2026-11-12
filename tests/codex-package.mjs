@@ -43,13 +43,22 @@ try {
     metadata.version = '0.0.1'; write(file, metadata)
     assert.throws(() => validatePackage(root), /mismatch/)
   })
-  check('portable version protects generated output from mismatched Claude packaging', () => {
+  check('runtime package identity ignores optional host manifests', () => {
     const root = fixture('canonical')
-    const file = join(root, '.claude-plugin/plugin.json'), metadata = read(file)
-    metadata.version = '0.0.1'; write(file, metadata)
-    assert.equal(readPluginVersion(root), null)
-    rmSync(join(root, 'plugin.json'))
-    assert.equal(readPluginVersion(root), '0.0.1', 'legacy Claude-only bundles retain version discovery')
+    const expected = read(join(root, 'package.json')).version
+    for (const path of ['plugin.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json']) {
+      const file = join(root, path), metadata = read(file)
+      metadata.version = '0.0.1'; write(file, metadata)
+    }
+    assert.equal(readPluginVersion(root), expected)
+    assert.throws(() => validatePackage(root), /mismatch/)
+    for (const path of ['plugin.json', '.claude-plugin', '.codex-plugin']) rmSync(join(root, path), { recursive: true })
+    assert.equal(readPluginVersion(root), expected, 'runtime needs no host metadata')
+    rmSync(join(root, 'package.json'))
+    write(join(root, '.claude-plugin/plugin.json'), { name: 'demo-driven-development', version: expected })
+    const diagnostics = []
+    assert.equal(readPluginVersion(root, { onDiagnostic: (message) => diagnostics.push(message) }), null, 'host metadata never supplies a missing runtime identity')
+    assert.match(diagnostics.join('\n'), /package\.json.*Rebuild or reinstall/)
   })
   check('missing bundled hook handler is rejected', () => {
     const root = fixture('missing-handler')
