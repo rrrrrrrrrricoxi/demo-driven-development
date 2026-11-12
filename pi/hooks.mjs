@@ -78,7 +78,7 @@ export default function ddd(pi) {
     // 结果链仍可被后续守卫改成错误;只记候选,绝不修改/包装结果。
     if (event.toolName !== 'bash' || event.isError || (event.structuredContent?.exit_code !== undefined && event.structuredContent.exit_code !== 0)) return
     const current = scope(ctx)
-    if (typeof event.input.command !== 'string' || !event.input.command.startsWith('gh pr ') || current.pending.size >= 256) return
+    if (typeof event.input.command !== 'string' || current.pending.size >= 256) return
     current.pending.set(callKey(event), event.input.command)
   })
   pi.on('tool_execution_end', (event, ctx) => {
@@ -89,7 +89,7 @@ export default function ddd(pi) {
     if (!result.additionalContext) return
     const S = table(ctx)
     // 独立上下文消息在 print/RPC 同样有效,不会触发另一个 agent run。
-    publish(ctx, /^gh pr merge\b/.test(command) ? S.piRemindMerge : S.piRemind)
+    publish(ctx, command.startsWith('gh pr ') ? (/^gh pr merge\b/.test(command) ? S.piRemindMerge : S.piRemind) : result.additionalContext)
   })
   pi.on('agent_before_settle', (event, ctx) => {
     if (event.outcome !== 'completed' || ctx.signal?.aborted) return

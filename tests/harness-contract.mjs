@@ -51,9 +51,9 @@ function hints(text) {
   assert.match(text, /journey\.development\/detail/)
 }
 // 仅驱动现有 Pi 适配器注册的回调;不是安装运行时或伪造一个受支持的宿主。
-function piHost(root) {
+function piHost(root, messages = []) {
   const handlers = new Map(), listeners = new Map()
-  piAdapter({ on: (name, fn) => handlers.set(name, fn), events: { on: (name, fn) => listeners.set(name, fn), emit: (name, value) => listeners.get(name)?.(value) }, sendMessage() {} })
+  piAdapter({ on: (name, fn) => handlers.set(name, fn), events: { on: (name, fn) => listeners.set(name, fn), emit: (name, value) => listeners.get(name)?.(value) }, sendMessage(message, options) { messages.push({ message, options }) } })
   const ctx = { cwd: root, sessionManager: { getSessionId: () => 'fixture' } }
   return (name, value = {}) => handlers.get(name)?.({ type: name, ...value }, ctx)
 }
@@ -61,6 +61,121 @@ let checks = 0
 async function check(name, fn) { await fn(); checks++; console.log(`✓ ${name}`) }
 try {
   for (const lang of ['en', 'zh']) {
+    await check(`${lang}: writes assign only the target card to the model; reads stay quiet`, () => {
+      const f = fixture(`closeout-${lang}`, lang), before = snapshot(f.board)
+      const command = `node '${join(repo, 'scripts/ddd.mjs')}' card set BL-HISTORY title 'Updated title'`
+      const request = { event: 'after-tool', cwd: f.root, tool: { kind: 'shell', command } }
+      for (const repeatedStop of [false, true]) {
+        const result = runHook({ ...request, repeatedStop })
+        assert.equal(result.kind, 'none')
+        assert.match(result.additionalContext, /BL-HISTORY note/)
+        assert.doesNotMatch(result.additionalContext, /D-SUMMARY/)
+        assert.match(result.additionalContext, /card show 'BL-HISTORY'/)
+        assert.match(result.additionalContext, /audit --dir/)
+        assert.equal(result.continue, undefined)
+      }
+      for (const args of ['card show BL-HISTORY', 'card list', 'card history BL-HISTORY', 'card set UNKNOWN title x', 'card new backlog', 'card set BL-HISTORY title x --help', 'card set BL-HISTORY title x --help=yes', 'card set BL-HISTORY title x --help=false']) {
+        assert.deepEqual(runHook({ ...request, tool: { kind: 'shell', command: `node '${join(repo, 'scripts/ddd.mjs')}' ${args}` } }), { kind: 'none' })
+      }
+      for (const command of ['echo "node ddd.mjs card set BL-HISTORY title x"', 'cd elsewhere && node ddd.mjs card set BL-HISTORY title x', 'node "$PLUGIN/ddd.mjs" card set BL-HISTORY title x']) {
+        assert.deepEqual(runHook({ ...request, tool: { kind: 'shell', command } }), { kind: 'none' })
+      }
+      const other = fixture(`closeout-other-${lang}`, lang)
+      const commented = `${command} # --dir '${other.board}'`
+      assert.deepEqual(runHook({ ...request, tool: { kind: 'shell', command: commented } }), { kind: 'none' }, 'shell comments cannot redirect card ownership to another board')
+      const quoted = `node '${join(repo, 'scripts/ddd.mjs')}' card set BL-HISTORY title '# --dir ${other.board}'`
+      const quotedResult = runHook({ ...request, tool: { kind: 'shell', command: quoted } })
+      assert.match(quotedResult.additionalContext, new RegExp(f.board))
+      assert.doesNotMatch(quotedResult.additionalContext, new RegExp(other.board))
+      assert.deepEqual(snapshot(f.board), before, 'after-tool follow-up is read-only')
+      const portable = cli(f, 'ddd.mjs', ['card', 'set', 'BL-HISTORY', 'title', JSON.stringify('Updated title'), '--json'])
+      assert.equal(JSON.parse(portable.stdout).ok, true, 'portable JSON stdout remains parseable')
+      assert.match(portable.stderr, /BL-HISTORY note/)
+      assert.match(portable.stderr, /audit --dir/)
+      assert.doesNotMatch(portable.stderr, /D-SUMMARY/)
+      assert.equal(cli(f, 'ddd.mjs', ['card', 'show', 'BL-HISTORY', '--json']).stderr, '')
+      assert.equal(cli(f, 'ddd.mjs', ['card', 'list']).stderr, '')
+      for (const adapter of ['claude', 'codex']) {
+        const input = { cwd: f.root, tool_name: 'Bash', tool_input: { command } }
+        const hooked = adapter === 'claude' ? cli(f, 'ghpr-remind.mjs', [], input) : cli(f, 'codex-hook.mjs', ['post-tool'], input)
+        const payload = JSON.parse(hooked.stdout)
+        assert.equal(payload.hookSpecificOutput.hookEventName, 'PostToolUse')
+        assert.match(payload.hookSpecificOutput.additionalContext, /BL-HISTORY note/)
+        assert.doesNotMatch(payload.hookSpecificOutput.additionalContext, /D-SUMMARY/)
+      }
+      const messages = [], emit = piHost(f.root, messages)
+      const event = { toolName: 'bash', toolCallId: 'card-write', input: { command }, isError: false }
+      emit('tool_result', event); emit('tool_execution_end', event)
+      assert.equal(messages.length, 1)
+      assert.match(messages[0].message.content, /BL-HISTORY note/)
+      assert.deepEqual(messages[0].options, { triggerTurn: false })
+      emit('tool_result', event); emit('tool_execution_end', event)
+      assert.equal(messages.length, 1, 'Pi deduplicates without another turn')
+    })
+    await check(`${lang}: long prose and portable new cards receive work; fixes become quiet`, () => {
+      const f = fixture(`closeout-prose-${lang}`, lang)
+      const path = join(f.board, 'backlog-manifest.json'), manifest = JSON.parse(readFileSync(path, 'utf8'))
+      const card = { id: 'BL-PROSE', title: 'Long prose', status: 'ready', tier: 1, priority: 'med', problem: 'Original evidence. '.repeat(60) }
+      manifest.items.push(card, { ...card, id: 'BL-CLEAN', problem: 'Brief problem.' })
+      write(path, manifest)
+      const req = id => ({ event: 'after-tool', cwd: f.root, tool: { kind: 'shell', command: `node scripts/ddd.mjs card set ${id} title updated` } })
+      const result = runHook(req('BL-PROSE'))
+      assert.match(result.additionalContext, /BL-PROSE/)
+      assert.match(result.additionalContext, /card set 'BL-PROSE' detail/)
+      assert.doesNotMatch(result.additionalContext, /BL-HISTORY|D-SUMMARY/)
+      assert.deepEqual(runHook(req('BL-CLEAN')), { kind: 'none' })
+      assert.equal(cli(f, 'ddd.mjs', ['card', 'set', 'BL-CLEAN', 'title', 'Updated clean card']).stderr, '')
+      cli(f, 'ddd.mjs', ['card', 'set', 'BL-PROSE', 'detail', card.problem])
+      const fixed = cli(f, 'ddd.mjs', ['card', 'set', 'BL-PROSE', 'problem', 'Brief summary.'])
+      assert.equal(fixed.stderr, '')
+      assert.deepEqual(runHook(req('BL-PROSE')), { kind: 'none' })
+      const from = join(f.root, 'new-card.json'); write(from, { ...card, id: undefined })
+      const created = cli(f, 'ddd.mjs', ['card', 'new', 'backlog', '--from', from, '--json'])
+      const made = JSON.parse(created.stdout)
+      assert.match(created.stderr, new RegExp(made.id))
+      assert.match(created.stderr, /card show/)
+      assert.doesNotMatch(created.stderr, /BL-HISTORY|D-SUMMARY/)
+    })
+    await check(`${lang}: suggested mutations work outside the project and diagnostics preserve successful writes`, () => {
+      const f = fixture(`outside ' quote-${lang}`, lang)
+      const path = join(f.board, 'backlog-manifest.json'), manifest = JSON.parse(readFileSync(path, 'utf8'))
+      manifest.items.push({ id: 'BL-PROSE', title: 'Long prose', status: 'ready', tier: 1, priority: 'med', problem: 'Original evidence. '.repeat(60) })
+      write(path, manifest)
+      const outside = spawnSync(process.execPath, [join(repo, 'scripts/ddd.mjs'), 'card', 'set', 'BL-PROSE', 'title', 'Updated outside', '--dir', f.board], { cwd: work, env, encoding: 'utf8' })
+      assert.equal(outside.status, 0, outside.stderr)
+      const mutations = [...outside.stderr.matchAll(/`([^`]+card set 'BL-PROSE' (?:detail|journey) [^`]+)`/g)].map(match => match[1].split(' <')[0])
+      assert.equal(mutations.length, 2)
+      const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'"
+      const journey = JSON.parse(readFileSync(join(f.board, 'decisions-manifest.json'), 'utf8')).entries[0].journey
+      for (const command of mutations) {
+        const value = command.includes(' detail ') ? 'Complete original evidence.' : JSON.stringify(journey)
+        const result = spawnSync('/bin/sh', ['-c', command + ' ' + quote(value)], { cwd: work, env, encoding: 'utf8' })
+        assert.equal(result.status, 0, result.stderr)
+      }
+      const updated = JSON.parse(cli(f, 'ddd.mjs', ['card', 'show', 'BL-PROSE', '--json']).stdout)
+      assert.equal(updated.detail, 'Complete original evidence.')
+      assert.deepEqual(updated.journey, journey)
+      // 非数组的其它 manifest 能让审计 collector 抛错;附加收尾不能推翻已完成的新卡写入。
+      write(join(f.board, 'manifest.json'), { tasks: {} })
+      const made = cli(f, 'ddd.mjs', ['card', 'new', 'backlog', '--title', 'Successful despite unrelated source damage', '--json'])
+      assert.equal(JSON.parse(made.stdout).ok, true)
+      assert.match(made.stderr, lang === 'zh' ? /收尾核对未完成/ : /could not be checked/)
+      assert.match(made.stderr, /audit --dir/)
+    })
+    await check(`${lang}: feedback findings describe Git persistence and preserve human verdicts`, () => {
+      const f = fixture(`closeout-feedback-${lang}`, lang)
+      const path = join(f.board, 'kanban.config.json'), cfg = JSON.parse(readFileSync(path, 'utf8'))
+      write(path, { ...cfg, acceptanceFeedback: true })
+      const feedback = JSON.stringify({ ts: '2020-01-01T00:00:00Z', pr: 17, item: 'AC1', who: 'human', rev: 1, verdict: 'bad' }) + '\n'
+      const file = join(f.board, 'acceptance-feedback.jsonl'); writeFileSync(file, feedback)
+      const audit = JSON.parse(cli(f, 'ddd.mjs', ['audit', '--json']).stdout)
+      const finding = audit.chore.find(entry => entry.key === 'accFbUncommitted')
+      assert.equal(finding.n, 1)
+      assert.match(finding.text, /Git/)
+      assert.match(finding.text, /git diff HEAD/)
+      assert.match(finding.text, lang === 'zh' ? /不表示验收未判或未通过/ : /not a claim that acceptance is unjudged or failed/)
+      assert.equal(readFileSync(file, 'utf8'), feedback)
+    })
     await check(`${lang}: CLI exposes both shared advisories without rewriting evidence`, () => {
       const f = fixture(`audit-${lang}`, lang), before = snapshot(f.board)
       const audit = JSON.parse(cli(f, 'ddd.mjs', ['audit', '--json']).stdout)

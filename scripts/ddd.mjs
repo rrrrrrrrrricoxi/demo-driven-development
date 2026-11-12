@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
 import { resolveKanbanDir } from './kanban-dir.mjs'
 import { loadStrings, pickStrings } from './strings.mjs'
-import { journeySummaryFields, journeySuggested } from './journey-summary.mjs'
+import { cardCloseout } from './card-closeout.mjs'
 import { contentUpdatedAtError, currentRecordDependents, currentRecordsStrings, resolveCurrentRecords } from './current-records.mjs'
 import { CARD_KINDS, boardRepo, cardsDirOf, cardText, localDate, NOTE_FIELD, scanCardDir, sortCards, stripOrder } from './cards.mjs'
 import { atomicWrite, jsonText } from './cards-lib.mjs'
@@ -194,16 +194,6 @@ function writeCard(store, row, card, { explicitContentUpdatedAt = false } = {}) 
   return next
 }
 
-function warnJourneySummary(card) {
-  const fields = journeySummaryFields(card)
-  if (fields.length) console.error(TABLE.journeySummary([{ id: card.id, fields }]))
-}
-
-function warnJourneySuggested(card) {
-  const hit = journeySuggested(card)
-  if (hit) console.error(TABLE.journeySuggested([{ id: card.id, ...hit }]))
-}
-
 // ---- 取值与校验 ----------------------------------------------------------
 const laneIds = () => (CFG.lanes && Array.isArray(CFG.lanes.ids) ? CFG.lanes.ids.map(String) : null)
 /**
@@ -307,7 +297,14 @@ function checkCurrentRecords(candidate) {
 }
 
 // ---- 命令 ----------------------------------------------------------------
-const say = (obj, human) => { console.log(flags.json ? JSON.stringify(obj, null, 2) : human) }
+const say = (obj, human) => {
+  console.log(flags.json ? JSON.stringify(obj, null, 2) : human)
+  // CLI 本身覆盖 portable 与嵌套调用;保持 JSON stdout 契约,没有本卡待办就不追加输出。
+  if (obj.ok && obj.card && obj.id) {
+    const followup = cardCloseout(KANBAN, obj.id)
+    if (followup) console.error(followup)
+  }
+}
 /** 占位注释(`<…>`)按空处理:往它后面追时间线只会读成一句废话 */
 const isPlaceholder = (s) => /^<[^>]*>$/.test(String(s).trim())
 const appendTimeline = (cur, line) => (!cur || isPlaceholder(cur) ? line : `${cur}\n\n${line}`)
@@ -498,8 +495,6 @@ function cmdSet() {
   }
   const card = writeCard(store, row, patch, { explicitContentUpdatedAt: field === 'contentUpdatedAt' })
   say({ ok: true, id, field, value, file: row.where, card }, S.setDone(id, field, typeof value === 'string' ? value : JSON.stringify(value), row.where))
-  if (field === 'journey') warnJourneySummary(card)
-  if (['note', 'notes', 'decision', 'demoNote', 'demo', 'links', 'status'].includes(field)) warnJourneySuggested(card)
 }
 
 function cmdStatus() {
@@ -515,7 +510,6 @@ function cmdStatus() {
   if (noted) card[nf] = appendTimeline(card[nf], `【${TODAY}】status → ${next}`)
   const written = writeCard(store, row, card)
   say({ ok: true, id, from, to: next, note: noted ? nf : null, file: row.where, card: written }, S.statusDone(id, from, next, noted ? nf : '', !nf))
-  warnJourneySuggested(written)
 }
 
 function cmdNote() {
@@ -528,7 +522,6 @@ function cmdNote() {
   const line = `【${TODAY}】${rest.join(' ')}`
   const card = writeCard(store, row, { ...row.card, [nf]: appendTimeline(row.card[nf], line) })
   say({ ok: true, id, field: nf, line, file: row.where, card }, S.noteDone(id, nf, line))
-  warnJourneySuggested(card)
 }
 
 /** 只有这几个 scheme 能进 links —— gen 那边同一条白名单,坏值在这儿就该被拦下,别等渲染 */
@@ -560,7 +553,6 @@ function cmdLink() {
   }
   const written = writeCard(store, row, card)
   say({ ok: true, id, added: true, title, href, pr: prAdded, file: row.where, card: written }, S.linkDone(id, href, prAdded))
-  warnJourneySuggested(written)
 }
 
 /**

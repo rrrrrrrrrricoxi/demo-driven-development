@@ -8,7 +8,7 @@ The Pi adapter always passes `regenerate: false`.
 ## Responsibilities
 
 The core locates the board, checks generated reads and merges, builds PR
-reminders, and audits settlement. It returns a result without reading stdin,
+reminders and card write follow-up, and audits settlement. It returns a result without reading stdin,
 writing stdout or stderr, changing environment variables, or exiting the
 process. Importing these modules does not execute a hook.
 
@@ -182,6 +182,39 @@ scripts as subprocesses; they do not install or trust hooks. Pi checks load the
 real DDD adapter with a small event driver; they do not claim an installed Pi
 runtime test. The separate optional installed-Pi checks are described in
 [Pi integration](pi.md#verification).
+
+## Card write follow-up
+
+`card-closeout.mjs` reuses the shared rich-text and journey collectors with the
+card set narrowed to an explicit target id. It returns actionable facts only
+when that card has findings. It never writes cards, judgments, Git state, or
+retry state. The writing agent must check the source evidence, organize the
+card, review its diff, save/commit within project authorization, and rerun the
+source query and audit. Unconfirmed decisions stay pending.
+
+After-tool dispatch recognizes a single literal `node <path>/ddd.mjs card
+set|status|note|link|after <id> ...` command, including a literal `--dir` override.
+It returns follow-up as `additionalContext` to the model, not just a settlement
+UI notice. It skips reads, unknown tools, dynamic targets, and compound shell
+commands. This is conservative command recognition, not a shell interpreter or
+proof of command success; facts are read from the target card's current state.
+The CLI calls the same helper after successful writes, including `card new`,
+and writes findings to stderr while preserving JSON stdout. This also covers
+portable and nested code-mode calls without adding a lifecycle adapter.
+
+Claude and Codex encode this as PostToolUse `additionalContext`. Pi delivers
+the shared content after successful tool completion with `triggerTurn: false`
+and its existing deduplication. None of these paths requests a corrective
+continuation or changes whole-board settlement severity. The shared contract
+tests cover both languages, target versus unrelated cards, read-only calls,
+CLI delivery, adapter encoding, and repeated Pi delivery. They use synthetic
+boards and event drivers; they do not claim installed-host verification.
+
+Acceptance feedback notices explicitly report Git persistence work. They do
+not infer missing or failed acceptance. An explicit maintenance request still
+needs a scoped review of feedback and evidence, authorized commits under the
+project's Git coordination rules, and a final audit. This mechanism does not
+claim ownership of all historical findings or automatically clear them.
 
 ## Adding another host
 
