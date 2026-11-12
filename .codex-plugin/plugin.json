@@ -1,6 +1,6 @@
 {
   "name": "demo-driven-development",
-  "version": "0.19.9",
+  "version": "0.19.10",
   "description": "Demo-driven decisions, a source-based kanban, deterministic tools, and lifecycle guards for coding agents.",
   "author": { "name": "rrrrrrrrrricoxi" },
   "repository": "https://github.com/rrrrrrrrrricoxi/demo-driven-development",

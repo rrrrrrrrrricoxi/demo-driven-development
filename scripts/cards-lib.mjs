@@ -11,11 +11,11 @@ import { stripCardUpdated } from './cards.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-/** 产物集:index.html + shots.html + parts/*.html + refs/*(refs 只比 sha,里面是整份文档) */
+/** 产物集:index.html + shots.html + parts/* + journeys/* + refs/*。 */
 export function productFiles(kanbanDir) {
   const out = []
   for (const f of ['index.html', 'shots.html']) if (existsSync(join(kanbanDir, f))) out.push(f)
-  for (const sub of ['parts', 'refs']) {
+  for (const sub of ['parts', 'journeys', 'refs']) {
     let names = []
     try { names = readdirSync(join(kanbanDir, sub)).sort() } catch { continue }
     for (const n of names) {

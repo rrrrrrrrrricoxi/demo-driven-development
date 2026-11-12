@@ -131,15 +131,13 @@ export function stripOrder(cards) {
 export function cardText(card) { return JSON.stringify(card, null, 2) + '\n' }
 
 /**
- * 每卡最后改动日(v0.14.0 起 gen 在用,v0.15.14 起守卫也读同一份)。一条 git log 批量取每个卡
- * 文件的最后提交日,不是一卡一条命令;git 失败 / 文件还没提交 → 文件 mtime → 空。
- * 取的是已提交的事实:同一个 commit 下同输出,不破 gen 的确定性。
+ * 每卡最后提交日。一条 git log 批量查询;git 失败或文件未提交时不返回日期。
  * @param kanbanDir 看板目录(git 命令的 cwd,也是相对路径的根)
  * @param cardsDir  config.cardsDir
  * @param srcOf     Map<id, '<cardsDir>/<sub>/<id>.json'>(相对看板目录)
- * @returns Map<id, 'YYYY-MM-DD' | ''>
+ * @returns Map<id, 'YYYY-MM-DD'>
  */
-export function cardUpdatedMap(kanbanDir, cardsDir, srcOf) {
+export function cardCommittedMap(kanbanDir, cardsDir, srcOf) {
   const byPath = new Map() // git 的路径相对仓根,不相对看板目录,故只认末两段
   try {
     const out = execFileSync('git', ['log', '--format=%cs', '--name-only', '--', cardsDir],
@@ -152,10 +150,20 @@ export function cardUpdatedMap(kanbanDir, cardsDir, srcOf) {
       const k = line.split('/').slice(-2).join('/')
       if (day && !byPath.has(k)) byPath.set(k, day) // git log 是新→旧,第一次见到即最后一次改动
     }
-  } catch { /* 无 git / 命令失败 → 整批退 mtime */ }
+  } catch { /* 无 git / 命令失败 → 不显示提交日期。 */ }
   const out = new Map()
   for (const [id, rel] of srcOf) {
-    let d = byPath.get(rel.split('/').slice(-2).join('/')) || ''
+    const d = byPath.get(rel.split('/').slice(-2).join('/'))
+    if (d) out.set(id, d)
+  }
+  return out
+}
+
+/** 每卡最后改动日:提交日 → 文件 mtime(UTC) → 空。可复用已查询的提交日,避免重复 git log。 */
+export function cardUpdatedMap(kanbanDir, cardsDir, srcOf, committed = cardCommittedMap(kanbanDir, cardsDir, srcOf)) {
+  const out = new Map()
+  for (const [id, rel] of srcOf) {
+    let d = committed.get(id) || ''
     if (!d) { try { d = statSync(join(kanbanDir, rel)).mtime.toISOString().slice(0, 10) } catch { d = '' } }
     out.set(id, d)
   }

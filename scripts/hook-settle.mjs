@@ -1,7 +1,7 @@
 // Shared settlement rules. No host protocol, stdin, installation lookup, or exit.
 // Audits are read-only. Automatic generation requires an explicit caller opt-in;
 // the existing mainline, version-stamp, and initialization-lock guards still apply.
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,7 +9,7 @@ import { detect } from './lib-detect.mjs'
 import { cmpVer, readPluginVersion, readStamp } from './lib-version.mjs'
 import { loadStrings } from './strings.mjs'
 import { boardBranchCheck } from './board-branch-check.mjs'
-import { journeyPath } from './journey.mjs'
+import { journeyPath } from './journey-model.mjs'
 import { CARD_SOURCES, CARD_FILE_KEYS, auditCmd, choreLine, collect, makeCtx, pickLevel } from './audits.mjs'
 
 export function checkSettlement(request, { regenerate = false } = {}) {
@@ -68,14 +68,11 @@ export function checkSettlement(request, { regenerate = false } = {}) {
     // v0.11.0:lazyTabs 板若 parts/ 缺件(手删/半拷贝),index 再新也是残废态 → 视同过期重跑自愈
     // v0.14.0:归档是 0.13.0 起的第三个 part —— 漏掉它,深链到已归档的卡就静默落空,而 index 是
     // 新的,守卫永远不会重跑。门控照 gen:backlogArchive 开着才有 archive.html。
-    let lazyBroken = false
-    try {
-      const c = JSON.parse(readFileSync(join(KANBAN, 'kanban.config.json'), 'utf8'))
-      // v0.15.0:验收与发布进度也进了 parts,门控照 gen(各自的 tab 开着才有那一份)
-      const parts = ['decisions.html', 'backlog.html', ...(c.backlogArchive === true ? ['archive.html'] : []),
-        ...(c.acceptanceTab === true ? ['acceptance.html'] : []), ...(c.releaseTab === true ? ['release.html'] : [])]
-      lazyBroken = c.lazyTabs === true && !parts.every((f) => existsSync(join(KANBAN, 'parts', f)))
-    } catch {}
+    const c = CTX.cfg
+    // v0.15.0:验收与发布进度也进了 parts,门控照 gen(各自的 tab 开着才有那一份)
+    const parts = ['decisions.html', 'backlog.html', ...(c.backlogArchive === true ? ['archive.html'] : []),
+      ...(c.acceptanceTab === true ? ['acceptance.html'] : []), ...(c.releaseTab === true ? ['release.html'] : [])]
+    const lazyBroken = c.lazyTabs === true && !parts.every((f) => existsSync(join(KANBAN, 'parts', f)))
     // Compare the current generator version with the existing output stamp.
     const stampNewer = Boolean(MY_VER && STAMP && cmpVer(STAMP, MY_VER) > 0)
     const stampStale = Boolean(MY_VER && STAMP !== undefined && (STAMP === null || cmpVer(STAMP, MY_VER) < 0))

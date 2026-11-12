@@ -65,6 +65,31 @@ try {
     rmSync(join(root, 'scripts/codex-hook.mjs'))
     assert.throws(() => validatePackage(root), /resource/)
   })
+  check('package validation works without release commands or board rules', () => {
+    const root = fixture('independent-validator')
+    for (const file of ['release.mjs', 'lib-version.mjs', 'strings.mjs']) rmSync(join(root, 'scripts', file))
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+      "import { validatePackage } from './scripts/package-manifest.mjs'; console.log(JSON.stringify(validatePackage()))",
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(JSON.parse(result.stdout), validatePackage(ROOT))
+  })
+  check('required hook events cannot contain empty or malformed handler groups', () => {
+    const root = fixture('empty-hooks')
+    for (const path of ['hooks/codex-hooks.json', 'hooks/hooks.json']) {
+      const file = join(root, path), original = read(file)
+      for (const event of ['Stop', 'PreToolUse', 'PostToolUse']) {
+        for (const groups of [[], [{}], [{ hooks: [] }], [{ hooks: {} }], [null]]) {
+          const spec = structuredClone(original)
+          spec.hooks[event] = groups
+          write(file, spec)
+          assert.throws(() => validatePackage(root), /Missing hook/, `${path} ${event}: ${JSON.stringify(groups)}`)
+        }
+      }
+      write(file, original)
+    }
+    assert.deepEqual(validatePackage(root), validatePackage(ROOT))
+  })
   check('hook resource traversal is rejected', () => {
     const root = fixture('traversal')
     for (const path of ['plugin.json', '.codex-plugin/plugin.json']) {
