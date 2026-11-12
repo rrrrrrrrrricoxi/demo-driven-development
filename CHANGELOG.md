@@ -9,6 +9,10 @@ version and the guard refuses to overwrite newer output with an older gen, so a
 downgrade would freeze every already-stamped board. See
 [RELEASING.md](RELEASING.md).
 
+## 0.19.8 — 2026-11-12
+
+- Keep the current-resource button label short on referenced journeys; show the source link inside its menu and on the card so narrow screens retain the existing navigation width.
+
 ## [0.19.7] - 2026-11-12
 
 - Let related cards explicitly reference one current journey while preserving their own history, evidence, and acceptance records.

@@ -1,6 +1,6 @@
 {
   "name": "demo-driven-development",
-  "version": "0.19.7",
+  "version": "0.19.8",
   "private": true,
   "engines": { "node": ">=18" },
   "scripts": {
