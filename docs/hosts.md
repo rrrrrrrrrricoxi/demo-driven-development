@@ -24,7 +24,10 @@ node <plugin>/scripts/init.mjs apply --dir <projectRoot> --brand <name> --runtim
 
 ## Codex
 
-Install from the Git marketplace with the Codex CLI:
+Install from the Git marketplace with the Codex CLI. When refreshing or
+reinstalling during active sessions, first follow the
+[cache preservation steps](../RELEASING.md#after-publishing); both marketplace
+refresh and plugin installation can remove caches those sessions still use:
 
 ```sh
 codex plugin marketplace add https://github.com/rrrrrrrrrricoxi/demo-driven-development.git --ref codex-native

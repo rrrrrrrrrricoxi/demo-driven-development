@@ -7,6 +7,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { GenerationDeferred, GENERATION_DEFERRED } from '../scripts/gen-deferral.mjs'
 import { acquireGenerationLock, lockRoot } from '../scripts/gen-concurrent.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -26,6 +27,7 @@ const fixture = (name, concurrent = true) => {
   const fill = (text) => text.replaceAll('{{BRAND}}', 'CONCURRENT').replaceAll('{{GH_REPO}}', '').replaceAll('{{BRANCH}}', '').replaceAll('{{APP_BASE}}', '')
   const cfg = JSON.parse(fill(readFileSync(join(repo, 'templates/kanban.config.json'), 'utf8')))
   if (concurrent !== null) cfg.concurrentSessions = concurrent
+  cfg.lang = 'en'
   cfg.lazyTabs = true
   writeFileSync(join(board, 'kanban.config.json'), JSON.stringify(cfg))
   for (const name of ['manifest.json', 'backlog-manifest.json', 'decisions-manifest.json']) writeFileSync(join(board, name), fill(readFileSync(join(repo, 'templates/manifests', name), 'utf8')))
@@ -39,8 +41,14 @@ const { syncBuiltinESMExports } = require('node:module');
 const { join } = require('node:path');
 const read = fs.readFileSync, rename = fs.renameSync;
 let entered = false, changed = false, configRead = false;
+if (process.env.TEST_CHANGE === 'lock-timeout') {
+  const now = Date.now; let tick = 0; Date.now = () => now() + (++tick * 40001);
+}
 const signal = (text) => fs.appendFileSync(process.env.TEST_EVENTS, text + '\\n');
 fs.readFileSync = function(path, ...args) {
+  if (entered && process.env.TEST_CHANGE === 'permission-check' && String(path).endsWith('/kanban.config.json')) {
+    throw Object.assign(new Error('TEST EACCES fingerprint'), { code: 'EACCES' });
+  }
   const result = read.call(this, path, ...args);
   if (!configRead && String(path).endsWith('/kanban.config.json') && process.env.TEST_CONFIG_RACE) {
     configRead = true;
@@ -189,7 +197,8 @@ try {
       ok(result.stderr.includes('newer'), 'newer stamp rejection remains explicit')
     } else {
       ok(hash(join(kb, 'index.html')) === indexBefore, `${mutation}: existing index is preserved`)
-      ok(result.stderr.includes('Sources changed'), `${mutation}: changed-source defer explains retry`)
+      ok(result.status === GENERATION_DEFERRED['sources-changed'] && result.stderr.includes('Sources changed'), `${mutation}: changed-source defer has dedicated exit status`)
+      ok(!/\n\s+at |Error:|node:internal/.test(result.stderr), `${mutation}: expected defer has no stack`)
       ok(existsSync(join(kb, '.ddd-gen-stale')), `${mutation}: changed input leaves retry marker`)
       if (mutation !== 'late') ok(hash(join(kb, 'refs/doc.html')) === refBefore, `${mutation}: staged refs remain unpublished`)
       if (mutation === 'source') {
@@ -209,9 +218,16 @@ try {
     const demoBefore = hash(join(kb, 'demos/user.html'))
     const child = launch(kb, `config-race-${race}`, { TEST_CONFIG_RACE: race })
     const result = await child.done
-    ok(result.status !== 0 && result.stderr.includes('configuration changed'), `${race}: configuration detection race fails closed`)
+    ok(result.status === GENERATION_DEFERRED['startup-config-race'] && result.stderr.includes('configuration changed') && !/\n\s+at |Error:/.test(result.stderr), `${race}: configuration detection race fails closed`)
+    ok(existsSync(join(kb, '.ddd-gen-stale')), `${race}: startup race leaves persistent retry marker`)
     ok(hash(join(kb, 'demos/user.html')) === demoBefore && !existsSync(join(kb, 'index.html')), `${race}: configuration race preserves demo and publishes nothing`)
   }
+
+  const denied = fixture('permission-check')
+  const permission = await launch(denied, 'permission-check', { TEST_CHANGE: 'permission-check' }).done
+  ok(permission.status !== 0 && !Object.values(GENERATION_DEFERRED).includes(permission.status), 'fingerprint permission failure is not an expected defer')
+  ok(permission.stderr.includes('TEST EACCES fingerprint') && /\n\s+at /.test(permission.stderr), 'fingerprint permission failure keeps its original diagnostic')
+  ok(readdirSync(lockRoot(denied)).length === 0, 'fingerprint permission failure releases contender record')
 
   const broken = fixture('failure-cleanup')
   const bad = JSON.parse(readFileSync(join(broken, 'manifest.json'))); bad.tasks = [{ id: 'bad', iteration: 'missing' }]
@@ -232,11 +248,15 @@ try {
   const own = join(root, `${Buffer.from(hostname()).toString('base64url')}.${process.pid}.live-test`)
   mkdirSync(own); writeFileSync(join(own, 'ticket'), '1')
   utimesSync(own, new Date(0), new Date(0))
-  await assert.rejects(acquireGenerationLock(live, { timeoutMs: 70 }), /Timed out/)
+  await assert.rejects(acquireGenerationLock(live, { timeoutMs: 70 }), (e) => e instanceof GenerationDeferred && e.code === 'lock-timeout' && /Timed out/.test(e.message))
   ok(existsSync(own) && readdirSync(root).length === 1, 'old live owner is never evicted; timed-out waiter cleans itself')
+  const timedOut = await launch(live, 'cli-lock-timeout', { TEST_CHANGE: 'lock-timeout' }).done
+  ok(timedOut.status === GENERATION_DEFERRED['lock-timeout'] && /Timed out/.test(timedOut.stderr), 'explicit lock timeout has its dedicated nonzero exit status')
+  ok(!/\n\s+at |Error:/.test(timedOut.stderr) && existsSync(join(live, '.ddd-gen-stale')), 'explicit lock timeout has no stack and preserves retry marker')
+  ok(existsSync(own) && readdirSync(root).length === 1, 'explicit timeout preserves live owner and releases its own contender')
   rmSync(own, { recursive: true })
   const unknown = join(root, 'unverifiable-owner'); mkdirSync(unknown)
-  await assert.rejects(acquireGenerationLock(live, { timeoutMs: 70 }), /Timed out/)
+  await assert.rejects(acquireGenerationLock(live, { timeoutMs: 70 }), (e) => e instanceof GenerationDeferred && e.code === 'lock-timeout' && /Timed out/.test(e.message))
   ok(existsSync(unknown) && readdirSync(root).length === 1, 'unverifiable owner is preserved and causes bounded defer')
   rmSync(unknown, { recursive: true })
 

@@ -13,8 +13,8 @@ writing stdout or stderr, changing environment variables, or exiting the
 process. Importing these modules does not execute a hook.
 
 Adapters normalize host events, select the project and tool working directories,
-translate results, and control retries. Adapters also own host authorization,
-installation, and lifecycle behavior. A DDD result cannot grant permission that
+translate results, and select whether settlement may regenerate. Adapters also
+own host authorization, installation, and lifecycle behavior. A DDD result cannot grant permission that
 the host or another guard denied.
 
 `hook-protocol.mjs` contains the existing Claude/Codex JSON normalization and
@@ -43,6 +43,31 @@ adapter and do not select a board for the CLI.
 
 An explicit `gen` writes generated output. Run it on the project's main board
 branch and keep source-writing sessions coordinated.
+
+With `concurrentSessions: true`, expected generation deferrals have dedicated
+nonzero exit codes: 75 for changed sources, 76 for a lock wait timeout, and 77
+for a concurrent configuration change during startup. These outcomes print a
+short localized diagnostic without a stack trace. Explicit generation does not
+retry or report success after a deferral. Syntax, permission, validation, and
+other unexpected failures keep their original diagnostics.
+
+Claude and Codex Stop adapters authorize shared-core automatic generation. In
+shared-board mode, the core retries changed sources at most once, using a new
+process that reacquires the lock and rereads configuration and source inputs.
+The two attempts share a 55-second budget measured from settlement entry, within
+the adapters' 60-second hook timeout. The second attempt starts only when the
+remaining budget is at least the first attempt's duration plus 250 milliseconds,
+with a minimum of 1 second. Lock waits still time out after 40 seconds; lock
+timeouts, startup configuration races, and unexpected failures do not retry.
+Generation subprocesses are killed when their remaining budget expires.
+
+A final expected deferral produces a short advisory notice. Its stale marker
+lets a later Stop request generation even if the index timestamp is newer than
+the sources. Successful generation clears the marker. The mainline and version
+checks still apply. Publication is atomic per file, not across all generated
+files: a deferral during publication can leave updated parts with an older
+index. Pi settlement stays read-only; portable CLI callers control their own
+invocations and receive no automatic Stop retry.
 
 For a new board without host configuration, use init. Its default runtime is
 `portable`; these commands make that choice explicit:
