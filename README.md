@@ -880,36 +880,49 @@ CLI rewrites the manifest as a whole there.
 
 ### Multi-round card journeys
 
-A decision or backlog card can opt into a stable entry with `journey`. The board shows three concise summaries in separate label/value rows and opens `journeys/<card-id>.html`. Current links remain directly accessible on the card. Cards without `journey` keep their existing output. The entry uses the board's typography, colors, theme, and existing demo controls. A 44px return bar contains navigation for the current design, phase history, and development records. The current demo fills the remaining screen, with no outer sidebar or centered card. Record views use the existing fixed contents navigation. The page summary, history, and original resources start collapsed. Original `demo`, `links`, `shots`, `detail`, and development notes remain in the card source and remain accessible from the entry. Do not write pending questions as accepted decisions.
+A decision or backlog card can use `journey` for a stable entry at `journeys/<card-id>.html`. The board shows the effective decision, progress, recent change, and current links. Cards without a journey keep their existing output. For the summary-writing and round-review rules, use [the workflow skill](skills/ddd-workflow/SKILL.md).
 
-`journey` is optional for backward compatibility, so cards that do not need a multi-round entry keep their current form. When updating an older card with multiple demo rounds and a long card face, organize its history into a journey without waiting for a card-by-card request. Rebuild the summaries from the card's sources and review evidence; chronology alone does not make an old choice current or approved. Preserve the old `note`, `links`, `shots`, `detail`, and other source material. Short cards without `journey` do not need migration, and this is not a request to migrate every existing card.
-
-Write the summaries for product readers: `decision` states confirmed product rules and names pending choices; `progress` states the implementation stage, usable capabilities, and key gaps, distinguishing a demo, product implementation, and human acceptance; `recent` states a meaningful change since the previous round. Put routine verification counts, device sizes, console or overflow results, and investigation notes in `development` or `detail`. Keep a verification detail in its source evidence, and move it yourself after checking the card's requirements; do not ask the product owner to sort the summary. If the CLI or an audit flags verification detail in a summary, check its meaning and evidence, preserve it in the appropriate field, and review the card before finishing. If CLI or audit suggests organizing a card with no `journey`, an existing demo, a long note, and at least three clearly dated sections, the current card owner should review and organize that card; another session should edit it only when that card is in its assigned work. If information needed to support a product claim is missing, check the card's sources or user requirements; do not infer product requirements from test results or invent facts. Keep product requirements and business measures in summaries when they are the actual goal, such as a layout requirement, performance target, or testing tool.
-
-Use the current card's sources and user requirements to set its scope. Reuse a navigation mechanism across cards, but do not inherit another card's or an example's UI layout or viewport requirement unless this card's evidence calls for it. The shared entry container preserves the demo's viewport and controls; it does not require a particular layout inside the demo. An individual UI design does not become a general requirement without user authorization.
-
-For example, suppose the card's evidence says date filtering is available in the demo, implementation has not started, and review has not decided whether to keep it. A misleading summary would be `progress: "No overflow at 390px; zero console errors."` A product-facing summary is `progress: "Date filtering is available in the demo; implementation has not started; decision pending review."` Keep the viewport and console check in `development`. If the card's product goal is responsive layout, state the required viewport behavior in the product summary.
+A card either owns its current content or references another card. The owner stores the four current fields:
 
 ```json
 {
   "journey": {
-    "decision": "The detail panel stays beside the results; keyboard access is still undecided.",
-    "progress": "The demo shows the selected layout; implementation has not started.",
-    "recent": "The review selected the side-by-side layout.",
+    "decision": "Keep the detail panel beside the results; keyboard access is undecided.",
+    "progress": "The selected layout is available in the demo; implementation has not started.",
+    "recent": "Review selected the side-by-side layout.",
     "current": {
       "title": "Current design",
-      "href": "demos/current.html",
-      "summary": "The selected overall layout.",
-      "links": [{ "title": "Current legend", "href": "demos/legend.html" }]
+      "href": "demos/current.html?layout=side-by-side",
+      "summary": "Select a result to inspect its details without losing the result list.",
+      "links": [
+        { "title": "Implementation specification", "href": "refs/result-panel.html", "role": "document" },
+        { "title": "Product preview", "href": "https://preview.example.com/results", "role": "preview" }
+      ]
     },
     "history": [{ "date": "2026-11-10", "title": "First review", "summary": "Compared layouts.", "href": "demos/round-1.html" }],
-    "development": [{ "date": "2026-11-10", "title": "Implementation", "summary": "Check the panel.", "href": "index.html#acc-12" }]
+    "development": []
   }
 }
 ```
 
-Write the object with `ddd.mjs card set <id> journey --json '<object>'`. The three summaries, `current.title`, and `current.href` are required nonempty strings. `history` and `development` are required arrays; their rows require `title`. Row `date`, `summary`, and `href` are optional. `current.links` is an optional array of titled URLs. Dates use `YYYY-MM-DD`. URLs are board-relative or HTTP(S); executable schemes, control characters, backslashes, and protocol-relative URLs are rejected. Document URLs follow the existing rendered-document mapping, and board hashes return to `index.html`. Acceptance links use the existing PR/card relationships. A journey does not change the acceptance revision or human judgments.
+An associated card can use this shape instead (the card IDs are illustrative):
 
-Set `current.href` to the current interactive demo under `demos/` (`.html` or `.htm`). The entry embeds that local demo immediately and preserves its query and fragment. The existing ‘Open demo’ action opens it separately. For same-origin demos, the entry clips a fixed board-return bar from view and adds its height to the frame. This keeps the demo's original viewport dimensions and its own navigation and controls. Embedded board-return links target the top-level card. The closed current-resources menu contains local refinements and document links. Local refinements use the same full-screen view on demand; document and external links remain links. Other `current.href` destinations remain links because the entry does not embed documents or external sites. Keep `current.links` limited to the current specification and relevant refinements; older links belong in history or the preserved original resources. Demo options that select the current design must be explicit in the URL; generation does not change an old demo's default.
+```json
+{
+  "journey": {
+    "currentFrom": "D42",
+    "history": [{ "date": "2026-11-10", "title": "Previous local summary", "summary": "The earlier entry compared three panel layouts.", "href": "demos/round-1.html" }],
+    "development": []
+  }
+}
+```
 
-The `journeys/` directory contains generated output. Preserve old demo URLs. Read the card source or run targeted searches instead of reading generated entries in full.
+`currentFrom` resolves only `decision`, `progress`, `recent`, and `current`. It cannot coexist with any of those local fields. The referencing card keeps its own history, development records, and original `demo`, `links`, `shots`, and `detail`. Update the owner to change effective current content; do not copy the four fields across associated cards. Missing targets and reference cycles fail validation. Before replacing an older local summary, preserve its wording and context in that card's history or development records. A reference does not approve a pending choice or change an acceptance revision or human judgment.
+
+Write either object with `ddd.mjs card set <id> journey --json '<object>'`. For an owner, the three summaries and `current.title/href` are required nonempty strings. Both forms require `history` and `development` arrays; each row requires `title`, with optional `date`, `summary`, and `href`. Dates use `YYYY-MM-DD`. `card show <id>` identifies a reference source; `card show <id> --resolved` shows effective current content for inspection.
+
+`current.links` is an optional list of titled URLs, deduplicated by URL against the main current entry and each other. A link can set `role` to `demo`, `document`, or `preview`. Without a role, existing destination inference applies. A local demo can open inside the entry; document links and product previews remain links. Keep the owner's existing card-level `designDoc` as its source-document pointer, and include the current document in `current.links` so associated cards also expose it. Document URLs use the existing rendered-document mapping, and board hashes return to `index.html`. URLs are board-relative or HTTP(S); executable schemes, control characters, backslashes, and protocol-relative URLs are rejected.
+
+A local `current.href` under `demos/` (`.html` or `.htm`) opens immediately with its query and fragment. The entry uses the board's theme and return navigation, preserves the demo's viewport and controls, and offers current resources, phase history, and development records. For same-origin demos, it clips an existing fixed `#ddd-backnav` bar and adjusts the frame height. Mark a pure return element with `data-ddd-backnav` when it should hide inside the entry; keep reset, comparison, and workflow controls outside that marked element. Other destinations remain links. History and original resources start collapsed. Keep current links limited to the active specification and relevant refinements; earlier resources remain available from history and the original card data.
+
+CLI writes set `contentUpdatedAt` when card content changes; a no-op leaves it unchanged. The board distinguishes this content-update date from the Git commit date, so an uncommitted content change does not appear to be an old decision. Generation does not advance the content date. The `journeys/` directory is generated output; inspect card sources or targeted matches instead of reading generated entries in full. Preserve old demo URLs.

@@ -2,13 +2,13 @@
   "format": "ddd-codex-native-package-v1",
   "source": {
     "repository": "https://github.com/rrrrrrrrrricoxi/demo-driven-development",
-    "commit": "b81a8731790b38ba537a6a7ea13330038479b1cd",
-    "tree": "534bf7956e9bcfc0cd29d21bc7cd0848880ff626",
-    "version": "0.19.6"
+    "commit": "cc3fa087468aa2d639867f0b61b0daeb2d9a1bdc",
+    "tree": "8588ce26c335b989ff2d857a0928bd168a5eee17",
+    "version": "0.19.7"
   },
   "package": {
     "name": "demo-driven-development",
-    "version": "0.19.6"
+    "version": "0.19.7"
   },
   "snapshot": "git commit; uncommitted and untracked files excluded",
   "publication": "not checked",
